@@ -9,7 +9,7 @@ from PIL import Image
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
-from utils.helpers import is_allowed_ext, safe_filename
+from utils.helpers import is_allowed_ext, safe_download_path, safe_filename
 
 tool_bp = Blueprint("image_convert", __name__)
 
@@ -73,7 +73,7 @@ def process():
         out_buf.seek(0)
 
         original_name = Path(file.filename).stem
-        new_name = f"{original_name}.{target_fmt}"
+        new_name = safe_filename(f"{original_name}.{target_fmt}")
         upload_dir: Path = current_app.config["UPLOAD_DIR"]
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / new_name
@@ -95,7 +95,9 @@ def process():
 @tool_bp.get("/download/<filename>")
 def download(filename: str):
     upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    safe = safe_filename(filename)
-    if not safe or not is_allowed_ext(safe, _ALLOWED_EXTS):
+    if not is_allowed_ext(filename, _ALLOWED_EXTS):
         return jsonify(error="文件名不合法"), 400
-    return send_file(upload_dir / safe, as_attachment=True)
+    target = safe_download_path(upload_dir, filename)
+    if target is None or not target.exists():
+        return jsonify(error="文件不存在"), 404
+    return send_file(target, as_attachment=True)

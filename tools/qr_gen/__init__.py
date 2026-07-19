@@ -73,9 +73,9 @@ def process():
 
 @tool_bp.get("/download/<filename>")
 def download(filename: str):
-    from utils.helpers import safe_filename
+    from utils.helpers import safe_download_path
     upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    safe = safe_filename(filename)
-    if not safe:
-        return jsonify(error="文件名不合法"), 400
-    return send_file(upload_dir / safe, as_attachment=True)
+    target = safe_download_path(upload_dir, filename)
+    if target is None or not target.exists():
+        return jsonify(error="文件不存在"), 404
+    return send_file(target, as_attachment=True)

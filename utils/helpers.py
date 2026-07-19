@@ -54,6 +54,27 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def safe_download_path(upload_dir: Path, filename: str) -> Optional[Path]:
+    """Return a traversal-safe absolute path under ``upload_dir`` for ``filename``.
+
+    Unlike :func:`safe_filename`, this does **not** rename the file — it preserves
+    the exact stored name so a download route can find the file that was saved
+    earlier. Returns ``None`` if the filename is empty, contains path separators
+    / parent traversal, or resolves outside ``upload_dir``.
+    """
+    if not filename:
+        return None
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return None
+    base = Path(upload_dir).resolve()
+    try:
+        target = (base / filename).resolve()
+        target.relative_to(base)
+    except (ValueError, OSError):
+        return None
+    return target
+
+
 def human_bytes(num: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if num < 1024.0:

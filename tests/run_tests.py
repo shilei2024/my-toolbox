@@ -862,7 +862,173 @@ except Exception as exc:  # noqa: BLE001
 
 
 # ---------------------------------------------------------------------------
-# 9. 生成报告
+# 9. 扩展测试：下载链路 / 错误页 / PN 导入导出 / 匿名配额耗尽 / 非法输入 / 静态资源
+# ---------------------------------------------------------------------------
+login_admin()
+
+
+def _dl(tool_id, data, expect_mime=None):
+    """发起处理并立刻下载返回的文件，验证 200 与 mimetype。"""
+    r = post_tool(tool_id, data)
+    j = r.get_json(silent=True) or {}
+    if not j.get("ok") or not j.get("url"):
+        return False, f"process 未返回 ok/url: {j.get('error', j)}"
+    url = j["url"]
+    if not url.startswith("/"):
+        url = "/" + url
+    d = client.get(url)
+    if d.status_code != 200:
+        return False, f"GET {url} -> {d.status_code}"
+    if expect_mime and not d.mimetype.startswith(expect_mime):
+        return False, f"mime 不符: {d.mimetype} (期望 {expect_mime})"
+    return True, f"{url} -> {d.status_code} {d.mimetype} {len(d.data)}B"
+
+
+_dl_tests = [
+    ("pdf_merge",      [("pdfs", (make_pdf(2), "a.pdf")), ("pdfs", (make_pdf(1), "b.pdf"))], "application/pdf"),
+    ("pdf_split",      [("pdf", (make_pdf(3), "s.pdf")), ("ranges", "1-2")], "application/pdf"),
+    ("pdf_watermark",  [("pdf", (make_pdf(2), "s.pdf")), ("text", "WM")], "application/pdf"),
+    ("pdf_rotate",     [("pdf", (make_pdf(2), "s.pdf")), ("angle", "90"), ("scope", "all")], "application/pdf"),
+    ("pdf_to_word",    [("pdf", (make_pdf(2), "s.pdf"))], "application/vnd.openxmlformats"),
+    ("image_compress", [("image", (make_png(), "p.png")), ("quality", "60")], "image/"),
+    ("image_convert",  [("file", (make_png(), "p.png")), ("format", "jpg"), ("quality", "85")], "image/"),
+    ("image_to_pdf",   [("files", (make_png(), "p.png"))], "application/pdf"),
+    ("qr_gen",         [("text", "hi"), ("size", "10")], "image/"),
+    ("word_to_pdf",    [("file", (make_docx(), "d.docx"))], "application/pdf"),
+    ("data_convert",   [("from", "csv"), ("to", "xlsx"), ("text", "a,b\n1,2")], "application/vnd.openxmlformats"),
+    ("fcst_merge",     [("files", (make_fcst_xlsx(), "f.xlsx"))], "application/vnd.openxmlformats"),
+]
+for tid, data, mime in _dl_tests:
+    try:
+        ok, msg = _dl(tid, data, mime)
+        record("下载", f"{tid} 下载产物", ok, msg)
+    except Exception as exc:  # noqa: BLE001
+        record("下载", f"{tid} 下载产物", False, str(exc).splitlines()[0], traceback.format_exc())
+
+# ai_image 下载（status 返回 url）
+try:
+    r = client.post("/tools/ai-image/generate", data={"prompt": "x", "size": "256x256"},
+                    content_type="multipart/form-data", headers=AJ)
+    j = r.get_json() or {}
+    if j.get("task_id"):
+        s = client.get(f"/tools/ai-image/status/{j['task_id']}", headers=AJ).get_json() or {}
+        url = s.get("url", "")
+        if url:
+            d = client.get(url)
+            ok = d.status_code == 200 and d.mimetype.startswith("image/")
+            record("下载", "ai_image 下载产物", ok, f"{url} -> {d.status_code} {d.mimetype}")
+        else:
+            record("下载", "ai_image 下载产物", False, f"status 未返回 url: {s}")
+    else:
+        record("下载", "ai_image 下载产物", False, f"未返回 task_id: {j}")
+except Exception as exc:  # noqa: BLE001
+    record("下载", "ai_image 下载产物", False, str(exc).splitlines()[0], traceback.format_exc())
+
+# base64 解码图片后下载
+try:
+    import base64 as _b
+    png_bytes = make_png().getvalue()
+    b64 = _b.b64encode(png_bytes).decode()
+    r = post_tool("base64", [("action", "decode"), ("text", f"data:image/png;base64,{b64}")])
+    j = r.get_json() or {}
+    url = j.get("url", "")
+    if url:
+        d = client.get(url)
+        ok = d.status_code == 200 and d.mimetype.startswith("image/")
+        record("下载", "base64 解码图片下载", ok, f"{url} -> {d.status_code} {d.mimetype}")
+    else:
+        record("下载", "base64 解码图片下载", False, f"未返回 url: {j}")
+except Exception as exc:  # noqa: BLE001
+    record("下载", "base64 解码图片下载", False, str(exc).splitlines()[0], traceback.format_exc())
+
+# 错误页
+try:
+    r = client.get("/this-page-does-not-exist")
+    record("边界", "404 错误页", r.status_code == 404, f"status={r.status_code}")
+except Exception as exc:  # noqa: BLE001
+    record("边界", "404 错误页", False, str(exc).splitlines()[0])
+
+# 静态资源
+for sfile in ["/static/js/result.js", "/static/js/tools.js", "/static/js/main.js", "/static/css/style.css"]:
+    try:
+        r = client.get(sfile)
+        record("静态", f"GET {sfile}", r.status_code == 200, f"status={r.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        record("静态", f"GET {sfile}", False, str(exc).splitlines()[0])
+
+# PN 批量导入
+try:
+    import openpyxl
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["品号", "原厂料号", "品牌"])
+    ws.append(["IMP1", "M-IMP1", "BrandA"])
+    ws.append(["IMP2", "M-IMP2", "BrandB"])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    r = client.post("/tools/fcst-merge/api/pn/import",
+                    data={"file": (buf, "pn.xlsx")}, content_type="multipart/form-data", headers=AJ)
+    j = r.get_json() or {}
+    ok = r.status_code == 200 and j.get("ok") and j.get("added", 0) >= 1
+    record("功能", "fcst_merge PN 批量导入", ok, f"status={r.status_code} added={j.get('added')}")
+except Exception as exc:  # noqa: BLE001
+    record("功能", "fcst_merge PN 批量导入", False, str(exc).splitlines()[0], traceback.format_exc())
+
+# PN 导出
+try:
+    r = client.get("/tools/fcst-merge/api/pn/export", headers=AJ)
+    ok = r.status_code == 200 and "spreadsheet" in (r.mimetype or "")
+    record("功能", "fcst_merge PN 导出 xlsx", ok, f"status={r.status_code} {r.mimetype}")
+except Exception as exc:  # noqa: BLE001
+    record("功能", "fcst_merge PN 导出 xlsx", False, str(exc).splitlines()[0])
+
+# PN 统计
+try:
+    r = client.get("/tools/fcst-merge/api/pn/stats", headers=AJ)
+    j = r.get_json() or {}
+    ok = r.status_code == 200 and j.get("ok") and j.get("total", 0) >= 0
+    record("功能", "fcst_merge PN 统计", ok, f"status={r.status_code} total={j.get('total')}")
+except Exception as exc:  # noqa: BLE001
+    record("功能", "fcst_merge PN 统计", False, str(exc).splitlines()[0])
+
+# 匿名配额耗尽：新客户端连续调用同一工具，第 4 次应被拦截
+try:
+    c2 = app.test_client()
+    last_status = None
+    blocked_correctly = False
+    for i in range(4):
+        rr = c2.post("/tools/json-formatter/process",
+                     data={"text": '{"x":1}', "action": "format"},
+                     content_type="multipart/form-data", headers=AJ)
+        last_status = rr.status_code
+        jj = rr.get_json(silent=True) or {}
+        if i < 3:
+            if not jj.get("ok"):
+                blocked_correctly = False
+                break
+        else:
+            # 第 4 次应被拦截（429 或非 ok）
+            blocked_correctly = (rr.status_code == 429 or not jj.get("ok"))
+    record("配额", "匿名配额耗尽拦截", blocked_correctly, f"第4次 status={last_status}")
+except Exception as exc:  # noqa: BLE001
+    record("配额", "匿名配额耗尽拦截", False, str(exc).splitlines()[0], traceback.format_exc())
+
+# 非法输入处理
+_invalid = [
+    ("json_formatter", [("text", "{bad json}"), ("action", "format")], 400),
+    ("hash_calc",      [("algo", "sha256")], 400),  # 无文本无文件
+    ("unit_convert",   [("category", "length"), ("value", "abc"), ("from_unit", "m"), ("to_unit", "km")], 400),
+    ("color_convert",  [("color", "zzzzz")], 400),
+    ("uuid_gen",       [("count", "abc"), ("version", "4")], 400),
+]
+for tid, data, expect in _invalid:
+    try:
+        r = post_tool(tid, data)
+        record("边界", f"{tid} 非法输入 -> {expect}", r.status_code == expect, f"status={r.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        record("边界", f"{tid} 非法输入 -> {expect}", False, str(exc).splitlines()[0])
+
+
+# ---------------------------------------------------------------------------
+# 10. 生成报告
 # ---------------------------------------------------------------------------
 _write_reports()
 

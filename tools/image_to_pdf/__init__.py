@@ -10,7 +10,7 @@ from PIL import Image
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
-from utils.helpers import is_allowed_ext, safe_filename
+from utils.helpers import is_allowed_ext, safe_download_path, safe_filename
 
 tool_bp = Blueprint("image_to_pdf", __name__)
 
@@ -85,7 +85,7 @@ def process():
 @tool_bp.get("/download/<filename>")
 def download(filename: str):
     upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    safe = safe_filename(filename)
-    if not safe:
-        return jsonify(error="文件名不合法"), 400
-    return send_file(upload_dir / safe, as_attachment=True)
+    target = safe_download_path(upload_dir, filename)
+    if target is None or not target.exists():
+        return jsonify(error="文件不存在"), 404
+    return send_file(target, as_attachment=True)
