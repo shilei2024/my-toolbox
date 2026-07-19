@@ -1,0 +1,73 @@
+<p class="text-muted">计算文本或文件的 MD5 / SHA1 / SHA256 / SHA512 哈希值。</p>
+
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><button class="nav-link active" data-tab="text">文本</button></li>
+  <li class="nav-item"><button class="nav-link" data-tab="file">文件</button></li>
+</ul>
+
+<form id="hashForm" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="mb-3">
+    <label class="form-label">算法</label>
+    <select name="algo" class="form-select" style="max-width:200px;">
+      <option value="md5">MD5</option>
+      <option value="sha1">SHA1</option>
+      <option value="sha256" selected>SHA256</option>
+      <option value="sha512">SHA512</option>
+    </select>
+  </div>
+  <div class="mb-3" id="textArea">
+    <textarea name="text" class="form-control font-monospace" rows="6" placeholder="输入要计算哈希的文本…"></textarea>
+  </div>
+  <div class="mb-3 d-none" id="fileArea">
+    <input type="file" name="file" class="form-control" />
+  </div>
+  <button type="submit" class="btn btn-warning"><i class="bi bi-hash"></i> 计算哈希</button>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+<div id="result" class="card bg-light mt-3 d-none">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="text-muted small" id="hashSource">—</span>
+      <button id="copyBtn" class="btn btn-sm btn-outline-success"><i class="bi bi-clipboard"></i> 复制</button>
+    </div>
+    <code id="hashResult" class="d-block p-3 bg-white rounded font-monospace" style="word-break:break-all;"></code>
+  </div>
+</div>
+
+<script>
+(function(){
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  document.querySelectorAll('.nav-tabs .nav-link').forEach(b=>{
+    b.onclick = function(){
+      document.querySelectorAll('.nav-tabs .nav-link').forEach(x=>x.classList.remove('active'));
+      this.classList.add('active');
+      document.getElementById('textArea').classList.toggle('d-none', this.dataset.tab!=='text');
+      document.getElementById('fileArea').classList.toggle('d-none', this.dataset.tab!=='file');
+    };
+  });
+  document.getElementById('hashForm').onsubmit = async function(e){
+    e.preventDefault();
+    const fd = new FormData(this); fd.set('csrf_token', CSRF);
+    document.getElementById('errorBox').classList.add('d-none');
+    document.getElementById('result').classList.add('d-none');
+    try {
+      const r = await fetch('{{ url_for("hash_calc.process") }}', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.ok){
+        document.getElementById('hashResult').textContent = d.result;
+        document.getElementById('hashSource').textContent = `${d.algo} · ${d.source}`;
+        document.getElementById('result').classList.remove('d-none');
+      } else {
+        document.getElementById('errorBox').textContent = d.error;
+        document.getElementById('errorBox').classList.remove('d-none');
+      }
+    } catch(err){ document.getElementById('errorBox').textContent='请求失败: '+err; document.getElementById('errorBox').classList.remove('d-none'); }
+  };
+  document.getElementById('copyBtn').onclick = function(){
+    const v = document.getElementById('hashResult').textContent;
+    if(v){ navigator.clipboard.writeText(v); this.innerHTML='<i class="bi bi-check"></i> 已复制'; setTimeout(()=>{this.innerHTML='<i class="bi bi-clipboard"></i> 复制'},1500); }
+  };
+})();
+</script>

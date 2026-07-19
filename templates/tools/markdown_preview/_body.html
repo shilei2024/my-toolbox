@@ -1,0 +1,68 @@
+<p class="text-muted">输入 Markdown，实时预览渲染效果。支持表格、代码块、列表等。</p>
+
+<div class="row g-2">
+  <div class="col-md-6">
+    <label class="form-label small text-muted">Markdown 输入</label>
+    <textarea id="mdInput" class="form-control font-monospace" rows="14" placeholder="# 标题&#10;**粗体** *斜体*&#10;- 列表项&#10;&#10;```python&#10;print('hello')&#10;```"># Hello World
+
+这是一个 **Markdown** 预览。
+
+- 列表项 1
+- 列表项 2
+
+| 姓名 | 年龄 |
+|------|------|
+| 张三 | 25   |
+
+```python
+def hello():
+    print("Hello!")
+```
+</textarea>
+  </div>
+  <div class="col-md-6">
+    <label class="form-label small text-muted">预览</label>
+    <div id="mdPreview" class="border rounded p-3 bg-white" style="min-height:300px; overflow:auto;"></div>
+  </div>
+</div>
+
+<div class="mt-2">
+  <button id="renderBtn" class="btn btn-primary"><i class="bi bi-eye"></i> 渲染预览</button>
+  <small class="text-muted ms-2">修改后点击渲染或按 Ctrl+Enter</small>
+</div>
+
+<style>
+#mdPreview h1{font-size:1.8rem;font-weight:700;margin:.5em 0;}
+#mdPreview h2{font-size:1.5rem;font-weight:600;margin:.5em 0;}
+#mdPreview h3{font-size:1.2rem;font-weight:600;margin:.5em 0;}
+#mdPreview table{border-collapse:collapse;width:100%;margin:.5em 0;}
+#mdPreview th,#mdPreview td{border:1px solid #ddd;padding:6px 10px;text-align:left;}
+#mdPreview th{background:#f5f5f5;font-weight:600;}
+#mdPreview pre{background:#f5f5f5;padding:10px;border-radius:5px;overflow-x:auto;}
+#mdPreview code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-size:.9em;}
+#mdPreview pre code{background:none;padding:0;}
+#mdPreview blockquote{border-left:3px solid #ccc;margin:.5em 0;padding-left:1em;color:#666;}
+</style>
+
+<script>
+(function(){
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  const input = document.getElementById('mdInput');
+  const preview = document.getElementById('mdPreview');
+
+  async function render(){
+    const text = input.value;
+    if(!text.trim()){ preview.innerHTML='<span class="text-muted">输入 Markdown 后点击渲染</span>'; return; }
+    try {
+      const fd = new FormData(); fd.set('text', text); fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("markdown_preview.process") }}', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.ok){ preview.innerHTML = d.html; }
+    } catch(e){ preview.innerHTML = '<span class="text-danger">渲染失败: '+e+'</span>'; }
+  }
+
+  document.getElementById('renderBtn').onclick = render;
+  input.addEventListener('keydown', function(e){ if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ render(); } });
+  render();
+})();
+</script>

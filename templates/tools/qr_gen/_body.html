@@ -1,0 +1,37 @@
+<p class="text-muted">输入文本或链接，生成可下载的二维码图片。</p>
+
+<form id="qrForm" method="post" enctype="multipart/form-data" data-async="1" data-preview="image">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="mb-3">
+    <label class="form-label">内容</label>
+    <textarea name="text" class="form-control" rows="3" placeholder="https://example.com 或任意文本" required></textarea>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-3">
+      <label class="form-label small">尺寸</label>
+      <input type="number" name="size" class="form-control" value="10" min="1" max="40" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">边框</label>
+      <input type="number" name="border" class="form-control" value="2" min="0" max="10" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">前景色</label>
+      <input type="color" name="fg" class="form-control form-control-color" value="#000000" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">背景色</label>
+      <input type="color" name="bg" class="form-control form-control-color" value="#ffffff" />
+    </div>
+  </div>
+  <button type="submit" class="btn btn-success"><i class="bi bi-qr-code"></i> 生成二维码</button>
+  <span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 生成中…</span>
+</form>
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body text-center">
+    <h5 class="card-title text-success"><i class="bi bi-check-circle-fill"></i> 二维码已生成</h5>
+    <img id="resultPreview" class="img-fluid mb-3" style="max-width:300px;" />
+    <div><a id="downloadLink" class="btn btn-success btn-sm" download><i class="bi bi-download"></i> 下载 PNG</a></div>
+  </div>
+</div>

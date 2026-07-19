@@ -1,0 +1,64 @@
+<p class="text-muted">HEX ↔ RGB ↔ HSL 颜色值互转，实时预览色块。</p>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="mb-3">
+      <label class="form-label">输入颜色值</label>
+      <div class="input-group">
+        <input type="color" id="colorPicker" class="form-control form-control-color" style="max-width:60px;" value="#3b82f6" />
+        <input type="text" id="colorInput" class="form-control font-monospace" value="#3b82f6" placeholder="#3b82f6 / rgb(59,130,246) / hsl(217,91%,60%)" />
+      </div>
+    </div>
+    <button id="convertBtn" class="btn btn-info"><i class="bi bi-arrow-repeat"></i> 转换</button>
+  </div>
+  <div class="col-md-6">
+    <div class="card" style="background:#3b82f6; min-height:120px;" id="preview"></div>
+  </div>
+</div>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="mt-3 d-none">
+  <table class="table table-sm">
+    <tr><td class="text-muted" style="width:80px;">HEX</td><td><code id="resHex">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-target="resHex"><i class="bi bi-clipboard"></i></button></td></tr>
+    <tr><td class="text-muted">RGB</td><td><code id="resRgb">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-target="resRgb"><i class="bi bi-clipboard"></i></button></td></tr>
+    <tr><td class="text-muted">HSL</td><td><code id="resHsl">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-target="resHsl"><i class="bi bi-clipboard"></i></button></td></tr>
+  </table>
+</div>
+
+<script>
+(function(){
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  const picker = document.getElementById('colorPicker');
+  const input = document.getElementById('colorInput');
+  picker.oninput = ()=>{ input.value = picker.value; };
+  document.getElementById('convertBtn').onclick = async function(){
+    const v = input.value.trim();
+    if(!v) return;
+    document.getElementById('errorBox').classList.add('d-none');
+    try {
+      const fd = new FormData(); fd.set('color', v); fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("color_convert.process") }}', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.ok){
+        document.getElementById('resHex').textContent = d.hex;
+        document.getElementById('resRgb').textContent = d.rgb;
+        document.getElementById('resHsl').textContent = d.hsl;
+        document.getElementById('preview').style.background = d.preview;
+        if(d.hex){ picker.value = d.hex; }
+        document.getElementById('result').classList.remove('d-none');
+      } else {
+        document.getElementById('errorBox').textContent = d.error;
+        document.getElementById('errorBox').classList.remove('d-none');
+      }
+    } catch(e){ document.getElementById('errorBox').textContent='请求失败: '+e; document.getElementById('errorBox').classList.remove('d-none'); }
+  };
+  document.querySelectorAll('.copyBtn').forEach(b=>{
+    b.onclick = function(){
+      const el = document.getElementById(this.dataset.target);
+      navigator.clipboard.writeText(el.textContent);
+      this.innerHTML='<i class="bi bi-check"></i>'; setTimeout(()=>{this.innerHTML='<i class="bi bi-clipboard"></i>'},1500);
+    };
+  });
+})();
+</script>

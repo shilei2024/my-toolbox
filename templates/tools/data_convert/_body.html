@@ -1,0 +1,77 @@
+<p class="text-muted">CSV ↔ JSON ↔ Excel(.xlsx) ↔ TSV 数据格式互转。</p>
+
+<div class="row g-2 mb-3 align-items-end">
+  <div class="col-md-3">
+    <label class="form-label">输入格式</label>
+    <select id="fromFormat" class="form-select">
+      <option value="json">JSON</option>
+      <option value="csv" selected>CSV</option>
+      <option value="tsv">TSV</option>
+    </select>
+  </div>
+  <div class="col-md-1 text-center pt-4"><i class="bi bi-arrow-right"></i></div>
+  <div class="col-md-3">
+    <label class="form-label">输出格式</label>
+    <select id="toFormat" class="form-select">
+      <option value="json">JSON</option>
+      <option value="csv">CSV</option>
+      <option value="tsv">TSV</option>
+      <option value="xlsx">Excel (.xlsx)</option>
+    </select>
+  </div>
+  <div class="col-md-5">
+    <button id="convertBtn" class="btn btn-info w-100"><i class="bi bi-arrow-left-right"></i> 转换</button>
+  </div>
+</div>
+
+<div class="mb-3">
+  <textarea id="dataInput" class="form-control font-monospace" rows="10" placeholder="粘贴数据…">name,age,city
+张三,25,北京
+李四,30,上海
+王五,28,深圳</textarea>
+</div>
+
+<div id="errorBox" class="alert alert-danger d-none"></div>
+
+<div class="mb-3">
+  <label class="form-label text-muted small">结果</label>
+  <textarea id="dataOutput" class="form-control font-monospace" rows="10" readonly style="background:#f8f9fa;"></textarea>
+</div>
+
+<div id="fileResult" class="d-none">
+  <a id="downloadLink" class="btn btn-success btn-sm" download><i class="bi bi-download"></i> 下载文件</a>
+</div>
+
+<script>
+(function(){
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  document.getElementById('convertBtn').onclick = async function(){
+    const text = document.getElementById('dataInput').value;
+    if(!text.trim()) return;
+    document.getElementById('errorBox').classList.add('d-none');
+    document.getElementById('fileResult').classList.add('d-none');
+    try {
+      const fd = new FormData();
+      fd.set('text', text);
+      fd.set('from', document.getElementById('fromFormat').value);
+      fd.set('to', document.getElementById('toFormat').value);
+      fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("data_convert.process") }}', {method:'POST', body:fd});
+      const d = await r.json();
+      if(d.ok){
+        if(d.mode === 'file'){
+          document.getElementById('dataOutput').value = `已生成文件: ${d.filename} (${d.size} bytes)`;
+          document.getElementById('downloadLink').href = d.url;
+          document.getElementById('downloadLink').download = d.filename;
+          document.getElementById('fileResult').classList.remove('d-none');
+        } else {
+          document.getElementById('dataOutput').value = d.result;
+        }
+      } else {
+        document.getElementById('errorBox').textContent = d.error;
+        document.getElementById('errorBox').classList.remove('d-none');
+      }
+    } catch(e){ document.getElementById('errorBox').textContent='请求失败: '+e; document.getElementById('errorBox').classList.remove('d-none'); }
+  };
+})();
+</script>

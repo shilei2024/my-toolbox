@@ -174,3 +174,115 @@ tools:
     category: developer
     enabled: true
     order: 90
+
+  # ===== 第二梯队 =====
+  - id: qr_gen
+    name: 二维码生成
+    description: 输入文本或链接，生成可自定义颜色和尺寸的二维码 PNG。
+    icon: bi-qr-code
+    color: "#198754"
+    route: /tools/qr-gen
+    blueprint_module: tools.qr_gen
+    category: image
+    enabled: true
+    order: 56
+
+  - id: hash_calc
+    name: 哈希计算
+    description: 计算文本或文件的 MD5 / SHA1 / SHA256 / SHA512 哈希值。
+    icon: bi-hash
+    color: "#fd7e14"
+    route: /tools/hash-calc
+    blueprint_module: tools.hash_calc
+    category: developer
+    enabled: true
+    order: 91
+
+  - id: regex_tester
+    name: 正则测试器
+    description: 输入正则表达式和文本，实时查看匹配结果和捕获组。
+    icon: bi-code-square
+    color: "#6f42c1"
+    route: /tools/regex-tester
+    blueprint_module: tools.regex_tester
+    category: developer
+    enabled: true
+    order: 92
+
+  - id: sql_formatter
+    name: SQL 格式化
+    description: SQL 语句美化、压缩，自动检测语句数量。
+    icon: bi-database
+    color: "#0d6efd"
+    route: /tools/sql-formatter
+    blueprint_module: tools.sql_formatter
+    category: developer
+    enabled: true
+    order: 93
+
+  - id: word_to_pdf
+    name: Word 转 PDF
+    description: 上传 .docx 文件，转换为 PDF 格式。
+    icon: bi-file-earmark-pdf
+    color: "#0d6efd"
+    route: /tools/word-to-pdf
+    blueprint_module: tools.word_to_pdf
+    category: pdf
+    enabled: true
+    order: 46
+
+  # ===== 第三梯队 =====
+  - id: markdown_preview
+    name: Markdown 预览
+    description: 输入 Markdown，实时预览渲染效果，支持表格、代码块、列表。
+    icon: bi-markdown
+    color: "#6f42c1"
+    route: /tools/markdown-preview
+    blueprint_module: tools.markdown_preview
+    category: text
+    enabled: true
+    order: 100
+
+  - id: text_dedup
+    name: 文本去重
+    description: 粘贴多行文本，去重、排序、统计行数。
+    icon: bi-funnel
+    color: "#198754"
+    route: /tools/text-dedup
+    blueprint_module: tools.text_dedup
+    category: text
+    enabled: true
+    order: 105
+
+  - id: unit_convert
+    name: 单位换算
+    description: 长度、重量、温度、存储容量、时间单位互转。
+    icon: bi-rulers
+    color: "#20c997"
+    route: /tools/unit-convert
+    blueprint_module: tools.unit_convert
+    category: text
+    enabled: true
+    order: 110
+
+  - id: color_convert
+    name: 颜色转换
+    description: HEX ↔ RGB ↔ HSL 颜色值互转，实时预览色块。
+    icon: bi-palette
+    color: "#e83e8c"
+    route: /tools/color-convert
+    blueprint_module: tools.color_convert
+    category: text
+    enabled: true
+    order: 115
+
+  - id: data_convert
+    name: 数据格式转换
+    description: CSV ↔ JSON ↔ Excel(.xlsx) ↔ TSV 数据格式互转。
+    icon: bi-arrow-left-right
+    color: "#0dcaf0"
+    route: /tools/data-convert
+    blueprint_module: tools.data_convert
+    category: text
+    enabled: true
+    order: 120

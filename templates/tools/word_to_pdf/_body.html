@@ -1,0 +1,20 @@
+<p class="text-muted">上传 .docx 文件，转换为 PDF。仅支持 Word 2007+ 格式（.docx）。</p>
+<form id="w2pForm" action="{{ url_for('word_to_pdf.process') }}" method="post" enctype="multipart/form-data" data-async="1" data-preview="other">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="mb-3">
+    <label class="form-label">选择 Word 文件</label>
+    <input type="file" name="file" class="form-control" accept=".docx" required />
+    <small class="text-muted">仅支持 .docx，不支持旧版 .doc</small>
+  </div>
+  <button type="submit" class="btn btn-primary"><i class="bi bi-file-earmark-pdf"></i> 转换为 PDF</button>
+  <span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 转换中…</span>
+</form>
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success"><i class="bi bi-check-circle-fill"></i> 转换完成</h5>
+    <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width:300px;"></code>
+    <small class="text-muted">大小 <span id="resultSize">—</span></small>
+    <div><a id="downloadLink" class="btn btn-danger btn-sm mt-2" download><i class="bi bi-download"></i> 下载 PDF</a></div>
+  </div>
+</div>
