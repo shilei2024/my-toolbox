@@ -68,6 +68,10 @@ def register_tools(app: Flask) -> None:
 
     `tools/<id>/` is treated as a sub-package. Anything in
     `tools_config.yaml` is imported; unknown ones are logged and skipped.
+
+    If a tool module fails to import (e.g. a dependency is missing in the
+    deploy environment), it is marked ``enabled=False`` in the DB so the
+    homepage does not render a dead link to a route that doesn't exist.
     """
     # First, make sure the `tools` sub-packages themselves are importable.
     # pkgutil walks the package directory.
@@ -78,17 +82,53 @@ def register_tools(app: Flask) -> None:
             continue
         # don't actually import the tool yet — the YAML is the source of truth
 
+    entries = _load_yaml_config(app)
+    registered: set[str] = set()
+    failed: set[str] = set()
+
     # Now register based on the YAML config.
-    for entry in _load_yaml_config(app):
+    for entry in entries:
+        tid = entry["id"]
         module_path = entry["blueprint_module"]
         mod = _import_module(module_path)
         if mod is None:
+            failed.add(tid)
+            logger.error(
+                "Tool %s: module %s failed to import — disabling it so the "
+                "homepage doesn't show a dead link.", tid, module_path
+            )
             continue
         bp = getattr(mod, "tool_bp", None)
         if bp is None:
+            failed.add(tid)
             logger.error("Module %s has no `tool_bp` blueprint", module_path)
             continue
-        app.register_blueprint(bp, url_prefix=entry.get("route", f"/tools/{entry['id']}"))
+        app.register_blueprint(bp, url_prefix=entry.get("route", f"/tools/{tid}"))
+        registered.add(tid)
+
+    # Sync enabled state: disable tools that failed to import, re-enable those
+    # that registered successfully (so a previously-disabled tool comes back
+    # once its dependency is fixed and redeployed).
+    with app.app_context():
+        changed = False
+        for tid in failed:
+            tool = db.session.get(Tool, tid)
+            if tool is not None and tool.enabled:
+                tool.enabled = False
+                changed = True
+        for tid in registered:
+            tool = db.session.get(Tool, tid)
+            if tool is not None and not tool.enabled:
+                tool.enabled = True
+                changed = True
+        if changed:
+            db.session.commit()
+
+    if failed:
+        logger.warning("Tools registered %d/%d; disabled (import failed): %s",
+                       len(registered), len(entries), ", ".join(sorted(failed)))
+    else:
+        logger.info("All %d tools registered.", len(entries))
 
 
 def list_enabled_tools() -> list[Tool]:

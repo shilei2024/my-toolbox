@@ -57,6 +57,11 @@ def create_app() -> Flask:
     try:
         _log("Step 1/8: Flask(__name__)...")
         app = Flask(__name__)
+        # Accept both `/tools/x` and `/tools/x/` without a 308 redirect.
+        # Vercel's serverless layer sometimes drops/mishandles the trailing-slash
+        # redirect, which made tool pages unreachable when clicked from the homepage
+        # (homepage links use `tool.route` without a trailing slash).
+        app.url_map.strict_slashes = False
         _log(f"  ok, instance_path={app.instance_path}")
     except Exception:
         _log("  FATAL")

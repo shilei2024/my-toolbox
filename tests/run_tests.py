@@ -319,11 +319,16 @@ for t in _cfg.get("tools", []):
     tid = t["id"]
     route = t["route"]
     try:
-        r = client.get(route + "/")  # 蓝图路由带尾斜杠，避免 308 重定向
-        ok = r.status_code == 200
-        record("工具页面", f"GET {route}/ ({tid})", ok, f"status={r.status_code}")
+        # strict_slashes=False 后，无尾斜杠也应直接 200（不再 308 重定向）
+        r1 = client.get(route)
+        r2 = client.get(route + "/")
+        body = r2.get_data(as_text=True)
+        has_content = (f"{route}/process" in body) or (f"{route}/generate" in body) or ("<form" in body) or ("<button" in body)
+        ok = (r1.status_code == 200 and r2.status_code == 200 and has_content)
+        record("工具页面", f"GET {route} ({tid})", ok,
+               f"no-slash={r1.status_code} w-slash={r2.status_code} body={has_content}")
     except Exception as exc:  # noqa: BLE001
-        record("工具页面", f"GET {route}/ ({tid})", False, str(exc).splitlines()[0], traceback.format_exc())
+        record("工具页面", f"GET {route} ({tid})", False, str(exc).splitlines()[0], traceback.format_exc())
 
 
 # ---------------------------------------------------------------------------
