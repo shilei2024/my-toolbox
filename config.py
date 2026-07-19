@@ -27,10 +27,12 @@ def _auto_db_url() -> str:
     """
     vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
     if vercel:
-        return vercel
+        # SQLAlchemy 2.x requires postgresql:// not postgres://
+        return vercel.replace("postgres://", "postgresql://")
     explicit = os.environ.get("DATABASE_URL")
     if explicit:
-        return explicit
+        # Also normalize in case user supplies postgres://
+        return explicit.replace("postgres://", "postgresql://")
     return "sqlite:///app.db"
 
 
