@@ -331,6 +331,20 @@ for t in _cfg.get("tools", []):
         record("工具页面", f"GET {route} ({tid})", False, str(exc).splitlines()[0], traceback.format_exc())
 
 
+# 回归检查：凡是用 <form data-async="1"> 的工具页，必须加载 result.js，
+# 否则点击提交按钮会整页 POST 到 /process 显示裸 JSON → 页面丢失。
+try:
+    mismatches = []
+    for t in _cfg.get("tools", []):
+        body = client.get(t["route"] + "/").get_data(as_text=True)
+        if 'data-async="1"' in body and "js/result.js" not in body:
+            mismatches.append(t["id"])
+    record("JS依赖", "data-async 工具页均加载 result.js", not mismatches,
+           "缺失 result.js: " + ", ".join(mismatches) if mismatches else "全部一致")
+except Exception as exc:  # noqa: BLE001
+    record("JS依赖", "data-async 工具页均加载 result.js", False, str(exc).splitlines()[0])
+
+
 # ---------------------------------------------------------------------------
 # 5. 每个工具的功能测试（POST）
 # ---------------------------------------------------------------------------

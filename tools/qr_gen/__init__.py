@@ -21,6 +21,10 @@ def index():
         tool={"id": "qr_gen", "name": "二维码生成", "icon": "bi-qr-code", "color": "#198754"},
         remaining=remaining_for("qr_gen"),
         body_template="tools/qr_gen/_body.html",
+        # _body.html 用 <form data-async="1" data-preview="image">，依赖 result.js
+        # 拦截提交走 AJAX；不加载它的话点击按钮会整页 POST 到 /process 显示裸 JSON
+        # → 页面丢失。
+        tool_js_list=["js/result.js"],
     )
 
 
