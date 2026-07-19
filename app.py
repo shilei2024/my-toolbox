@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import tempfile
+import traceback
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -46,40 +48,99 @@ _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
 
 
 def create_app() -> Flask:
-    app = Flask(
-        __name__,
-        instance_relative_config=True,  # use default instance/ next to the app package
-    )
-    app.config.from_object(get_config())
+    _log = lambda msg: print(f"[my-toolbox] {msg}", file=sys.stderr, flush=True)
+
+    _log(f"Bootstrap start (VERCEL={_ON_VERCEL}, py={sys.version.split()[0]})")
+
+    try:
+        _log("Step 1/8: Flask(__name__)...")
+        app = Flask(
+            __name__,
+            instance_relative_config=True,
+        )
+        _log(f"  ok, instance_path={app.instance_path}")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
+
+    try:
+        _log("Step 2/8: config.from_object...")
+        app.config.from_object(get_config())
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
 
     # --- Vercel Serverless adaptations ---
     if _ON_VERCEL:
-        # Redirect writable directories to /tmp (Vercel's ephemeral writable storage)
         _tmp = Path(tempfile.gettempdir()) / "mytoolbox"
         app.config["UPLOAD_DIR"] = _tmp / "uploads"
         app.config["INSTANCE_DIR"] = _tmp / "instance"
-        # Use in-memory SQLite so we don't need filesystem writes
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        # No .env file on Vercel — env vars must come from Dashboard
-    # --- ensure folders exist ---
-    Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
-    Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
+        _log(f"  VERCEL: dirs→/tmp, db=:memory:")
 
-    _setup_logging(app)
-    _init_extensions(app)
-    _register_blueprints(app)
-    _register_error_handlers(app)
-    _register_context(app)
-    _register_cli(app)
-    _seed_admin(app)
-    sync_tool_registry(app)
-    register_tools(app)
+    # --- ensure folders exist ---
+    try:
+        _log("Step 3/8: ensure folders...")
+        Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
+
+    try:
+        _log("Step 4/8: _setup_logging...")
+        _setup_logging(app)
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
+
+    try:
+        _log("Step 5/8: _init_extensions (db, login, csrf, limiter)...")
+        _init_extensions(app)
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
+
+    try:
+        _log("Step 6/8: blueprints + error handlers + context + cli...")
+        _register_blueprints(app)
+        _register_error_handlers(app)
+        _register_context(app)
+        _register_cli(app)
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
+
+    try:
+        _log("Step 7/8: seed_admin + sync_tools + register_tools...")
+        _seed_admin(app)
+        sync_tool_registry(app)
+        register_tools(app)
+        _log("  ok")
+    except Exception:
+        _log("  FATAL")
+        traceback.print_exc(file=sys.stderr)
+        raise
 
     # background cleanup (skipped on Vercel — no persistent background threads)
     if not _ON_VERCEL:
         from utils.cleanup import schedule_cleanup
         scheduler = schedule_cleanup(app)
         scheduler.start()
+    else:
+        _log("Step 8/8: APScheduler skipped (Vercel)")
+        _log(f"Bootstrap COMPLETE — {len(list(app.url_map.iter_rules()))} routes")
 
     @app.get("/healthz")
     def healthz():
