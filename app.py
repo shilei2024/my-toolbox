@@ -56,10 +56,7 @@ def create_app() -> Flask:
 
     try:
         _log("Step 1/8: Flask(__name__)...")
-        app = Flask(
-            __name__,
-            instance_relative_config=True,
-        )
+        app = Flask(__name__)
         _log(f"  ok, instance_path={app.instance_path}")
     except Exception:
         _log("  FATAL")
