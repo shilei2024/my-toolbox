@@ -45,11 +45,12 @@ from tools import list_enabled_tools, register_tools, sync_tool_registry
 from utils.helpers import get_client_ip, utc_today_str
 
 _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
+_is_readonly_fs = False  # set True at runtime if mkdir fails (e.g. Vercel)
 
 
 def create_app() -> Flask:
+    global _is_readonly_fs
     _log = lambda msg: print(f"[my-toolbox] {msg}", file=sys.stderr, flush=True)
-    _is_readonly_fs = False  # set True if we detect a read-only filesystem
 
     _log(f"Bootstrap start (VERCEL={_ON_VERCEL}, py={sys.version.split()[0]})")
 
@@ -192,9 +193,16 @@ def _setup_logging(app: Flask) -> None:
 
 def _init_extensions(app: Flask) -> None:
     # Resolve SQLite path to the app's instance_path if user didn't override.
-    # Skip for in-memory DB (used on Vercel) and absolute paths.
+    # Skip for in-memory DB (used on Vercel / read-only FS), absolute paths,
+    # and when VERCEL env var is detected.
     uri = app.config["SQLALCHEMY_DATABASE_URI"]
-    if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////") and not _ON_VERCEL:
+    if (
+        uri.startswith("sqlite:///")
+        and not uri.startswith("sqlite:////")
+        and not _ON_VERCEL
+        and not _is_readonly_fs
+        and ":memory:" not in uri
+    ):
         # relative path -> anchor on instance_path
         rel = uri[len("sqlite:///"):]
         target = Path(app.instance_path) / rel
