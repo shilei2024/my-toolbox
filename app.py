@@ -161,6 +161,33 @@ def create_app() -> Flask:
     def healthz():
         return jsonify(status="ok", time=utc_today_str())
 
+    @app.get("/diag")
+    def diag():
+        """Deployment diagnostics — reveals why tool pages may not load.
+
+        Public (no auth) so it can be checked on Vercel without logging in.
+        Reports Python version, how many tools registered vs failed to import,
+        and the exact import error for each failed tool.
+        """
+        import platform
+        diag = app.config.get("TOOL_DIAG", {})
+        tool_routes = sorted(
+            {r.rule for r in app.url_map.iter_rules() if r.rule.startswith("/tools/")}
+        )
+        return jsonify(
+            python_version=platform.python_version(),
+            sys_version=sys.version.split()[0],
+            on_vercel=_ON_VERCEL,
+            readonly_fs=_is_readonly_fs,
+            db_uri_head=str(app.config["SQLALCHEMY_DATABASE_URI"])[:60],
+            yaml_tool_count=diag.get("yaml_count"),
+            registered_count=len(diag.get("registered", [])),
+            failed_count=len(diag.get("failed", {})),
+            failed=diag.get("failed", {}),
+            tool_route_count=len(tool_routes),
+            tool_routes=tool_routes,
+        )
+
     @app.get("/")
     def home():
         # Group tools by category for the homepage. CATEGORY_META drives the

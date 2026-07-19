@@ -84,23 +84,25 @@ def register_tools(app: Flask) -> None:
 
     entries = _load_yaml_config(app)
     registered: set[str] = set()
-    failed: set[str] = set()
+    failed: dict[str, str] = {}  # tid -> error message (for /diag)
 
     # Now register based on the YAML config.
     for entry in entries:
         tid = entry["id"]
         module_path = entry["blueprint_module"]
-        mod = _import_module(module_path)
-        if mod is None:
-            failed.add(tid)
+        try:
+            mod = importlib.import_module(module_path)
+        except Exception as exc:  # noqa: BLE001
+            failed[tid] = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:300]
             logger.error(
                 "Tool %s: module %s failed to import — disabling it so the "
-                "homepage doesn't show a dead link.", tid, module_path
+                "homepage doesn't show a dead link. Error: %s",
+                tid, module_path, exc, exc_info=True,
             )
             continue
         bp = getattr(mod, "tool_bp", None)
         if bp is None:
-            failed.add(tid)
+            failed[tid] = "module has no `tool_bp` blueprint attribute"
             logger.error("Module %s has no `tool_bp` blueprint", module_path)
             continue
         app.register_blueprint(bp, url_prefix=entry.get("route", f"/tools/{tid}"))
@@ -123,6 +125,13 @@ def register_tools(app: Flask) -> None:
                 changed = True
         if changed:
             db.session.commit()
+
+    # Expose diagnostics for the /diag endpoint.
+    app.config["TOOL_DIAG"] = {
+        "yaml_count": len(entries),
+        "registered": sorted(registered),
+        "failed": failed,
+    }
 
     if failed:
         logger.warning("Tools registered %d/%d; disabled (import failed): %s",
