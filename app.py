@@ -84,13 +84,18 @@ def create_app() -> Flask:
         app.config["UPLOAD_DIR"] = _tmp / "uploads"
         app.config["INSTANCE_DIR"] = _tmp / "instance"
         _is_readonly_fs = True
-        # Only switch to in-memory SQLite if no real DB (Vercel Postgres) is configured.
-        _db_uri = app.config["SQLALCHEMY_DATABASE_URI"]
-        if "postgresql" not in _db_uri and "mysql" not in _db_uri:
+        # Only switch to in-memory SQLite if no external DB env var is set.
+        # Vercel Postgres URLs use "postgres://" (not "postgresql://"), so we
+        # detect via env var presence rather than URL substring matching.
+        _has_external_db = bool(
+            os.environ.get("POSTGRES_URL_NON_POOLING")
+            or os.environ.get("POSTGRES_URL")
+        )
+        if not _has_external_db:
             app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-            _log("  Vercel: using in-memory SQLite (no external DB)")
+            _log("  DB: in-memory SQLite (no Vercel Postgres detected)")
         else:
-            _log(f"  Vercel: using external DB (postgresql)")
+            _log("  DB: Vercel Postgres (external, persistent)")
         # These MUST succeed — /tmp is always writable
         Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
         Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
