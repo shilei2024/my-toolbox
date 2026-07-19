@@ -1,0 +1,37 @@
+<p class="text-muted">URL 编码（EncodeURIComponent）和解码。</p>
+
+<div class="row g-2 mb-3">
+  <div class="col-md-6"><button id="encodeBtn" class="btn btn-primary w-100"><i class="bi bi-lock"></i> 编码</button></div>
+  <div class="col-md-6"><button id="decodeBtn" class="btn btn-outline-secondary w-100"><i class="bi bi-unlock"></i> 解码</button></div>
+</div>
+
+<div class="mb-3">
+  <textarea id="urlInput" class="form-control font-monospace" rows="6" placeholder="输入要编码/解码的文本或URL…"></textarea>
+</div>
+<div id="urlError" class="alert alert-danger d-none"></div>
+<div class="mb-3">
+  <label class="form-label text-muted small">结果</label>
+  <textarea id="urlOutput" class="form-control font-monospace" rows="6" readonly style="background:#f8f9fa;"></textarea>
+</div>
+<button id="copyBtn" class="btn btn-outline-success btn-sm"><i class="bi bi-clipboard"></i> 复制结果</button>
+
+<script>
+(function() {
+  const inp = document.getElementById('urlInput'), out = document.getElementById('urlOutput'), errEl = document.getElementById('urlError');
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  async function send(action) { 
+    const v = inp.value.trim(); if(!v) return;
+    errEl.classList.add('d-none');
+    try {
+      const fd = new FormData(); fd.set('text', v); fd.set('action', action); fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("url_codec.process") }}', { method:'POST', body:fd }); const d = await r.json();
+      if(d.ok) out.value = d.result; else { errEl.textContent = d.error; errEl.classList.remove('d-none'); out.value=''; }
+    } catch(e) { errEl.textContent = '请求失败: '+e; errEl.classList.remove('d-none'); }
+  }
+  document.getElementById('encodeBtn').onclick = ()=>send('encode');
+  document.getElementById('decodeBtn').onclick = ()=>send('decode');
+  document.getElementById('copyBtn').onclick = ()=>{
+    if(out.value){ navigator.clipboard.writeText(out.value); this.innerHTML='<i class="bi bi-check"></i> 已复制'; setTimeout(()=>{this.innerHTML='<i class="bi bi-clipboard"></i> 复制结果'}, 1500); }
+  };
+})();
+</script>

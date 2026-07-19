@@ -97,3 +97,80 @@ tools:
     category: business
     enabled: true
     order: 60
+
+  - id: image_convert
+    name: 图片格式转换
+    description: PNG / JPG / WEBP / GIF / BMP 任意互转，可调 JPEG 质量。
+    icon: bi-arrow-left-right
+    color: "#e83e8c"
+    route: /tools/image-convert
+    blueprint_module: tools.image_convert
+    category: image
+    enabled: true
+    order: 55
+
+  - id: image_to_pdf
+    name: 图片转 PDF
+    description: 把多张图片按顺序合并成一个 PDF 文件。
+    icon: bi-file-earmark-pdf
+    color: "#dc3545"
+    route: /tools/image-to-pdf
+    blueprint_module: tools.image_to_pdf
+    category: pdf
+    enabled: true
+    order: 45
+
+  - id: json_formatter
+    name: JSON 格式化
+    description: 粘贴 JSON，一键美化或压缩，自动校验格式错误。
+    icon: bi-braces
+    color: "#6f42c1"
+    route: /tools/json-formatter
+    blueprint_module: tools.json_formatter
+    category: developer
+    enabled: true
+    order: 70
+
+  - id: timestamp
+    name: 时间戳转换
+    description: Unix 秒 / 毫秒 ↔ 可读日期时间，自动检测格式，显示实时时间。
+    icon: bi-clock
+    color: "#20c997"
+    route: /tools/timestamp
+    blueprint_module: tools.timestamp
+    category: developer
+    enabled: true
+    order: 75
+
+  - id: base64
+    name: Base64 编解码
+    description: 文本 / 文件 / 图片 Data URI ↔ Base64 双向转换，支持图片解码预览。
+    icon: bi-file-binary
+    color: "#0d6efd"
+    route: /tools/base64
+    blueprint_module: tools.base64
+    category: developer
+    enabled: true
+    order: 80
+
+  - id: url_codec
+    name: URL 编解码
+    description: URL Encode / Decode，一键编码或解码 URL 字符串。
+    icon: bi-link-45deg
+    color: "#fd7e14"
+    route: /tools/url-codec
+    blueprint_module: tools.url_codec
+    category: developer
+    enabled: true
+    order: 85
+
+  - id: uuid_gen
+    name: UUID 生成器
+    description: 批量生成 UUID v1 / v4，支持大写、一键复制全部。
+    icon: bi-fingerprint
+    color: "#6610f2"
+    route: /tools/uuid-gen
+    blueprint_module: tools.uuid_gen
+    category: developer
+    enabled: true
+    order: 90

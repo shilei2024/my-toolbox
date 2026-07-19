@@ -1,0 +1,54 @@
+<p class="text-muted">把图片转成其他格式：PNG ↔ JPG ↔ WEBP ↔ GIF ↔ BMP。</p>
+
+<form id="convertForm" action="{{ url_for('image_convert.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="image">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择图片</label>
+    <input type="file" name="file" class="form-control" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" required />
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col-md-6">
+      <label class="form-label">目标格式</label>
+      <select name="format" class="form-select">
+        <option value="png">PNG</option>
+        <option value="jpg" selected>JPEG</option>
+        <option value="webp">WebP</option>
+        <option value="gif">GIF</option>
+        <option value="bmp">BMP</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">JPEG 质量 (<span id="qualityVal">85</span>)</label>
+      <input type="range" name="quality" class="form-range" min="1" max="100" value="85" id="qualitySlider"
+             oninput="document.getElementById('qualityVal').textContent=this.value" />
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-arrow-left-right"></i> 开始转换
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 转换中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success"><i class="bi bi-check-circle-fill"></i> 转换完成</h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width:300px;"></code>
+        <small class="text-muted">大小 <span id="resultSize">—</span></small>
+      </div>
+      <div>
+        <a id="downloadLink" class="btn btn-success btn-sm" download><i class="bi bi-download"></i> 下载</a>
+        <button type="button" id="redoBtn" class="btn btn-outline-secondary btn-sm ms-1"><i class="bi bi-arrow-counterclockwise"></i> 再转一张</button>
+      </div>
+    </div>
+  </div>
+</div>

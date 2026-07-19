@@ -1,0 +1,32 @@
+<p class="text-muted">上传多张图片，按顺序合并成一个 PDF 文件。</p>
+
+<form id="toPdfForm" action="{{ url_for('image_to_pdf.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="other">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择图片（可多选）</label>
+    <input type="file" name="files" class="form-control" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple required />
+    <small class="text-muted">按住 Ctrl 或 Shift 多选。支持 PNG / JPG / WebP / GIF / BMP</small>
+  </div>
+
+  <button type="submit" class="btn btn-danger">
+    <i class="bi bi-file-earmark-pdf"></i> 生成 PDF
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 生成中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+<div id="result" class="card border-danger shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-danger"><i class="bi bi-file-earmark-pdf"></i> PDF 已生成</h5>
+    <p class="text-muted mb-2">共 <span id="imgCount">—</span> 张图片已合并</p>
+    <div>
+      <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width:300px;"></code>
+      <small class="text-muted">大小 <span id="resultSize">—</span></small>
+    </div>
+    <a id="downloadLink" class="btn btn-danger btn-sm mt-2" download><i class="bi bi-download"></i> 下载 PDF</a>
+  </div>
+</div>

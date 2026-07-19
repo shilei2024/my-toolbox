@@ -1,0 +1,93 @@
+<p class="text-muted">Unix 时间戳（秒/毫秒） ↔ 可读日期时间，自动检测输入格式。</p>
+
+<div class="row g-2 mb-3">
+  <div class="col-md-6">
+    <button id="ts2dtBtn" class="btn btn-primary w-100">
+      <i class="bi bi-arrow-down"></i> 时间戳 → 日期
+    </button>
+  </div>
+  <div class="col-md-6">
+    <button id="dt2tsBtn" class="btn btn-outline-secondary w-100">
+      <i class="bi bi-arrow-up"></i> 日期 → 时间戳
+    </button>
+  </div>
+</div>
+
+<div class="mb-3">
+  <label class="form-label">输入</label>
+  <div class="input-group">
+    <input type="text" id="tsInput" class="form-control font-monospace" placeholder="1714003200 或 2025-01-01T00:00:00" />
+    <button id="nowBtn" class="btn btn-outline-warning"><i class="bi bi-lightning"></i> 当前时间</button>
+  </div>
+</div>
+
+<div id="errorBox" class="alert alert-danger d-none"></div>
+
+<div class="card bg-light">
+  <div class="card-body d-none" id="resultCard">
+    <table class="table table-sm mb-0">
+      <tr><td class="text-muted" style="width:120px;">UTC 时间</td><td><code id="resUtc">—</code></td></tr>
+      <tr><td class="text-muted">ISO 8601</td><td><code id="resIso">—</code></td></tr>
+      <tr><td class="text-muted">Unix 秒</td><td><code id="resSec">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-id="resSec"><i class="bi bi-clipboard"></i></button></td></tr>
+      <tr><td class="text-muted">Unix 毫秒</td><td><code id="resMs">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-id="resMs"><i class="bi bi-clipboard"></i></button></td></tr>
+      <tr><td class="text-muted">当前时间戳</td><td><code id="resNow">—</code></td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+(function() {
+  const input = document.getElementById('tsInput');
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  let dir = 'ts2dt';
+
+  document.getElementById('ts2dtBtn').onclick = () => { dir='ts2dt'; document.getElementById('ts2dtBtn').className='btn btn-primary w-100'; document.getElementById('dt2tsBtn').className='btn btn-outline-secondary w-100'; input.placeholder='1714003200 或 1714003200000'; };
+  document.getElementById('dt2tsBtn').onclick = () => { dir='dt2ts'; document.getElementById('dt2tsBtn').className='btn btn-primary w-100'; document.getElementById('ts2dtBtn').className='btn btn-outline-secondary w-100'; input.placeholder='2025-01-01T00:00:00 或 2025-01-01 08:00:00'; };
+  document.getElementById('nowBtn').onclick = () => {
+    const now = Math.floor(Date.now() / 1000);
+    input.value = now;
+    send();
+  };
+
+  async function send() {
+    const v = input.value.trim();
+    if (!v) return;
+    document.getElementById('errorBox').classList.add('d-none');
+    document.getElementById('resultCard').classList.add('d-none');
+    try {
+      const fd = new FormData();
+      fd.set('value', v);
+      fd.set('direction', dir);
+      fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("timestamp.process") }}', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) {
+        document.getElementById('resUtc').textContent = d.result.utc;
+        document.getElementById('resIso').textContent = d.result.iso;
+        document.getElementById('resSec').textContent = d.result.seconds;
+        document.getElementById('resMs').textContent = d.result.milliseconds;
+        document.getElementById('resNow').textContent = d.result.current_ts;
+        document.getElementById('resultCard').classList.remove('d-none');
+
+        document.getElementById('nowBtn').innerHTML = '<i class="bi bi-clock"></i> 实时 ' + new Date(d.result.current_ts * 1000).toLocaleTimeString();
+      } else {
+        document.getElementById('errorBox').textContent = d.error;
+        document.getElementById('errorBox').classList.remove('d-none');
+      }
+    } catch(e) { document.getElementById('errorBox').textContent = '请求失败: ' + e; document.getElementById('errorBox').classList.remove('d-none'); }
+  }
+
+  document.getElementById('ts2dtBtn').onclick = function() { dir='ts2dt'; this.className='btn btn-primary w-100'; document.getElementById('dt2tsBtn').className='btn btn-outline-secondary w-100'; input.placeholder='1714003200 或 1714003200000'; };
+  document.getElementById('dt2tsBtn').onclick = function() { dir='dt2ts'; this.className='btn btn-primary w-100'; document.getElementById('ts2dtBtn').className='btn btn-outline-secondary w-100'; input.placeholder='2025-01-01T00:00:00 或 2025-01-01 08:00:00'; };
+  document.getElementById('nowBtn').onclick = function() { const now=Math.floor(Date.now()/1000); input.value=now; send(); };
+  input.addEventListener('keydown', function(e) { if (e.key==='Enter') send(); });
+
+  document.querySelectorAll('.copyBtn').forEach(b => {
+    b.onclick = function() {
+      const el = document.getElementById(this.dataset.id);
+      navigator.clipboard.writeText(el.textContent);
+      this.innerHTML = '<i class="bi bi-check"></i>'; setTimeout(()=>{this.innerHTML='<i class="bi bi-clipboard"></i>'}, 1500);
+    };
+  });
+})();
+</script>

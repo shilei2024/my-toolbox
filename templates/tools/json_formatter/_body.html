@@ -1,0 +1,54 @@
+<p class="text-muted">粘贴 JSON，一键美化或压缩。自动校验格式。</p>
+
+<div class="mb-3">
+  <textarea id="jsonInput" class="form-control font-monospace" rows="12"
+            placeholder='{"name": "hello", "items": [1, 2, 3]}'></textarea>
+</div>
+
+<div class="d-flex gap-2 mb-3">
+  <button id="formatBtn" class="btn btn-primary"><i class="bi bi-magic"></i> 格式化</button>
+  <button id="compressBtn" class="btn btn-outline-secondary"><i class="bi bi-arrows-collapse"></i> 压缩</button>
+  <button id="clearBtn" class="btn btn-outline-danger"><i class="bi bi-trash"></i> 清空</button>
+  <button id="copyBtn" class="btn btn-outline-success ms-auto"><i class="bi bi-clipboard"></i> 复制结果</button>
+</div>
+
+<div id="errorBox" class="alert alert-danger d-none"></div>
+
+<div class="mb-3">
+  <label class="form-label text-muted small">结果</label>
+  <textarea id="jsonOutput" class="form-control font-monospace" rows="12" readonly
+            style="background:#f8f9fa;"></textarea>
+</div>
+
+<script>
+(function() {
+  const input = document.getElementById('jsonInput');
+  const output = document.getElementById('jsonOutput');
+  const errBox = document.getElementById('errorBox');
+  const copyBtn = document.getElementById('copyBtn');
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+
+  async function send(action) {
+    const raw = input.value.trim();
+    if (!raw) { errBox.textContent = '请输入 JSON'; errBox.classList.remove('d-none'); return; }
+    errBox.classList.add('d-none');
+    try {
+      const fd = new FormData();
+      fd.set('text', raw);
+      fd.set('action', action);
+      fd.set('csrf_token', CSRF);
+      const r = await fetch('{{ url_for("json_formatter.process") }}', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) { output.value = d.result; output.style.background = '#f8f9fa'; }
+      else { errBox.textContent = d.error; errBox.classList.remove('d-none'); output.value = ''; }
+    } catch(e) { errBox.textContent = '请求失败: ' + e; errBox.classList.remove('d-none'); }
+  }
+
+  document.getElementById('formatBtn').onclick = () => send('format');
+  document.getElementById('compressBtn').onclick = () => send('compress');
+  document.getElementById('clearBtn').onclick = () => { input.value = ''; output.value = ''; };
+  copyBtn.onclick = () => {
+    if (output.value) { navigator.clipboard.writeText(output.value); copyBtn.innerHTML = '<i class="bi bi-check"></i> 已复制'; setTimeout(() => copyBtn.innerHTML = '<i class="bi bi-clipboard"></i> 复制结果', 1500); }
+  };
+})();
+</script>

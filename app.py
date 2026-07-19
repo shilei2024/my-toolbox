@@ -165,6 +165,7 @@ def create_app() -> Flask:
             "pdf": {"title": "PDF 文件操作", "icon": "bi-file-earmark-pdf", "color": "#dc3545", "order": 1},
             "image": {"title": "图片功能", "icon": "bi-image", "color": "#fd7e14", "order": 2},
             "business": {"title": "业务工具", "icon": "bi-briefcase", "color": "#0d6efd", "order": 3},
+            "developer": {"title": "开发工具", "icon": "bi-code-slash", "color": "#6f42c1", "order": 4},
             "other": {"title": "其他工具", "icon": "bi-grid", "color": "#6c757d", "order": 99},
         }
         tools = list_enabled_tools()
