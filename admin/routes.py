@@ -64,13 +64,13 @@ def dashboard():
         datetime.now(timezone.utc) - timedelta(days=14)
     ).strftime("%Y-%m-%d %H:%M:%S")
     raw_daily = (
-        db.session.query(UsageLog.ts, func.count(UsageLog.id))
+        db.session.query(func.date(UsageLog.ts).label("day"), func.count(UsageLog.id))
         .filter(UsageLog.ts >= fourteen_days_ago)
         .group_by(func.date(UsageLog.ts))
         .all()
     )
     daily_series = sorted(
-        (ts.strftime("%Y-%m-%d"), count) for ts, count in raw_daily if ts
+        (str(day), count) for day, count in raw_daily if day
     )
 
     return render_template(
