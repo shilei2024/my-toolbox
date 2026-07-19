@@ -16,6 +16,24 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _auto_db_url() -> str:
+    """Auto-detect external database (Vercel Postgres) or default to SQLite.
+
+    Priority:
+      1. DATABASE_URL   — explicit override by the user
+      2. POSTGRES_URL_NON_POOLING  — Vercel Postgres (recommended for SQLAlchemy)
+      3. POSTGRES_URL   — Vercel Postgres fallback (includes pgbouncer)
+      4. sqlite:///app.db  — local default
+    """
+    explicit = os.environ.get("DATABASE_URL")
+    if explicit:
+        return explicit
+    vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
+    if vercel:
+        return vercel
+    return "sqlite:///app.db"
+
+
 def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
@@ -33,11 +51,9 @@ class Config:
     PERMANENT_SESSION_LIFETIME = timedelta(days=14)
 
     # --- Database ---
-    # Default is relative to Flask's instance/ directory. The app factory
-    # resolves it to an absolute path so cwd doesn't matter.
-    SQLALCHEMY_DATABASE_URI: str = os.environ.get(
-        "DATABASE_URL", "sqlite:///app.db"
-    )
+    # Detects Vercel Postgres (POSTGRES_URL_*) automatically.
+    # Default is relative to Flask's instance/ directory.
+    SQLALCHEMY_DATABASE_URI: str = _auto_db_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
 

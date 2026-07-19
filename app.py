@@ -83,8 +83,14 @@ def create_app() -> Flask:
         _tmp = Path(tempfile.gettempdir()) / "mytoolbox"
         app.config["UPLOAD_DIR"] = _tmp / "uploads"
         app.config["INSTANCE_DIR"] = _tmp / "instance"
-        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         _is_readonly_fs = True
+        # Only switch to in-memory SQLite if no real DB (Vercel Postgres) is configured.
+        _db_uri = app.config["SQLALCHEMY_DATABASE_URI"]
+        if "postgresql" not in _db_uri and "mysql" not in _db_uri:
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+            _log("  Vercel: using in-memory SQLite (no external DB)")
+        else:
+            _log(f"  Vercel: using external DB (postgresql)")
         # These MUST succeed — /tmp is always writable
         Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
         Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
