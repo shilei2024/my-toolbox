@@ -66,7 +66,7 @@ def dashboard():
     raw_daily = (
         db.session.query(UsageLog.ts, func.count(UsageLog.id))
         .filter(UsageLog.ts >= fourteen_days_ago)
-        .group_by(func.strftime("%Y-%m-%d", UsageLog.ts))
+        .group_by(func.date(UsageLog.ts))
         .all()
     )
     daily_series = sorted(
