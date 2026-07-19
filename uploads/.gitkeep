@@ -1,0 +1,3 @@
+# This file keeps the empty uploads/ directory in git.
+# User-uploaded files (PDFs, images, generated outputs) land here at runtime
+# and are ignored by .gitignore.

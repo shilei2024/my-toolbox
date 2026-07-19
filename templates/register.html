@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}注册 — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="h4 mb-3"><i class="bi bi-person-plus"></i> 创建账号</h2>
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          <div class="mb-3">
+            <label class="form-label">{{ form.email.label.text }}</label>
+            {{ form.email(class="form-control form-control-lg", autocomplete="email", autofocus=True) }}
+            {% for err in form.email.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label">{{ form.password.label.text }}</label>
+            {{ form.password(class="form-control form-control-lg", autocomplete="new-password") }}
+            <div class="form-text">至少 8 位，需同时包含字母和数字。</div>
+            {% for err in form.password.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label">{{ form.confirm.label.text }}</label>
+            {{ form.confirm(class="form-control form-control-lg", autocomplete="new-password") }}
+            {% for err in form.confirm.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
+          </div>
+          <button class="btn btn-primary w-100 btn-lg" type="submit">注册并登录</button>
+        </form>
+        <hr/>
+        <p class="text-center text-muted mb-0">
+          已有账号？ <a href="{{ url_for('auth.login') }}">直接登录</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

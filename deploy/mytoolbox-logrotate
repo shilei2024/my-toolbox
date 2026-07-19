@@ -1,0 +1,20 @@
+# /etc/logrotate.d/mytoolbox
+# Daily rotation, keep 14 days, gzip
+
+/opt/mytoolbox/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    create 0640 www-data www-data
+    sharedscripts
+    postrotate
+        # gunicorn is launched with --access-logfile/- --error-logfile -
+        # which means it logs to journald, not files. This entry is mainly
+        # for any file logging you enable later (e.g. via Flask's app.logger
+        # if you switch DEBUG on and write to file). Adjust path as needed.
+    endscript
+}

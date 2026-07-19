@@ -1,0 +1,99 @@
+# Tool registry — single source of truth for which tools are mounted.
+# Set `enabled: false` in DB at runtime to soft-disable a tool without restart.
+# Adding a new tool = drop a package under tools/<id>/ + add an entry here.
+#
+# `category` groups tools on the homepage. Use one of the known keys to land
+# in an existing section, or invent a new key to create a new section.
+# Known categories (see CATEGORY_META in app.py / index.html):
+#   pdf       — PDF 文件操作
+#   image     — 图片功能
+#   business  — 业务工具
+#   other     — 其他工具 (fallback)
+tools:
+  - id: pdf_merge
+    name: PDF 合并
+    description: 把多个 PDF 按你拖拽的顺序合并成一个文件。
+    icon: bi-files
+    color: "#0d6efd"
+    route: /tools/pdf-merge
+    blueprint_module: tools.pdf_merge
+    category: pdf
+    enabled: true
+    order: 10
+
+  - id: pdf_split
+    name: PDF 拆分
+    description: 按页码范围提取页面，支持 `1-3,5,7-9` 或多段拆成多个文件。
+    icon: bi-scissors
+    color: "#198754"
+    route: /tools/pdf-split
+    blueprint_module: tools.pdf_split
+    category: pdf
+    enabled: true
+    order: 20
+
+  - id: pdf_watermark
+    name: PDF 加水印
+    description: 给 PDF 每页盖半透明斜向文字水印，可调字号/颜色/透明度/旋转。
+    icon: bi-stamp
+    color: "#6610f2"
+    route: /tools/pdf-watermark
+    blueprint_module: tools.pdf_watermark
+    category: pdf
+    enabled: true
+    order: 30
+
+  - id: pdf_rotate
+    name: PDF 旋转
+    description: 把 PDF 页面顺时针旋转 90°/180°/270°，可选全部或指定页码。
+    icon: bi-arrow-clockwise
+    color: "#20c997"
+    route: /tools/pdf-rotate
+    blueprint_module: tools.pdf_rotate
+    category: pdf
+    enabled: true
+    order: 35
+
+  - id: pdf_to_word
+    name: PDF 转 Word
+    description: 把 PDF 转成可编辑的 .docx，尽量保留文字/表格/图片布局。
+    icon: bi-file-earmark-word
+    color: "#0d6efd"
+    route: /tools/pdf-to-word
+    blueprint_module: tools.pdf_to_word
+    category: pdf
+    enabled: true
+    order: 38
+
+  - id: ai_image
+    name: AI 作图
+    description: 输入一句话，AI 生成方形/横版/竖版图片。
+    icon: bi-brush
+    color: "#d63384"
+    route: /tools/ai-image
+    blueprint_module: tools.ai_image
+    category: image
+    enabled: true
+    order: 40
+
+  - id: image_compress
+    name: 图片压缩
+    description: 本地压缩 PNG/JPG/WebP，保留透明通道，可调质量。
+    icon: bi-image
+    color: "#fd7e14"
+    route: /tools/image-compress
+    blueprint_module: tools.image_compress
+    category: image
+    enabled: true
+    order: 50
+
+  - id: fcst_merge
+    name: FCST 预测合并
+    description: 上传 FCST 预测文件，按品号汇总每月预测，匹配料号映射表输出原厂料号/品牌。
+    icon: bi-table
+    color: "#0dcaf0"
+    route: /tools/fcst-merge
+    blueprint_module: tools.fcst_merge
+    category: business
+    enabled: true
+    order: 60

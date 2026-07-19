@@ -1,0 +1,52 @@
+<p class="text-muted">
+  把 PDF 转成可编辑的 Word (.docx) 文档。转换会尽量保留文字、表格和图片布局。
+  含扫描图片的 PDF（无文字层）转换效果较差，建议先 OCR。
+</p>
+
+<form id="toWordForm" action="{{ url_for('pdf_to_word.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="other">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择 PDF</label>
+    <input type="file" name="pdf" accept="application/pdf,.pdf" class="form-control" required />
+  </div>
+
+  <div class="alert alert-info py-2 small mb-3">
+    <i class="bi bi-info-circle"></i>
+    转换大文件可能需要 30 秒到几分钟，请耐心等待，不要关闭页面。
+  </div>
+
+  <button id="submitBtn" type="submit" class="btn btn-primary btn-lg">
+    <i class="bi bi-file-earmark-word"></i> 转为 Word
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 转换中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 转换完成
+    </h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 100%;"></code>
+        <div class="text-muted small mt-1">大小：<span id="resultSize">—</span></div>
+      </div>
+      <div class="d-flex flex-column gap-2">
+        <a id="downloadLink" class="btn btn-primary btn-sm" download>
+          <i class="bi bi-download"></i> 下载
+        </a>
+        <button id="resetBtn" type="button" class="btn btn-link btn-sm text-muted p-0">
+          <i class="bi bi-arrow-counterclockwise"></i> 再转换一个
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

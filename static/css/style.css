@@ -1,0 +1,59 @@
+:root {
+  --brand-color: #0d6efd;
+  --surface: #ffffff;
+  --bg: #f6f9fc;
+}
+
+body {
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Roboto, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1;
+}
+
+.hero {
+  background: linear-gradient(180deg, #ffffff 0%, transparent 100%);
+  border-radius: 1rem;
+}
+
+.tool-card {
+  transition: transform .15s ease, box-shadow .15s ease;
+  background: var(--surface);
+}
+.tool-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 .5rem 1.25rem rgba(13, 110, 253, .12) !important;
+}
+.tool-card-link { color: inherit; }
+.tool-card-link:hover { color: inherit; }
+
+.tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: .6rem;
+  font-size: 1.1rem;
+}
+
+.dropzone {
+  background: #fafbff;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.file-item .grip {
+  cursor: grab;
+  color: #adb5bd;
+}
+
+/* tool page right column spacing on small screens */
+@media (max-width: 991.98px) {
+  main .col-lg-4 { margin-top: 1rem; }
+}

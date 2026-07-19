@@ -1,0 +1,82 @@
+{% extends "admin/_base.html" %}
+{% block admin_content %}
+<h1 class="h3 mb-3"><i class="bi bi-speedometer2"></i> 仪表盘</h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">注册用户</div>
+        <div class="display-5 fw-bold">{{ total_users }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">今日活跃用户</div>
+        <div class="display-5 fw-bold">{{ today_active_users }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">今日调用</div>
+        <div class="display-5 fw-bold">{{ today_by_tool.values()|sum }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body">
+    <h5>近 7 天各工具调用</h5>
+    <canvas id="toolChart" height="120"></canvas>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <h5>近 14 天调用总量</h5>
+    <canvas id="dailyChart" height="120"></canvas>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const toolData = {
+    labels: {{ tool_stats.keys()|list|tojson }},
+    datasets: [
+      {
+        label: '成功',
+        data: {{ tool_stats.values()|map(attribute='success')|list|tojson }},
+        backgroundColor: '#0d6efd'
+      },
+      {
+        label: '失败',
+        data: {{ tool_stats.values()|map(attribute='failed')|list|tojson }},
+        backgroundColor: '#dc3545'
+      }
+    ]
+  };
+  new Chart(document.getElementById('toolChart'), {
+    type: 'bar',
+    data: toolData,
+    options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+  });
+
+  const dailyData = {
+    labels: {{ daily_series|map(attribute=0)|list|tojson }},
+    datasets: [{
+      label: '调用次数',
+      data: {{ daily_series|map(attribute=1)|list|tojson }},
+      borderColor: '#198754',
+      backgroundColor: '#19875433',
+      fill: true,
+      tension: .3
+    }]
+  };
+  new Chart(document.getElementById('dailyChart'), { type: 'line', data: dailyData, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+</script>
+{% endblock %}

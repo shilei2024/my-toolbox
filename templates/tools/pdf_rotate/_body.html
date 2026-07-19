@@ -1,0 +1,123 @@
+<p class="text-muted">
+  把 PDF 的页面顺时针旋转 90° / 180° / 270°。可选旋转全部页面或指定页码范围。
+</p>
+
+<form id="rotateForm" action="{{ url_for('pdf_rotate.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="pdf">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择 PDF</label>
+    <input type="file" name="pdf" accept="application/pdf,.pdf" class="form-control" required />
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">旋转角度</label>
+    <div class="d-flex gap-3 flex-wrap">
+      <div class="form-check">
+        <input type="radio" name="angle" id="angle90" value="90" class="form-check-input" checked />
+        <label class="form-check-label" for="angle90">
+          <i class="bi bi-arrow-90deg-cw"></i> 顺时针 90°
+        </label>
+      </div>
+      <div class="form-check">
+        <input type="radio" name="angle" id="angle180" value="180" class="form-check-input" />
+        <label class="form-check-label" for="angle180">
+          <i class="bi bi-arrow-repeat"></i> 180°
+        </label>
+      </div>
+      <div class="form-check">
+        <input type="radio" name="angle" id="angle270" value="270" class="form-check-input" />
+        <label class="form-check-label" for="angle270">
+          <i class="bi bi-arrow-90deg-ccw"></i> 270°
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">旋转范围</label>
+    <div class="d-flex gap-3 flex-wrap mb-2">
+      <div class="form-check">
+        <input type="radio" name="scope" id="scopeAll" value="all" class="form-check-input" checked />
+        <label class="form-check-label" for="scopeAll">全部页面</label>
+      </div>
+      <div class="form-check">
+        <input type="radio" name="scope" id="scopeCustom" value="custom" class="form-check-input" />
+        <label class="form-check-label" for="scopeCustom">指定页码</label>
+      </div>
+    </div>
+    <input type="text" name="ranges" id="ranges" class="form-control" placeholder="例如 1-3,5,7-9" disabled />
+    <div id="rangesHelp" class="form-text text-muted">
+      支持单页 <code>5</code>、区间 <code>1-3</code>、组合 <code>1-3,5,7-9</code>。
+    </div>
+  </div>
+
+  <button id="submitBtn" type="submit" class="btn btn-success btn-lg">
+    <i class="bi bi-arrow-clockwise"></i> 旋转 PDF
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 处理中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 旋转完成
+    </h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 100%;"></code>
+        <div class="text-muted small mt-1">大小：<span id="resultSize">—</span></div>
+      </div>
+      <div class="d-flex flex-column gap-2">
+        <a id="downloadLink" class="btn btn-success btn-sm" download>
+          <i class="bi bi-download"></i> 下载
+        </a>
+        <a id="openLink" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-up-right"></i> 在新标签打开
+        </a>
+        <button id="resetBtn" type="button" class="btn btn-link btn-sm text-muted p-0">
+          <i class="bi bi-arrow-counterclockwise"></i> 再旋转一次
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Toggle ranges input enabled state + validate pattern (shared with tools.js).
+(function () {
+  const scopeAll = document.getElementById("scopeAll");
+  const scopeCustom = document.getElementById("scopeCustom");
+  const ranges = document.getElementById("ranges");
+  const submit = document.getElementById("submitBtn");
+  if (!ranges || !submit) return;
+
+  function syncEnabled() {
+    const isCustom = scopeCustom.checked;
+    ranges.disabled = !isCustom;
+    if (!isCustom) {
+      ranges.value = "";
+      submit.disabled = false;
+    } else {
+      check();
+    }
+  }
+  const re = /^\s*\d+(\s*-\s*\d+)?(\s*,\s*\d+(\s*-\s*\d+)?)*\s*$/;
+  function check() {
+    if (!scopeCustom.checked) { submit.disabled = false; return; }
+    const ok = re.test(ranges.value || "");
+    submit.disabled = !ok;
+    document.getElementById("rangesHelp").classList.toggle("text-danger", !ok);
+  }
+  [scopeAll, scopeCustom].forEach((r) => r.addEventListener("change", syncEnabled));
+  ranges.addEventListener("input", check);
+  syncEnabled();
+})();
+</script>

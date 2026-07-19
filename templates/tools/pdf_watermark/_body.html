@@ -1,0 +1,98 @@
+<p class="text-muted">
+  给 PDF 的每一页盖上半透明文字水印。文字、字号、颜色、透明度、旋转角度都可以调。
+  处理完成后页面会显示文件名，可以下载或预览。
+</p>
+
+<form id="watermarkForm" action="{{ url_for('pdf_watermark.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="pdf">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <input type="hidden" name="opacity" id="opacityInput" value="76"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择 PDF</label>
+    <input type="file" name="pdf" accept="application/pdf,.pdf" class="form-control" required />
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">水印文字</label>
+    <input type="text" name="text" class="form-control" maxlength="100" required
+           placeholder="例如：机密 / DRAFT / © 公司名称" />
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-3">
+      <label class="form-label">字号</label>
+      <input type="number" name="font_size" min="12" max="200" value="60" class="form-control" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">颜色</label>
+      <input type="color" name="color" value="#888888" class="form-control form-control-color" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">旋转角度</label>
+      <input type="number" name="rotation" min="-180" max="180" value="45" step="5" class="form-control" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">水印浓度 <span class="text-muted small" id="opacityLabel">30%</span></label>
+      <input type="range" id="opacityRange" min="5" max="100" value="30" step="5" class="form-range" />
+    </div>
+  </div>
+
+  <div class="form-text text-muted mb-2">
+    水印浓度 0-100%：30% 是隐约可见的半透明水印；70%+ 比较醒目。原文档内容不会被遮挡。
+  </div>
+
+  <button id="submitBtn" type="submit" class="btn btn-primary btn-lg mt-1" style="background:#6610f2;border-color:#6610f2;">
+    <i class="bi bi-stamp"></i> 加水印
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 处理中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 加水印完成
+    </h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 100%;"></code>
+        <div class="text-muted small mt-1">大小：<span id="resultSize">—</span></div>
+      </div>
+      <div class="d-flex flex-column gap-2">
+        <a id="downloadLink" class="btn btn-primary btn-sm" style="background:#6610f2;border-color:#6610f2;" download>
+          <i class="bi bi-download"></i> 下载
+        </a>
+        <a id="openLink" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-up-right"></i> 在新标签打开
+        </a>
+        <button id="resetBtn" type="button" class="btn btn-link btn-sm text-muted p-0">
+          <i class="bi bi-arrow-counterclockwise"></i> 再处理一次
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Sync the opacity range slider → hidden input (0-100% → 0-255 for server).
+(function () {
+  var range = document.getElementById("opacityRange");
+  var label = document.getElementById("opacityLabel");
+  var hidden = document.getElementById("opacityInput");
+  if (!range || !hidden) return;
+  function sync() {
+    var pct = parseInt(range.value, 10) || 0;
+    if (label) label.textContent = pct + "%";
+    // Map 0-100% → 0-255; 30% → ~76, a typical subtle watermark.
+    hidden.value = Math.round(pct / 100 * 255);
+  }
+  range.addEventListener("input", sync);
+  sync();
+})();
+</script>

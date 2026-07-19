@@ -1,0 +1,65 @@
+{#
+  Generic tool page shell. Each tool extends this and provides body_template
+  (a small inline template) and `tool` metadata.
+#}
+{% extends "base.html" %}
+{% block title %}{{ tool.name }} — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="/" class="btn btn-link p-0 text-muted text-decoration-none">
+    <i class="bi bi-arrow-left"></i> 返回
+  </a>
+  <span class="text-muted">/</span>
+  <span class="text-muted">{{ tool.name }}</span>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h3 d-flex align-items-center gap-2">
+          <span class="tool-icon" style="background: {{ tool.color }}1a; color: {{ tool.color }};">
+            <i class="bi {{ tool.icon }}"></i>
+          </span>
+          {{ tool.name }}
+        </h1>
+        {% include body_template ignore missing %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h6 class="text-muted text-uppercase small">本次可用次数</h6>
+        <div class="display-6 fw-bold">
+          {% if current_user.is_authenticated and is_admin %}
+            ∞
+          {% else %}
+            {{ remaining }}
+          {% endif %}
+        </div>
+        <p class="small text-muted mb-0">
+          {% if current_user.is_authenticated %}
+            每个工具每天 10 次免费使用，失败不扣次数。
+          {% else %}
+            每个工具共 3 次免费试用，用完请<a href="{{ url_for('auth.register') }}">注册</a>。
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h6 class="text-muted text-uppercase small">使用提示</h6>
+        <ul class="small text-muted ps-3 mb-0">
+          <li>文件处理完会立即从服务器删除。</li>
+          <li>单文件最大 {{ config.MAX_UPLOAD_MB }} MB。</li>
+          <li>遇到问题请刷新页面或换个浏览器试试。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts_extra %}
+{% for js in (tool_js_list or []) %}<script src="{{ url_for('static', filename=js) }}"></script>{% endfor %}
+{% endblock %}

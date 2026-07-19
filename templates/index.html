@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ site_name }} — 首页{% endblock %}
+{% block content %}
+<section class="text-center py-4 mb-4 hero">
+  <h1 class="display-5 fw-bold mb-2">{{ site_name }}</h1>
+  <p class="lead text-muted mx-auto" style="max-width: 640px;">{{ site_tagline }}</p>
+  {% if not current_user.is_authenticated %}
+    <div class="mt-3 d-flex gap-2 justify-content-center flex-wrap">
+      <a class="btn btn-primary" href="{{ url_for('auth.register') }}">
+        <i class="bi bi-person-plus"></i> 免费注册
+      </a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('auth.login') }}">
+        已有账号？登录
+      </a>
+    </div>
+  {% else %}
+    <p class="text-muted mt-2">
+      欢迎回来，<strong>{{ current_user.email }}</strong>。
+      {% if is_admin %}（管理员）{% endif %}
+    </p>
+  {% endif %}
+</section>
+
+{# Quick-jump category chips (sticky so they're always reachable) #}
+<nav class="category-chips mb-4 d-flex flex-wrap gap-2 sticky-top bg-white py-2" style="z-index: 1020;">
+  {% for cat in categories %}
+    {% set meta = category_meta.get(cat, {"title": cat, "icon": "bi-grid", "color": "#6c757d"}) %}
+    <a href="#cat-{{ cat }}" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 rounded-pill">
+      <i class="bi {{ meta.icon }}" style="color: {{ meta.color }};"></i>
+      <span>{{ meta.title }}</span>
+      <span class="badge bg-light text-dark rounded-pill ms-1">{{ groups[cat] | length }}</span>
+    </a>
+  {% endfor %}
+</nav>
+
+{% for cat in categories %}
+  {% set meta = category_meta.get(cat, {"title": cat, "icon": "bi-grid", "color": "#6c757d", "description": ""}) %}
+  <section id="cat-{{ cat }}" class="mb-5 tool-section">
+    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom category-header">
+      <span class="category-badge d-inline-flex align-items-center justify-content-center"
+            style="background: {{ meta.color }}1a; color: {{ meta.color }};">
+        <i class="bi {{ meta.icon }}"></i>
+      </span>
+      <h2 class="h4 mb-0">{{ meta.title }}</h2>
+      <span class="text-muted small">{{ groups[cat] | length }} 个工具</span>
+    </div>
+
+    <div class="row g-3">
+      {% for tool in groups[cat] %}
+        <div class="col-12 col-sm-6 col-lg-3">
+          <a class="text-decoration-none tool-card-link" href="{{ tool.route }}">
+            <div class="card tool-card h-100 shadow-sm border-0">
+              <div class="card-body d-flex flex-column">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <span class="tool-icon" style="background: {{ tool.color }}1a; color: {{ tool.color }};">
+                    <i class="bi {{ tool.icon }}"></i>
+                  </span>
+                  <h5 class="card-title mb-0">{{ tool.name }}</h5>
+                </div>
+                <p class="card-text text-muted small flex-grow-1">{{ tool.description }}</p>
+                <div class="d-flex justify-content-between align-items-center small text-muted">
+                  <span>
+                    {% if current_user.is_authenticated and is_admin %}
+                      今日剩余 <strong class="text-dark">∞</strong> 次
+                    {% elif current_user.is_authenticated %}
+                      今日剩余 <strong class="text-dark">{{ remaining_for(tool.id) }}</strong> 次
+                    {% else %}
+                      试用 <strong class="text-dark">3</strong> 次
+                    {% endif %}
+                  </span>
+                  <span class="text-primary">打开 <i class="bi bi-arrow-right-short"></i></span>
+                </div>
+              </div>
+            </div>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+{% else %}
+  <div class="alert alert-info">暂无可用工具。</div>
+{% endfor %}
+
+<style>
+  .category-chips { box-shadow: 0 4px 8px -8px rgba(0,0,0,0.1); }
+  .category-chips .btn { white-space: nowrap; }
+  .category-badge {
+    width: 40px; height: 40px; border-radius: 10px; font-size: 1.25rem;
+  }
+  .category-header h2 { letter-spacing: -0.02em; }
+  .tool-card-link:hover .tool-card { transform: translateY(-2px); }
+  .tool-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .tool-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+  }
+  /* smooth-scroll anchor offset for sticky navbar */
+  section[id^="cat-"] { scroll-margin-top: 80px; }
+</style>
+{% endblock %}

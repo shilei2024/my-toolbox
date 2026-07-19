@@ -1,0 +1,119 @@
+{% extends "admin/_base.html" %}
+{% block admin_content %}
+<h1 class="h3 mb-3"><i class="bi bi-gear"></i> 系统设置</h1>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="mb-3"><i class="bi bi-sliders"></i> 站点与限额</h5>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+          <div class="mb-3">
+            <label class="form-label">网站名称</label>
+            <input type="text" name="site_name" class="form-control"
+                   value="{{ stored.site_name or config.SITE_NAME }}"/>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">首页标语</label>
+            <textarea name="site_tagline" class="form-control" rows="2">{{ stored.site_tagline or config.SITE_TAGLINE }}</textarea>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">注册用户每日免费次数</label>
+              <input type="number" name="daily_free_limit" class="form-control" min="0" max="1000"
+                     value="{{ stored.daily_free_limit or config.DAILY_FREE_LIMIT }}"/>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">匿名用户每工具总次数</label>
+              <input type="number" name="anon_free_limit" class="form-control" min="0" max="100"
+                     value="{{ stored.anon_free_limit or config.ANON_FREE_LIMIT }}"/>
+            </div>
+          </div>
+
+          <hr class="my-4"/>
+          <h5 class="mb-3"><i class="bi bi-brush"></i> AI 作图配置</h5>
+
+          <div class="mb-3">
+            <label class="form-label">Provider (生图引擎)</label>
+            <select name="AI_PROVIDER" class="form-select">
+              {% set cur = stored.AI_PROVIDER_EFFECTIVE %}
+              <option value="pollinations" {{ 'selected' if cur == 'pollinations' }}>
+                pollinations — 免费、无需 API Key（默认）
+              </option>
+              <option value="openai" {{ 'selected' if cur == 'openai' }}>
+                openai — OpenAI / 兼容接口（gpt-image-1、dall-e-3）
+              </option>
+              <option value="siliconflow" {{ 'selected' if cur == 'siliconflow' }}>
+                siliconflow — SiliconFlow（OpenAI 兼容）
+              </option>
+              <option value="mock" {{ 'selected' if cur == 'mock' }}>
+                mock — 占位图（仅测试用）
+              </option>
+            </select>
+            <div class="form-text text-muted">
+              改完保存即生效，无需重启服务。留空的字段会回退到 .env 默认值。
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">API Key</label>
+            <input type="password" name="AI_API_KEY" class="form-control"
+                   placeholder="{{ stored.AI_API_KEY_MASKED or '未设置（pollinations 不需要）' }}"
+                   autocomplete="new-password"/>
+            <div class="form-text text-muted">
+              当前：{{ stored.AI_API_KEY_MASKED or '未设置' }}。留空保持不变；pollinations 无需填写。
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Base URL</label>
+            <input type="text" name="AI_BASE_URL" class="form-control"
+                   value="{{ stored.AI_BASE_URL_EFFECTIVE }}"
+                   placeholder="https://image.pollinations.ai"/>
+            <div class="form-text text-muted">
+              pollinations → https://image.pollinations.ai；OpenAI → https://api.openai.com/v1
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Model</label>
+            <input type="text" name="AI_MODEL" class="form-control"
+                   value="{{ stored.AI_MODEL_EFFECTIVE }}"
+                   placeholder="pollinations 留空即可；OpenAI 用 gpt-image-1 / dall-e-3"/>
+          </div>
+
+          <button class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存设置</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h6 class="text-muted text-uppercase small">当前生效配置</h6>
+        <table class="table table-sm mb-0">
+          <tr><td>Provider</td><td><code>{{ stored.AI_PROVIDER_EFFECTIVE }}</code></td></tr>
+          <tr><td>Base URL</td><td><code class="text-truncate d-inline-block" style="max-width:200px;">{{ stored.AI_BASE_URL_EFFECTIVE }}</code></td></tr>
+          <tr><td>Model</td><td><code>{{ stored.AI_MODEL_EFFECTIVE or '(默认)' }}</code></td></tr>
+          <tr><td>API Key</td><td><code>{{ stored.AI_API_KEY_MASKED or '未设置' }}</code></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h6 class="text-muted text-uppercase small">Provider 说明</h6>
+        <ul class="small text-muted mb-0">
+          <li><strong>pollinations</strong>：免费、无需 Key，适合开箱即用测试。</li>
+          <li><strong>openai</strong>：官方或兼容接口，效果最好但需付费 Key。</li>
+          <li><strong>siliconflow</strong>：国内可用的 OpenAI 兼容接口。</li>
+          <li><strong>mock</strong>：本地生成占位图，离线可用。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

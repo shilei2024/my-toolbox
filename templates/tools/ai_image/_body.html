@@ -1,0 +1,153 @@
+<p class="text-muted">输入提示词，AI 帮你生成图片。生成过程中请勿关闭页面。</p>
+
+<form id="aiForm" action="{{ url_for('ai_image.generate') }}" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <input type="hidden" name="size" id="sizeInput" value="1024x1024"/>
+
+  <div class="mb-3">
+    <label class="form-label">提示词</label>
+    <textarea name="prompt" id="prompt" class="form-control" rows="4" maxlength="2000" required
+              placeholder="例如：一只橘猫坐在窗台上，背景是清晨的城市天际线，电影感，柔光"></textarea>
+  </div>
+
+  <div class="row g-3 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label">画面比例</label>
+      <select id="ratioSelect" class="form-select">
+        <option value="1:1" data-w="1" data-h="1" selected>1 : 1（方形）</option>
+        <option value="16:9" data-w="16" data-h="9">16 : 9（宽屏）</option>
+        <option value="9:16" data-w="9" data-h="16">9 : 16（竖屏）</option>
+        <option value="4:3" data-w="4" data-h="3">4 : 3（标准）</option>
+        <option value="3:4" data-w="3" data-h="4">3 : 4（竖向）</option>
+        <option value="3:2" data-w="3" data-h="2">3 : 2（横向）</option>
+        <option value="2:3" data-w="2" data-h="3">2 : 3（竖向）</option>
+        <option value="21:9" data-w="21" data-h="9">21 : 9（超宽）</option>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">分辨率</label>
+      <select id="resSelect" class="form-select">
+        <option value="480"  data-base="640">480P</option>
+        <option value="720"  data-base="960" selected>720P</option>
+        <option value="1080" data-base="1280">1080P</option>
+        <option value="1440" data-base="1920">2K</option>
+        <option value="2160" data-base="2560">4K</option>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">实际像素</label>
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-aspect-ratio"></i></span>
+        <input type="text" id="sizePreview" class="form-control" readonly value="1024 × 1024"/>
+      </div>
+      <div class="form-text text-muted" id="sizeHint">短边对齐到所选分辨率的基准。</div>
+    </div>
+  </div>
+
+  <!-- Visual ratio preview -->
+  <div class="mb-3 mt-2 d-flex align-items-center gap-2">
+    <span class="text-muted small">预览：</span>
+    <div id="ratioPreview" class="border border-secondary rounded bg-light d-inline-block"
+         style="width: 48px; height: 48px;"></div>
+    <span class="text-muted small" id="ratioLabel">1 : 1</span>
+  </div>
+
+  <button id="submitBtn" type="submit" class="btn btn-danger btn-lg mt-2">
+    <i class="bi bi-brush"></i> 生成图片
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 生成中…（可能需要 10-30 秒）
+  </span>
+</form>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 生成完成
+    </h5>
+    <div class="d-flex align-items-start gap-3 flex-wrap">
+      <a id="resultLink" href="#" target="_blank" rel="noopener" class="d-inline-block flex-shrink-0">
+        <img id="resultImg" class="img-fluid rounded border" style="max-width: 320px; max-height: 320px; object-fit: contain;" alt="生成结果"/>
+      </a>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <div class="d-flex align-items-center gap-2">
+          <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 240px;"></code>
+          <button id="copyFilenameBtn" type="button" class="btn btn-sm btn-link text-muted p-0" title="复制文件名">
+            <i class="bi bi-clipboard"></i>
+          </button>
+        </div>
+        <div class="text-muted small mt-1">大小：<span id="resultSize">—</span></div>
+        <div class="text-muted small mt-1">尺寸：<span id="resultDimensions">—</span></div>
+        <div class="text-muted small mt-1">耗时：<span id="resultDuration">—</span></div>
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+          <a id="downloadLink" class="btn btn-primary btn-sm" download>
+            <i class="bi bi-download"></i> 下载图片
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<script>
+// Combine ratio × resolution → actual WxH and write to the hidden `size`
+// field the server reads. The shorter side of the ratio is aligned to the
+// resolution's base pixel value; the longer side is scaled to keep the
+// exact ratio (so 16:9 @ 720P → 1280×720, 9:16 @ 720P → 720×1280).
+(function () {
+  const ratioSel = document.getElementById("ratioSelect");
+  const resSel   = document.getElementById("resSelect");
+  const sizeInp  = document.getElementById("sizeInput");
+  const preview  = document.getElementById("sizePreview");
+  const hint     = document.getElementById("sizeHint");
+  const ratioBox = document.getElementById("ratioPreview");
+  const ratioLbl = document.getElementById("ratioLabel");
+
+  function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
+  function recompute() {
+    const rOpt = ratioSel.options[ratioSel.selectedIndex];
+    const rW = Number(rOpt.dataset.w);
+    const rH = Number(rOpt.dataset.h);
+    const base = Number(resSel.options[resSel.selectedIndex].dataset.base);
+
+    // Determine which side is the short one.
+    const shortRatio = Math.min(rW, rH);
+    const longRatio  = Math.max(rW, rH);
+    // short side = base, long side = round(base * longRatio / shortRatio)
+    const shortPx = base;
+    const longPx  = Math.round(base * longRatio / shortRatio);
+
+    let width, height;
+    if (rW >= rH) {
+      width = longPx; height = shortPx;
+    } else {
+      width = shortPx; height = longPx;
+    }
+    sizeInp.value = width + "x" + height;
+    preview.value = width + " × " + height;
+    hint.textContent = `短边 ${shortPx}px → ${width}×${height}`;
+
+    // Update the visual ratio preview box (max 48px).
+    const boxMax = 48;
+    let bw, bh;
+    if (rW >= rH) {
+      bw = boxMax;
+      bh = Math.max(8, Math.round(boxMax * rH / rW));
+    } else {
+      bh = boxMax;
+      bw = Math.max(8, Math.round(boxMax * rW / rH));
+    }
+    ratioBox.style.width  = bw + "px";
+    ratioBox.style.height = bh + "px";
+    ratioLbl.textContent  = ratioSel.value;
+  }
+
+  ratioSel.addEventListener("change", recompute);
+  resSel.addEventListener("change", recompute);
+  recompute();
+})();
+</script>

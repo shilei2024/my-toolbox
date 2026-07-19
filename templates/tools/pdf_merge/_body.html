@@ -1,0 +1,61 @@
+<p class="text-muted">上传 2 个或更多 PDF，按你想要的顺序拖拽排列，然后点合并。处理完成后页面会显示文件名，可以预览或下载。</p>
+
+<form id="mergeForm" action="{{ url_for('pdf_merge.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="pdf">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <input type="hidden" name="order" id="orderInput" value=""/>
+
+  <div id="dropzone" class="dropzone mb-3 p-4 text-center border border-2 border-dashed rounded">
+    <i class="bi bi-cloud-arrow-up fs-1 text-muted"></i>
+    <p class="mb-2">把 PDF 拖到这里，或</p>
+    <label class="btn btn-outline-primary mb-0">
+      选择文件
+      <input type="file" name="pdfs" id="pdfs" accept="application/pdf,.pdf" multiple hidden />
+    </label>
+    <p class="small text-muted mt-2 mb-0">单文件 ≤ {{ config.MAX_UPLOAD_MB }} MB</p>
+  </div>
+
+  <ul id="fileList" class="list-group mb-3"></ul>
+
+  <button id="submitBtn" type="submit" class="btn btn-primary btn-lg" disabled>
+    <i class="bi bi-files"></i> 合并 PDF
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 合并中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 合并完成
+    </h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 100%;"></code>
+        <div class="text-muted small mt-1">大小：<span id="resultSize">—</span></div>
+      </div>
+      <div class="d-flex flex-column gap-2">
+        <a id="downloadLink" class="btn btn-primary btn-sm" download>
+          <i class="bi bi-download"></i> 下载
+        </a>
+        <a id="openLink" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-up-right"></i> 在新标签打开
+        </a>
+        <button id="resetBtn" type="button" class="btn btn-link btn-sm text-muted p-0">
+          <i class="bi bi-arrow-counterclockwise"></i> 再合并一次
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .dropzone.is-drag { background: #eef5ff; border-color: #0d6efd; }
+  .file-item { cursor: grab; }
+  .file-item.dragging { opacity: .5; }
+</style>

@@ -1,0 +1,72 @@
+<p class="text-muted">本地压缩图片，不会上传到第三方。可选质量、最大边长。处理完成后页面会显示图片预览和文件名，可以直接下载。</p>
+
+<form id="compressForm" action="{{ url_for('image_compress.process') }}" method="post"
+      enctype="multipart/form-data" data-async="1" data-preview="image">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+  <div class="mb-3">
+    <label class="form-label">选择图片</label>
+    <input type="file" name="image" accept="image/png,image/jpeg,image/webp,image/gif" class="form-control" required />
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">质量（仅 JPEG / WebP）</label>
+      <input type="number" name="quality" min="1" max="100" value="75" class="form-control" />
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">最大边长（留空=不缩放）</label>
+      <input type="number" name="max_edge" min="64" max="8000" class="form-control" placeholder="例如 1920" />
+    </div>
+  </div>
+
+  <button id="submitBtn" type="submit" class="btn btn-warning btn-lg mt-3">
+    <i class="bi bi-image"></i> 压缩图片
+  </button>
+  <span id="busy" class="ms-2 text-muted d-none">
+    <span class="spinner-border spinner-border-sm"></span> 压缩中…
+  </span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body">
+    <h5 class="card-title text-success mb-3">
+      <i class="bi bi-check-circle-fill"></i> 压缩完成
+    </h5>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <div id="resultPreview"></div>
+      <div class="flex-grow-1" style="min-width: 200px;">
+        <div class="text-muted small">生成的文件</div>
+        <code id="resultFilename" class="d-block text-truncate user-select-all" style="max-width: 100%;"></code>
+        <div class="mt-2 d-flex gap-3 flex-wrap">
+          <div>
+            <div class="text-muted small">原图</div>
+            <span id="resultOriginalSize" class="text-decoration-line-through text-muted">—</span>
+          </div>
+          <div>
+            <div class="text-muted small">压缩后</div>
+            <span id="resultSize" class="fw-bold">—</span>
+          </div>
+          <div>
+            <div class="text-muted small">节省</div>
+            <span id="resultSaved" class="badge bg-success">—</span>
+          </div>
+        </div>
+        <div class="text-muted small mt-2">尺寸：<span id="resultDimensions">—</span></div>
+      </div>
+      <div class="d-flex flex-column gap-2">
+        <a id="downloadLink" class="btn btn-warning btn-sm" download>
+          <i class="bi bi-download"></i> 下载
+        </a>
+        <a id="openLink" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-up-right"></i> 在新标签打开
+        </a>
+        <button id="resetBtn" type="button" class="btn btn-link btn-sm text-muted p-0">
+          <i class="bi bi-arrow-counterclockwise"></i> 再压缩一张
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
