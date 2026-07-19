@@ -333,16 +333,22 @@ for t in _cfg.get("tools", []):
 
 # 回归检查：凡是用 <form data-async="1"> 的工具页，必须加载 result.js，
 # 否则点击提交按钮会整页 POST 到 /process 显示裸 JSON → 页面丢失。
+# 同时表单必须有 action="...process" 指向处理端点，否则 result.js 的
+# fetch(form.action) 会提交到当前页（GET-only 的 index）→ 404/405。
 try:
     mismatches = []
     for t in _cfg.get("tools", []):
         body = client.get(t["route"] + "/").get_data(as_text=True)
-        if 'data-async="1"' in body and "js/result.js" not in body:
-            mismatches.append(t["id"])
-    record("JS依赖", "data-async 工具页均加载 result.js", not mismatches,
-           "缺失 result.js: " + ", ".join(mismatches) if mismatches else "全部一致")
+        if 'data-async="1"' in body:
+            if "js/result.js" not in body:
+                mismatches.append(f"{t['id']}(缺result.js)")
+            # 渲染后的 action 应指向 /process 或 /generate
+            if f"{t['route']}/process" not in body and f"{t['route']}/generate" not in body:
+                mismatches.append(f"{t['id']}(form缺action)")
+    record("JS依赖", "data-async 工具页加载 result.js 且 form 有 action", not mismatches,
+           "问题: " + ", ".join(mismatches) if mismatches else "全部一致")
 except Exception as exc:  # noqa: BLE001
-    record("JS依赖", "data-async 工具页均加载 result.js", False, str(exc).splitlines()[0])
+    record("JS依赖", "data-async 工具页加载 result.js 且 form 有 action", False, str(exc).splitlines()[0])
 
 
 # ---------------------------------------------------------------------------
