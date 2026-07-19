@@ -230,5 +230,5 @@ def _quota_exceeded(message: str, **log_kwargs: Any):
     flash(message, "warning")
     # Anonymous -> bounce to login; logged-in -> back to tool page
     if current_user.is_authenticated:
-        return redirect(request.referrer or url_for("main.index"))
+        return redirect(request.referrer or url_for("home"))
     return redirect(url_for("auth.login", next=request.path))

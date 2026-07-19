@@ -16,7 +16,7 @@ auth_bp = Blueprint("auth", __name__, template_folder="../templates")
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     if current_user.is_authenticated:
-        return redirect(url_for("main.index"))
+        return redirect(url_for("home"))
 
     form = RegisterForm()
     if form.validate_on_submit():
@@ -42,7 +42,7 @@ def register():
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("main.index"))
+        return redirect(url_for("home"))
 
     form = LoginForm()
     if form.validate_on_submit():
@@ -74,4 +74,4 @@ def login():
 def logout():
     logout_user()
     flash("已退出登录。", "info")
-    return redirect(url_for("main.index"))
+    return redirect(url_for("home"))
