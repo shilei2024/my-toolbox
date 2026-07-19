@@ -6,10 +6,18 @@ Run locally:
 
 Run in production:
     gunicorn -w 2 -b 127.0.0.1:8000 'app:create_app()'
+
+Vercel (auto-detected via VERCEL env var):
+    - Uses /tmp for writable directories (uploads, instance)
+    - Uses in-memory SQLite (ephemeral — data resets per cold start)
+    - Skips APScheduler (background threads not supported in Serverless)
+    - Sets env vars via Vercel Dashboard (not .env file)
 """
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -32,8 +40,9 @@ from config import get_config
 from extensions import csrf, db, limiter, login_manager
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
-from utils.cleanup import schedule_cleanup
 from utils.helpers import get_client_ip, utc_today_str
+
+_ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
 
 
 def create_app() -> Flask:
@@ -43,6 +52,15 @@ def create_app() -> Flask:
     )
     app.config.from_object(get_config())
 
+    # --- Vercel Serverless adaptations ---
+    if _ON_VERCEL:
+        # Redirect writable directories to /tmp (Vercel's ephemeral writable storage)
+        _tmp = Path(tempfile.gettempdir()) / "mytoolbox"
+        app.config["UPLOAD_DIR"] = _tmp / "uploads"
+        app.config["INSTANCE_DIR"] = _tmp / "instance"
+        # Use in-memory SQLite so we don't need filesystem writes
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        # No .env file on Vercel — env vars must come from Dashboard
     # --- ensure folders exist ---
     Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
@@ -57,9 +75,11 @@ def create_app() -> Flask:
     sync_tool_registry(app)
     register_tools(app)
 
-    # background cleanup
-    scheduler = schedule_cleanup(app)
-    scheduler.start()
+    # background cleanup (skipped on Vercel — no persistent background threads)
+    if not _ON_VERCEL:
+        from utils.cleanup import schedule_cleanup
+        scheduler = schedule_cleanup(app)
+        scheduler.start()
 
     @app.get("/healthz")
     def healthz():
@@ -110,8 +130,9 @@ def _setup_logging(app: Flask) -> None:
 
 def _init_extensions(app: Flask) -> None:
     # Resolve SQLite path to the app's instance_path if user didn't override.
+    # Skip for in-memory DB (used on Vercel) and absolute paths.
     uri = app.config["SQLALCHEMY_DATABASE_URI"]
-    if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////"):
+    if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////") and not _ON_VERCEL:
         # relative path -> anchor on instance_path
         rel = uri[len("sqlite:///"):]
         target = Path(app.instance_path) / rel
