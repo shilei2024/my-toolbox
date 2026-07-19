@@ -352,7 +352,6 @@ def process():
         else:
             mfr = ""
             brand = ""
-            unmatched_pn += 0  # noqa
             unmatched_pns += 1 if pn else 0
         row = [pn, mfr, brand] + [fcst_data[pn].get(mo, 0) for mo in months_out]
         detail_rows.append(row)

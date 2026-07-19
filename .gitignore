@@ -116,3 +116,7 @@ Desktop.ini
 # =============================================================================
 *.spec
 site-packages/
+
+# test reports (generated)
+tests/test_report.json
+tests/test_report.html

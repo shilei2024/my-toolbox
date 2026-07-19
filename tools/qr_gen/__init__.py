@@ -39,8 +39,8 @@ def process():
         size = int(request.form.get("size", 10))
         size = max(1, min(40, size))
         border = int(request.form.get("border", 2))
-        fg = request.form.get("fg", "#000000").lstrip("#")
-        bg = request.form.get("bg", "#ffffff").lstrip("#")
+        fg = request.form.get("fg", "#000000")
+        bg = request.form.get("bg", "#ffffff")
 
         qr = qrcode.QRCode(
             version=1,
