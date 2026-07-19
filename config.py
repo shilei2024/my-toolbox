@@ -20,17 +20,17 @@ def _auto_db_url() -> str:
     """Auto-detect external database (Vercel Postgres) or default to SQLite.
 
     Priority:
-      1. DATABASE_URL   — explicit override by the user
-      2. POSTGRES_URL_NON_POOLING  — Vercel Postgres (recommended for SQLAlchemy)
-      3. POSTGRES_URL   — Vercel Postgres fallback (includes pgbouncer)
-      4. sqlite:///app.db  — local default
+      1. POSTGRES_URL_NON_POOLING  — Vercel Postgres direct (best for SQLAlchemy)
+      2. POSTGRES_URL              — Vercel Postgres pooled (fallback)
+      3. DATABASE_URL              — explicit override by user (for non-Vercel envs)
+      4. sqlite:///app.db          — local default
     """
-    explicit = os.environ.get("DATABASE_URL")
-    if explicit:
-        return explicit
     vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
     if vercel:
         return vercel
+    explicit = os.environ.get("DATABASE_URL")
+    if explicit:
+        return explicit
     return "sqlite:///app.db"
 
 
