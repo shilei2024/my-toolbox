@@ -49,6 +49,7 @@ _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
 
 def create_app() -> Flask:
     _log = lambda msg: print(f"[my-toolbox] {msg}", file=sys.stderr, flush=True)
+    _is_readonly_fs = False  # set True if we detect a read-only filesystem
 
     _log(f"Bootstrap start (VERCEL={_ON_VERCEL}, py={sys.version.split()[0]})")
 
@@ -73,24 +74,24 @@ def create_app() -> Flask:
         traceback.print_exc(file=sys.stderr)
         raise
 
-    # --- Vercel Serverless adaptations ---
-    if _ON_VERCEL:
-        _tmp = Path(tempfile.gettempdir()) / "mytoolbox"
-        app.config["UPLOAD_DIR"] = _tmp / "uploads"
-        app.config["INSTANCE_DIR"] = _tmp / "instance"
-        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-        _log(f"  VERCEL: dirs→/tmp, db=:memory:")
-
-    # --- ensure folders exist ---
+    # --- Writable directories: try project path first, fall back to /tmp ---
     try:
         _log("Step 3/8: ensure folders...")
         Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
         Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
-        _log("  ok")
-    except Exception:
-        _log("  FATAL")
-        traceback.print_exc(file=sys.stderr)
-        raise
+        _log("  ok (project dirs)")
+    except OSError:
+        _log("  project dirs read-only, falling back to /tmp …")
+        _tmp = Path(tempfile.gettempdir()) / "mytoolbox"
+        app.config["UPLOAD_DIR"] = _tmp / "uploads"
+        app.config["INSTANCE_DIR"] = _tmp / "instance"
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        _is_readonly_fs = True
+        # These MUST succeed — /tmp is always writable
+        Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)
+        _log("  ok (/tmp fallback, DB=in-memory)")
+
 
     try:
         _log("Step 4/8: _setup_logging...")
@@ -133,13 +134,13 @@ def create_app() -> Flask:
         traceback.print_exc(file=sys.stderr)
         raise
 
-    # background cleanup (skipped on Vercel — no persistent background threads)
-    if not _ON_VERCEL:
+    # background cleanup (skipped on read-only filesystem — no threads in Serverless)
+    if not _is_readonly_fs:
         from utils.cleanup import schedule_cleanup
         scheduler = schedule_cleanup(app)
         scheduler.start()
     else:
-        _log("Step 8/8: APScheduler skipped (Vercel)")
+        _log("Step 8/8: APScheduler skipped (read-only fs)")
         _log(f"Bootstrap COMPLETE — {len(list(app.url_map.iter_rules()))} routes")
 
     @app.get("/healthz")
