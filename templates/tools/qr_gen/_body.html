@@ -27,6 +27,7 @@
   <button type="submit" class="btn btn-success"><i class="bi bi-qr-code"></i> 生成二维码</button>
   <span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 生成中…</span>
 </form>
+<script>document.getElementById('qrForm').action="{{ url_for('qr_gen.process') }}";</script>
 <div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
 <div id="result" class="card border-success shadow-sm mt-4 d-none">
   <div class="card-body text-center">
