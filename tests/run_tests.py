@@ -588,8 +588,10 @@ try:
     data = [("text", "https://example.com"), ("size", "10")]
     r = post_tool("qr_gen", data)
     ok, msg = _assert_json_ok(r, ["mime"])
+    j = r.get_json(silent=True) or {}
     if ok:
-        ok = r.get_json()["mime"] == "image/png"
+        ok = j.get("mime") == "image/png" and bool(j.get("image_data", "").startswith("data:image/png;base64,"))
+        msg = "base64内联预览" if ok else "缺 image_data"
     record("功能", "qr_gen 生成二维码", ok, msg)
 except Exception as exc:  # noqa: BLE001
     record("功能", "qr_gen 生成二维码", False, str(exc).splitlines()[0], traceback.format_exc())

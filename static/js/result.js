@@ -136,7 +136,10 @@
 
         const mode = pickMode(prefer, data.mime);
         if (previewSlot) {
-          previewSlot.innerHTML = PREVIEW_HTML[mode](data.url, data.filename);
+          // image_data（base64 data URI）优先于 url：避免 Vercel serverless
+          // 多实例间 /tmp 不可见导致图片 404 加载失败
+          const previewSrc = data.image_data || data.url;
+          previewSlot.innerHTML = PREVIEW_HTML[mode](previewSrc, data.filename);
         }
         if (filenameEl) {
           filenameEl.textContent = data.filename;

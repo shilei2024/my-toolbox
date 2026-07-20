@@ -1,6 +1,7 @@
 """QR code generator."""
 from __future__ import annotations
 
+import base64 as _b64
 import io
 import uuid
 from pathlib import Path
@@ -56,19 +57,28 @@ def process():
         qr.make(fit=True)
         img = qr.make_image(fill_color=fg, back_color=bg)
 
+        # 同时保存到磁盘（供下载）和编码为 base64（供内联预览，
+        # 避免 Vercel serverless 多实例间 /tmp 文件不可见导致预览 404）
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        img_bytes = buf.getvalue()
+        image_data = f"data:image/png;base64,{_b64.b64encode(img_bytes).decode('ascii')}"
+
         filename = f"qr_{uuid.uuid4().hex[:8]}.png"
         upload_dir: Path = current_app.config["UPLOAD_DIR"]
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / filename
-        img.save(target)
+        target.write_bytes(img_bytes)
 
         commit_usage("qr_gen", success=True)
         return jsonify(
             ok=True,
             url=f"/tools/qr-gen/download/{filename}",
             filename=filename,
-            size=target.stat().st_size,
+            size=len(img_bytes),
             mime="image/png",
+            # 内联预览用的 base64 data URI（不需要再发 HTTP 请求拿图片）
+            image_data=image_data,
         )
     except Exception as e:
         commit_usage("qr_gen", success=False, message=str(e))
