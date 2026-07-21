@@ -1,0 +1,50 @@
+<p class="text-muted">上传 PDF，选择压缩等级，预览压缩前后体积变化。</p>
+
+<form action="{{ url_for('pdf_compress.process') }}" method="post" enctype="multipart/form-data" data-async="1" data-preview="other">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="mb-3">
+    <label class="form-label">选择 PDF 文件</label>
+    <input type="file" name="pdf" class="form-control" accept=".pdf" required />
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-4">
+      <label class="form-label small">压缩等级</label>
+      <select name="level" class="form-select">
+        <option value="light">轻度（保留最多细节）</option>
+        <option value="medium" selected>标准（推荐）</option>
+        <option value="aggressive">激进（最小体积）</option>
+      </select>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary" id="submitBtn"><i class="bi bi-file-earmark-zip"></i> 开始压缩</button>
+  <span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 压缩中…</span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body text-center">
+    <h5 class="card-title text-success"><i class="bi bi-check-circle-fill"></i> 压缩完成</h5>
+    <div class="d-flex justify-content-center gap-4 my-3">
+      <div class="text-center">
+        <div class="text-muted small">压缩前</div>
+        <div class="fw-bold fs-5 text-danger" id="resultOriginalSize">—</div>
+      </div>
+      <div class="d-flex align-items-center">
+        <i class="bi bi-arrow-right text-muted fs-5"></i>
+      </div>
+      <div class="text-center">
+        <div class="text-muted small">压缩后</div>
+        <div class="fw-bold fs-5 text-success" id="resultSize">—</div>
+      </div>
+      <div class="text-center">
+        <div class="text-muted small">节省</div>
+        <div class="fw-bold fs-5 text-primary" id="resultSaved">—</div>
+      </div>
+    </div>
+    <div class="d-flex justify-content-center gap-2">
+      <a id="downloadLink" class="btn btn-success" download><i class="bi bi-download"></i> 下载压缩后 PDF</a>
+      <button id="resetBtn" type="button" class="btn btn-outline-secondary"><i class="bi bi-arrow-counterclockwise"></i> 再来一个</button>
+    </div>
+  </div>
+</div>

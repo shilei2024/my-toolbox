@@ -1,0 +1,78 @@
+<p class="text-muted">上传 PDF / DOCX / XLSX / PPTX，直接在线预览内容。</p>
+
+<div class="mb-3">
+  <label class="form-label">选择文件</label>
+  <input type="file" id="docFile" class="form-control" accept=".pdf,.docx,.xlsx,.pptx" />
+</div>
+<button id="previewBtn" class="btn btn-primary"><i class="bi bi-eye"></i> 在线预览</button>
+<span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 解析中…</span>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="previewArea" class="mt-4 d-none">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <span id="previewTitle" class="fw-bold"></span>
+    <span id="previewFormat" class="badge bg-secondary"></span>
+  </div>
+  <div id="previewContent" style="max-height:75vh;overflow-y:auto;background:#f8f9fa;border-radius:8px;padding:16px;">
+  </div>
+</div>
+
+<script>
+(function() {
+  var fileEl  = document.getElementById('docFile');
+  var btn     = document.getElementById('previewBtn');
+  var busy    = document.getElementById('busy');
+  var errBox  = document.getElementById('errorBox');
+  var area    = document.getElementById('previewArea');
+  var titleEl = document.getElementById('previewTitle');
+  var fmtEl   = document.getElementById('previewFormat');
+  var content = document.getElementById('previewContent');
+  var CSRF    = document.querySelector('meta[name="csrf-token"]').content;
+
+  btn.addEventListener('click', async function() {
+    var f = fileEl.files[0];
+    if (!f) { errBox.textContent = '请先选择文件'; errBox.classList.remove('d-none'); return; }
+    errBox.classList.add('d-none');
+    area.classList.add('d-none');
+    btn.disabled = true; busy.classList.remove('d-none');
+
+    var fd = new FormData();
+    fd.set('file', f);
+    fd.set('csrf_token', CSRF);
+
+    try {
+      var r = await fetch('{{ url_for("doc_viewer.process") }}', { method: 'POST', body: fd });
+      var d = await r.json();
+      if (!r.ok || d.error) { throw new Error(d.error || 'HTTP ' + r.status); }
+
+      titleEl.textContent = d.filename || f.name;
+      fmtEl.textContent = d.format_name || d.format || '';
+      content.innerHTML = '';
+
+      if (d.pages && d.pages.length) {
+        // PDF pages as images
+        d.pages.forEach(function(p) {
+          var card = document.createElement('div');
+          card.className = 'text-center mb-3';
+          card.innerHTML = '<img src="' + p.src + '" alt="Page ' + p.num + '" style="max-width:100%;box-shadow:0 2px 8px rgba(0,0,0,0.1);border-radius:4px;" />' +
+            '<div class="text-muted small mt-1">第 ' + p.num + ' / ' + d.page_count + ' 页</div>';
+          content.appendChild(card);
+        });
+      } else if (d.html) {
+        content.innerHTML = d.html;
+      } else {
+        content.innerHTML = '<p class="text-muted">无可预览内容</p>';
+      }
+
+      area.classList.remove('d-none');
+      area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      errBox.textContent = '预览失败：' + (e.message || e);
+      errBox.classList.remove('d-none');
+    } finally {
+      btn.disabled = false; busy.classList.add('d-none');
+    }
+  });
+})();
+</script>

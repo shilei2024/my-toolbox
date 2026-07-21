@@ -1,0 +1,59 @@
+<p class="text-muted">给 PDF 添加打开密码，或移除已有的密码保护。</p>
+
+<form action="{{ url_for('pdf_protect.process') }}" method="post" enctype="multipart/form-data" data-async="1" data-preview="other">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="mb-3">
+    <label class="form-label">选择 PDF 文件</label>
+    <input type="file" name="pdf" class="form-control" accept=".pdf" required />
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-4">
+      <label class="form-label small">操作模式</label>
+      <select name="mode" id="protectMode" class="form-select">
+        <option value="encrypt" selected>加密（添加密码）</option>
+        <option value="decrypt">解锁（移除密码）</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small" id="pwLabel">设置密码</label>
+      <input type="text" name="password" id="protectPassword" class="form-control" placeholder="输入密码（英文/数字）" maxlength="128" />
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary" id="submitBtn"><i class="bi bi-shield-lock"></i> <span id="btnText">加密文件</span></button>
+  <span id="busy" class="ms-2 text-muted d-none"><span class="spinner-border spinner-border-sm"></span> 处理中…</span>
+</form>
+
+<div id="errorBox" class="alert alert-danger mt-3 d-none"></div>
+
+<div id="result" class="card border-success shadow-sm mt-4 d-none">
+  <div class="card-body text-center">
+    <h5 class="card-title text-success"><i class="bi bi-check-circle-fill"></i> <span id="actionLabel">处理</span>完成</h5>
+    <p class="text-muted small" id="resultFilename">—</p>
+    <div class="d-flex justify-content-center gap-2">
+      <a id="downloadLink" class="btn btn-success" download><i class="bi bi-download"></i> 下载 PDF</a>
+      <button id="resetBtn" type="button" class="btn btn-outline-secondary"><i class="bi bi-arrow-counterclockwise"></i> 再来一个</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var mode = document.getElementById('protectMode');
+  var pw = document.getElementById('protectPassword');
+  var btn = document.getElementById('btnText');
+  var lbl = document.getElementById('pwLabel');
+  function update() {
+    if (mode.value === 'encrypt') {
+      btn.textContent = '加密文件';
+      lbl.textContent = '设置密码';
+      pw.placeholder = '输入密码（英文/数字）';
+    } else {
+      btn.textContent = '解锁文件';
+      lbl.textContent = '解锁密码（留空尝试无密码打开）';
+      pw.placeholder = '留空则尝试无密码打开';
+    }
+  }
+  mode.addEventListener('change', update);
+  update();
+})();
+</script>

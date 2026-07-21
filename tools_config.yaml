@@ -286,3 +286,36 @@ tools:
     category: text
     enabled: true
     order: 120
+
+  - id: pdf_compress
+    name: PDF 压缩
+    description: 减小 PDF 文件大小，可调压缩等级，预览压缩前后体积变化。
+    icon: bi-file-earmark-zip
+    color: "#0d6efd"
+    route: /tools/pdf-compress
+    blueprint_module: tools.pdf_compress
+    category: pdf
+    enabled: true
+    order: 36
+
+  - id: pdf_protect
+    name: PDF 解锁/加密
+    description: 移除 PDF 打开密码或给 PDF 添加密码保护。
+    icon: bi-shield-lock
+    color: "#6610f2"
+    route: /tools/pdf-protect
+    blueprint_module: tools.pdf_protect
+    category: pdf
+    enabled: true
+    order: 37
+
+  - id: doc_viewer
+    name: 文档在线预览
+    description: 上传 docx / pptx / xlsx / pdf，直接在线渲染预览，无需下载。
+    icon: bi-eye
+    color: "#20c997"
+    route: /tools/doc-viewer
+    blueprint_module: tools.doc_viewer
+    category: pdf
+    enabled: true
+    order: 39
