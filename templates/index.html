@@ -21,20 +21,27 @@
   {% endif %}
 </section>
 
-{# 实时汇率显示 #}
+{# 实时汇率 — 双向切换 #}
 <div id="exchangeRate" class="text-center mb-3">
-  <div class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill border bg-white shadow-sm">
-    <span class="text-muted small d-flex align-items-center gap-1">
-      <img src="https://flagcdn.com/16x12/us.png" width="16" height="12" alt="USD" style="object-fit:cover;border-radius:2px"/>
-      USD
+  <div class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill border bg-white shadow-sm" style="min-width:fit-content;">
+    <span id="fxFromBadge" class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded-pill small fw-semibold"
+          style="background:#f0f0f0;cursor:default;">
+      <img id="fxFromFlag" src="https://flagcdn.com/16x12/us.png" width="16" height="12" alt="USD" style="object-fit:cover;border-radius:2px;"/>
+      <span id="fxFromCode">USD</span>
     </span>
-    <i class="bi bi-arrow-left-right text-muted"></i>
-    <span class="text-muted small d-flex align-items-center gap-1">
-      <img src="https://flagcdn.com/16x12/cn.png" width="16" height="12" alt="CNY" style="object-fit:cover;border-radius:2px"/>
-      CNY
+    <button id="fxSwapBtn" class="btn btn-outline-secondary btn-sm rounded-circle p-0 border-0"
+            style="width:30px;height:30px;line-height:1;transition:transform 0.3s;"
+            title="切换方向">
+      <i class="bi bi-arrow-left-right" style="font-size:0.85rem;"></i>
+    </button>
+    <span id="fxToBadge" class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded-pill small fw-semibold"
+          style="background:#f0f0f0;cursor:default;">
+      <img id="fxToFlag" src="https://flagcdn.com/16x12/cn.png" width="16" height="12" alt="CNY" style="object-fit:cover;border-radius:2px;"/>
+      <span id="fxToCode">CNY</span>
     </span>
-    <span id="rateValue" class="fw-bold text-primary fs-6">--</span>
-    <small id="rateTime" class="text-muted" style="font-size:0.7rem;"></small>
+    <span class="vr"></span>
+    <span id="fxFormula" class="small text-muted">1 USD = <strong id="rateValue" class="text-primary">--</strong> CNY</span>
+    <small id="rateTime" class="text-muted" style="font-size:0.65rem;"></small>
     <button id="rateRefresh" class="btn btn-outline-secondary btn-sm rounded-circle p-0" style="width:26px;height:26px;line-height:1;" title="刷新汇率">
       <i class="bi bi-arrow-repeat" style="font-size:0.75rem;"></i>
     </button>
@@ -122,35 +129,74 @@
 {% block scripts_extra %}
 <script>
 (function() {
-  var rateEl = document.getElementById('rateValue');
-  var timeEl = document.getElementById('rateTime');
-  var btn = document.getElementById('rateRefresh');
-  if (!rateEl) return;
+  var rateEl  = document.getElementById('rateValue');
+  var timeEl  = document.getElementById('rateTime');
+  var refresh = document.getElementById('rateRefresh');
+  var swapBtn = document.getElementById('fxSwapBtn');
+  var formula = document.getElementById('fxFormula');
+  var badgeEls = {
+    fromCode: document.getElementById('fxFromCode'),
+    toCode:   document.getElementById('fxToCode'),
+    fromFlag: document.getElementById('fxFromFlag'),
+    toFlag:   document.getElementById('fxToFlag'),
+  };
+  if (!rateEl || !swapBtn) return;
+
+  // ISO 3166 → flagcdn code
+  var FLAGS = {USD:'us',CNY:'cn',EUR:'eu',GBP:'gb',JPY:'jp',HKD:'hk',KRW:'kr',AUD:'au',CAD:'ca'};
+  function flagUrl(code) { return 'https://flagcdn.com/16x12/'+(FLAGS[code]||'un')+'.png'; }
+  function fmtDate(s) {
+    if (!s) return '';
+    // open.er-api.com returns "Mon, 21 Jul 2026 00:00:00 +0000"
+    try { var d=new Date(s); return d.toISOString().slice(0,10); } catch(_) { return s.slice(0,10); }
+  }
+
+  var state = {from:'USD', to:'CNY'};
+
+  function updateBadges() {
+    badgeEls.fromCode.textContent = state.from;
+    badgeEls.toCode.textContent   = state.to;
+    badgeEls.fromFlag.src = flagUrl(state.from);
+    badgeEls.toFlag.src   = flagUrl(state.to);
+  }
 
   function fetchRate() {
-    rateEl.textContent = '--';
-    timeEl.textContent = '';
-    fetch('/api/exchange-rate')
+    rateEl.textContent = '--'; timeEl.textContent = '';
+    var url = '/api/exchange-rate?from=' + state.from + '&to=' + state.to;
+    fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d.rate) {
-          rateEl.textContent = d.rate.toFixed(4);
+          rateEl.textContent = d.rate.toFixed(6);
           rateEl.style.color = '';
-          timeEl.textContent = d.updated ? '更新于 ' + d.updated : '';
+          timeEl.textContent = d.updated ? '更新于 ' + fmtDate(d.updated) : '';
+          formula.innerHTML = '1 ' + state.from + ' = <strong id="rateValue" class="text-primary">' + d.rate.toFixed(6) + '</strong> ' + state.to;
+          // update the rateValue reference since we replaced the DOM
+          rateEl = document.getElementById('rateValue');
         } else {
-          rateEl.textContent = '获取失败';
-          rateEl.style.color = '#dc3545';
+          rateEl.textContent = '获取失败'; rateEl.style.color = '#dc3545';
         }
       })
       .catch(function() {
-        rateEl.textContent = '获取失败';
-        rateEl.style.color = '#dc3545';
+        rateEl.textContent = '获取失败'; rateEl.style.color = '#dc3545';
       });
   }
 
+  swapBtn.addEventListener('click', function() {
+    // swap direction
+    var tmp = state.from; state.from = state.to; state.to = tmp;
+    updateBadges();
+    // rotate animation
+    swapBtn.style.transform = 'rotate(180deg)';
+    setTimeout(function() { swapBtn.style.transform = ''; }, 300);
+    fetchRate();
+  });
+
+  if (refresh) refresh.addEventListener('click', fetchRate);
+
+  updateBadges();
   fetchRate();
-  setInterval(fetchRate, 5 * 60 * 1000); // 每 5 分钟自动刷新
-  if (btn) btn.addEventListener('click', fetchRate);
+  setInterval(fetchRate, 5 * 60 * 1000);
 })();
 </script>
 {% endblock %}

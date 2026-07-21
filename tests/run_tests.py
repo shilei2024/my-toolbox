@@ -210,15 +210,33 @@ try:
 except Exception as exc:  # noqa: BLE001
     record("系统", "GET /healthz", False, str(exc))
 
-# 汇率接口
+# 汇率接口（默认 USD→CNY ）
 try:
     r = client.get("/api/exchange-rate")
     j = r.get_json(silent=True) or {}
     ok = r.status_code == 200 and isinstance(j.get("rate"), (int, float)) and j["rate"] > 0
-    record("系统", "GET /api/exchange-rate", ok,
-           f"rate={j.get('rate')} updated={j.get('updated','')} cached={j.get('cached')}")
+    record("系统", "GET /api/exchange-rate (USD→CNY)", ok,
+           f"rate={j.get('rate')} from={j.get('from_cur')}→{j.get('to_cur')} cached={j.get('cached')}")
 except Exception as exc:  # noqa: BLE001
-    record("系统", "GET /api/exchange-rate", False, str(exc))
+    record("系统", "GET /api/exchange-rate (USD→CNY)", False, str(exc))
+
+# 汇率接口（CNY→USD 反向）
+try:
+    r = client.get("/api/exchange-rate?from=CNY&to=USD")
+    j = r.get_json(silent=True) or {}
+    ok = r.status_code == 200 and isinstance(j.get("rate"), (int, float)) and 0 < j["rate"] < 1
+    record("系统", "GET /api/exchange-rate (CNY→USD)", ok,
+           f"rate={j.get('rate')} cached={j.get('cached')}")
+except Exception as exc:  # noqa: BLE001
+    record("系统", "GET /api/exchange-rate (CNY→USD)", False, str(exc))
+
+# 首页汇率小组件含双向切换
+try:
+    body = client.get("/").get_data(as_text=True)
+    ok = all(k in body for k in ["fxSwapBtn", "fxFromCode", "fxToCode", "fxFormula"])
+    record("系统", "首页汇率双向切换小组件", ok, "" if ok else "缺元素")
+except Exception as exc:  # noqa: BLE001
+    record("系统", "首页汇率双向切换小组件", False, str(exc).splitlines()[0])
 
 # 首页
 try:

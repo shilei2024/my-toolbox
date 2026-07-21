@@ -191,36 +191,67 @@ def create_app() -> Flask:
 
     @app.get("/api/exchange-rate")
     def exchange_rate():
-        """Return USD/CNY exchange rate with simple in-memory caching (10 min TTL).
+        """Return exchange rate for any pair, defaults to USD→CNY.
 
-        Uses exchangerate-api.com (free, no API key).  On failure returns
-        the last known good rate if one is cached (stale-while-revalidate).
+        Query params:
+            from  — base currency (default USD)
+            to    — target currency (default CNY)
+
+        Uses open.er-api.com (free, no key).  All rates are USD-based;
+        cross pairs are calculated from the cached USD rates object.
+        Cached 10 minutes; stale-while-revalidate on upstream failure.
         """
-        cache = getattr(app, "_rate_cache", None)
+        from_cur = (request.args.get("from", "") or "USD").upper().strip()
+        to_cur = (request.args.get("to", "") or "CNY").upper().strip()
+        # valid currency codes are 3 letters
+        if len(from_cur) != 3 or len(to_cur) != 3:
+            return jsonify(error="Invalid currency code"), 400
+
+        def _calc(rates: dict, frm: str, to: str):
+            if frm == to:
+                return 1.0
+            if frm not in rates or to not in rates:
+                return None
+            return round(rates[to] / rates[frm], 6)
+
+        cache = getattr(app, "_fx_cache", None)
         if cache is None:
-            cache = {"rate": None, "updated": None, "ts": 0}
-            app._rate_cache = cache
+            cache = {"rates": {}, "updated": None, "ts": 0}
+            app._fx_cache = cache
 
         now = time.time()
-        if cache["rate"] and (now - cache["ts"]) < 600:
-            return jsonify(rate=cache["rate"], updated=cache["updated"], cached=True)
+        # cache hit
+        if cache["rates"] and (now - cache["ts"]) < 600:
+            rate = _calc(cache["rates"], from_cur, to_cur)
+            if rate is not None:
+                return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
+                               updated=cache["updated"], cached=True)
 
-        import requests  # noqa: PLC0415  (lazy, only when endpoint is hit)
+        import requests  # noqa: PLC0415
 
         try:
-            resp = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=5)
+            # open.er-api.com gives full rates vs USD with 6 decimal precision
+            resp = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
             if resp.status_code >= 400:
                 raise RuntimeError(f"HTTP {resp.status_code}")
             data = resp.json()
-            rate = round(data["rates"]["CNY"], 4)
-            cache["rate"] = rate
-            cache["updated"] = data.get("date", "")
+            if data.get("result") != "success":
+                raise RuntimeError("API returned non-success")
+            cache["rates"] = data["rates"]  # {"USD":1, "CNY":6.7653, ...}
+            cache["updated"] = data.get("time_last_update_utc", "")
             cache["ts"] = now
-            return jsonify(rate=rate, updated=data.get("date"), cached=False)
+            rate = _calc(cache["rates"], from_cur, to_cur)
+            if rate is None:
+                return jsonify(error=f"不支持币种 {from_cur}/{to_cur}"), 400
+            return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
+                           updated=cache["updated"], cached=False)
         except Exception as exc:  # noqa: BLE001
             app.logger.warning("exchange-rate fetch failed: %s", exc)
-            if cache["rate"]:
-                return jsonify(rate=cache["rate"], updated=cache["updated"], cached=True, stale=True)
+            if cache["rates"]:
+                rate = _calc(cache["rates"], from_cur, to_cur)
+                if rate is not None:
+                    return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
+                                   updated=cache["updated"], cached=True, stale=True)
             return jsonify(error="汇率获取失败，请稍后再试"), 502
 
     @app.get("/")
