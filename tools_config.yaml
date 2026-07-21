@@ -308,14 +308,3 @@ tools:
     category: pdf
     enabled: true
     order: 37
-
-  - id: doc_viewer
-    name: 文档在线预览
-    description: 上传 docx / pptx / xlsx / pdf，直接在线渲染预览，无需下载。
-    icon: bi-eye
-    color: "#20c997"
-    route: /tools/doc-viewer
-    blueprint_module: tools.doc_viewer
-    category: pdf
-    enabled: true
-    order: 39

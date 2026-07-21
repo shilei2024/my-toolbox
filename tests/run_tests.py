@@ -489,15 +489,6 @@ try:
 except Exception as exc:  # noqa: BLE001
     record("功能", "pdf_protect PDF 加密", False, str(exc).splitlines()[0], traceback.format_exc())
 
-# 5.7d 文档预览 (PDF)
-try:
-    r = post_tool("doc_viewer", [("file", (make_pdf(1), "doc.pdf"))])
-    j = r.get_json(silent=True) or {}
-    ok = j.get("ok") and j.get("pages") and len(j["pages"]) >= 1
-    record("功能", "doc_viewer PDF 预览", ok, f"pages={j.get('page_count','?')}")
-except Exception as exc:  # noqa: BLE001
-    record("功能", "doc_viewer PDF 预览", False, str(exc).splitlines()[0], traceback.format_exc())
-
 # 5.8 FCST 合并 + PN 映射 CRUD
 try:
     data = [("files", (make_fcst_xlsx(), "fcst.xlsx"))]
