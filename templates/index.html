@@ -21,6 +21,26 @@
   {% endif %}
 </section>
 
+{# 实时汇率显示 #}
+<div id="exchangeRate" class="text-center mb-3">
+  <div class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill border bg-white shadow-sm">
+    <span class="text-muted small d-flex align-items-center gap-1">
+      <img src="https://flagcdn.com/16x12/us.png" width="16" height="12" alt="USD" style="object-fit:cover;border-radius:2px"/>
+      USD
+    </span>
+    <i class="bi bi-arrow-left-right text-muted"></i>
+    <span class="text-muted small d-flex align-items-center gap-1">
+      <img src="https://flagcdn.com/16x12/cn.png" width="16" height="12" alt="CNY" style="object-fit:cover;border-radius:2px"/>
+      CNY
+    </span>
+    <span id="rateValue" class="fw-bold text-primary fs-6">--</span>
+    <small id="rateTime" class="text-muted" style="font-size:0.7rem;"></small>
+    <button id="rateRefresh" class="btn btn-outline-secondary btn-sm rounded-circle p-0" style="width:26px;height:26px;line-height:1;" title="刷新汇率">
+      <i class="bi bi-arrow-repeat" style="font-size:0.75rem;"></i>
+    </button>
+  </div>
+</div>
+
 {# Quick-jump category chips (sticky so they're always reachable) #}
 <nav class="category-chips mb-4 d-flex flex-wrap gap-2 sticky-top bg-white py-2" style="z-index: 1020;">
   {% for cat in categories %}
@@ -98,4 +118,39 @@
   /* smooth-scroll anchor offset for sticky navbar */
   section[id^="cat-"] { scroll-margin-top: 80px; }
 </style>
+{% endblock %}
+{% block scripts_extra %}
+<script>
+(function() {
+  var rateEl = document.getElementById('rateValue');
+  var timeEl = document.getElementById('rateTime');
+  var btn = document.getElementById('rateRefresh');
+  if (!rateEl) return;
+
+  function fetchRate() {
+    rateEl.textContent = '--';
+    timeEl.textContent = '';
+    fetch('/api/exchange-rate')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.rate) {
+          rateEl.textContent = d.rate.toFixed(4);
+          rateEl.style.color = '';
+          timeEl.textContent = d.updated ? '更新于 ' + d.updated : '';
+        } else {
+          rateEl.textContent = '获取失败';
+          rateEl.style.color = '#dc3545';
+        }
+      })
+      .catch(function() {
+        rateEl.textContent = '获取失败';
+        rateEl.style.color = '#dc3545';
+      });
+  }
+
+  fetchRate();
+  setInterval(fetchRate, 5 * 60 * 1000); // 每 5 分钟自动刷新
+  if (btn) btn.addEventListener('click', fetchRate);
+})();
+</script>
 {% endblock %}

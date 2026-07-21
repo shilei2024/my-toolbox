@@ -210,6 +210,16 @@ try:
 except Exception as exc:  # noqa: BLE001
     record("系统", "GET /healthz", False, str(exc))
 
+# 汇率接口
+try:
+    r = client.get("/api/exchange-rate")
+    j = r.get_json(silent=True) or {}
+    ok = r.status_code == 200 and isinstance(j.get("rate"), (int, float)) and j["rate"] > 0
+    record("系统", "GET /api/exchange-rate", ok,
+           f"rate={j.get('rate')} updated={j.get('updated','')} cached={j.get('cached')}")
+except Exception as exc:  # noqa: BLE001
+    record("系统", "GET /api/exchange-rate", False, str(exc))
+
 # 首页
 try:
     r = client.get("/")
