@@ -67,8 +67,6 @@
     text-align: center; padding: 3rem 1rem; color: #adb5bd;
   }
   .ze-empty i { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
-
-  .ze-loading { text-align: center; padding: 2rem; }
 </style>
 
 <div class="mb-3">
@@ -89,19 +87,13 @@
 
 <!-- 操作按钮行 -->
 <div class="ze-actions hidden" id="zeActions">
-  <button class="btn btn-primary" id="zeStartBtn" onclick="startExtract()">
+  <button class="btn btn-primary" id="zeStartBtn" onclick="startExtract(this)">
     <i class="bi bi-search"></i> 开始递归解压并提取 PDF
   </button>
   <button class="btn btn-outline-secondary btn-sm" onclick="clearQueue()">
     <i class="bi bi-trash"></i> 清空列表
   </button>
   <span class="text-muted small" id="zeQueueCount"></span>
-</div>
-
-<!-- 加载中 -->
-<div class="ze-loading hidden" id="zeLoading">
-  <div class="spinner-border text-primary" role="status"></div>
-  <p class="mt-2 text-muted small">正在递归解压并提取 PDF …</p>
 </div>
 
 <!-- 结果展示 -->
@@ -187,12 +179,13 @@ function formatSize(bytes) {
 }
 
 // ===== 步骤 2：发送后端解压 =====
-async function startExtract() {
+async function startExtract(btn) {
   if (STATE.queue.length === 0) return;
 
-  document.getElementById('zeLoading').classList.remove('hidden');
   document.getElementById('zeResult').classList.add('hidden');
-  document.getElementById('zeStartBtn').disabled = true;
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在解压…';
 
   const fd = new FormData();
   STATE.queue.forEach(q => fd.append('files', q.file, q.name));
@@ -216,8 +209,8 @@ async function startExtract() {
   } catch(e) {
     alert('网络异常: ' + e.message);
   } finally {
-    document.getElementById('zeLoading').classList.add('hidden');
-    document.getElementById('zeStartBtn').disabled = false;
+    btn.disabled = false;
+    btn.innerHTML = originalHTML;
   }
 }
 
