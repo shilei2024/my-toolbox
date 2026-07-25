@@ -291,70 +291,161 @@ def preview(filename):
     )
 
 
-@tool_bp.post("/ocr/<file_id>")
+@tool_bp.post("/ocr")
 @csrf.exempt
 @limiter.limit(lambda: "10/minute")
 @require_usage("reimbursement")
-def ocr(file_id):
+def ocr():
     """
-    OCR 识别发票信息。
+    OCR 识别发票信息。接收 JSON: {"image_base64": "..."} 或 {"file_id": "..."} (兼容旧版)
 
-    优先级：
-    1. 百度智能云增值税发票识别 (BAIDU_OCR_API_KEY + BAIDU_OCR_SECRET_KEY)
-    2. 本地 PaddleOCR (PADDLEOCR_ENABLED=true)
-    3. 模拟模式（返回空模板供手动填写）
+    Vercel 兼容：不依赖跨请求文件系统，图片数据通过 base64 直接传入。
     """
-    # 查找文件
-    f = request.files.get("file")
-    upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
-    filepath = None
+    data = request.get_json(silent=True) or {}
 
-    if f and f.filename != "":
-        ext = Path(f.filename).suffix.lower()
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = f"{file_id}{ext}"
-        filepath = upload_dir / safe_name
-        f.save(str(filepath))
+    # 方案 A：base64 直接传入（推荐，Vercel 兼容）
+    img_b64 = (data.get("image_base64") or "").strip()
+    if img_b64:
+        import base64
+        # 移除可能的 data:xxx;base64, 前缀
+        if "," in img_b64 and "base64" in img_b64:
+            img_b64 = img_b64.split(",", 1)[1]
+        try:
+            img_bytes = base64.b64decode(img_b64)
+        except Exception:
+            return jsonify(error="base64 解码失败"), 400
     else:
-        # 从已上传文件中按 file_id 查找
-        for p in upload_dir.glob(f"{file_id}.*"):
-            filepath = p
-            break
+        # 方案 B：文件上传（兼容旧版），从 request.files 或磁盘查找
+        f = request.files.get("file")
+        upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
+        file_id = data.get("file_id", "")
 
-    if not filepath or not filepath.exists():
-        return jsonify(error="文件未找到，请重新上传"), 404
+        if f and f.filename:
+            img_bytes = f.read()
+        elif file_id:
+            filepath = None
+            for p in upload_dir.glob(f"{file_id}.*"):
+                filepath = p; break
+            if not filepath or not filepath.exists():
+                return jsonify(error="文件未找到，请重新上传"), 404
+            img_bytes = filepath.read_bytes()
+        else:
+            return jsonify(error="请提供 image_base64 或 file_id + 文件"), 400
+
+    if not img_bytes:
+        return jsonify(error="图片数据为空"), 400
 
     # 尝试百度云 OCR
     baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
     baidu_secret = os.environ.get("BAIDU_OCR_SECRET_KEY", "").strip()
 
     if baidu_key and baidu_secret:
-        result = _baidu_ocr_invoice(filepath, baidu_key, baidu_secret)
-        if result:
-            return jsonify(success=True, file_id=file_id, data=result, provider="baidu")
+        try:
+            result = _baidu_ocr_from_bytes(img_bytes, baidu_key, baidu_secret)
+            if result:
+                return jsonify(success=True, data=result, provider="baidu")
+        except Exception as e:
+            current_app.logger.warning("Baidu OCR error: %s", e)
 
-    # 尝试 PaddleOCR
-    if os.environ.get("PADDLEOCR_ENABLED", "").strip() == "true":
-        result = _paddle_ocr_invoice(filepath)
-        if result:
-            return jsonify(success=True, file_id=file_id, data=result, provider="paddleocr")
-
-    # 模拟模式
+    # 模拟降级
     return jsonify(
         success=True,
-        file_id=file_id,
         data={
-            "invoice_number": "",
-            "invoice_date": "",
-            "seller_name": "",
-            "amount_excluding_tax": "",
-            "tax_amount": "",
-            "total_amount": "",
-            "description": "",
+            "invoice_number": "", "invoice_date": "",
+            "seller_name": "", "amount_excluding_tax": "",
+            "tax_amount": "", "total_amount": "", "description": "",
         },
         provider="mock",
-        note="未配置 OCR 服务，请手动填写。支持百度云 OCR/PaddleOCR。",
+        note="未配置 OCR 服务或识别失败，请手动填写。",
     )
+
+
+# ---------------------------------------------------------------------------
+# OCR 核心：从字节到结果（Vercel 兼容，无文件系统依赖）
+# ---------------------------------------------------------------------------
+def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> dict | None:
+    """
+    完整 OCR 流程（接收字节，无需文件路径）。
+    PDF 字节 → PyMuPDF 转图片 → 预处理多版本 → 增值税发票识别 → 通用 OCR 降级
+    """
+    import io as _io
+
+    # Step 0: 检测是否为 PDF，是则转图片
+    img_list = []
+    if img_bytes[:5] == b"%PDF-":
+        try:
+            import fitz
+            doc = fitz.open(stream=img_bytes, filetype="pdf")
+            for page_num in range(min(len(doc), 3)):
+                page = doc[page_num]
+                mat = fitz.Matrix(200 / 72, 200 / 72)
+                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                jpg = pix.tobytes("jpeg")
+                if len(jpg) > 800_000:
+                    mat2 = fitz.Matrix(150 / 72, 150 / 72)
+                    pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
+                    jpg = pix2.tobytes("jpeg")
+                img_list.append(jpg)
+            doc.close()
+        except Exception as e:
+            current_app.logger.warning("PyMuPDF stream: %s", e)
+            img_list = [img_bytes]
+    else:
+        if len(img_bytes) > 2_000_000:
+            try:
+                from PIL import Image
+                img = Image.open(_io.BytesIO(img_bytes))
+                w, h = img.size
+                if max(w, h) > 2000:
+                    img = img.resize((int(w * 2000 / max(w, h)), int(h * 2000 / max(w, h))), Image.LANCZOS)
+                buf = _io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                img_list = [buf.getvalue()]
+            except:
+                img_list = [img_bytes]
+        else:
+            img_list = [img_bytes]
+
+    if not img_list:
+        return None
+
+    # Step 1: 获取 token
+    try:
+        resp = __import__("requests").get(
+            "https://aip.baidubce.com/oauth/2.0/token",
+            params={"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key},
+            timeout=10,
+        )
+        token = resp.json().get("access_token")
+        if not token:
+            current_app.logger.warning("Baidu token failed")
+            return None
+    except Exception as e:
+        current_app.logger.warning("Baidu token: %s", e)
+        return None
+
+    # Step 2: 增值税发票识别（页×版本穷举）
+    for raw in img_list:
+        for ver in _preprocess_for_ocr(raw):
+            words = _baidu_vat_call(ver, token)
+            if words:
+                r = _parse_vat(words)
+                if r.get("invoice_number") or r.get("total_amount"):
+                    return r
+
+    # Step 3: 通用 OCR 降级
+    best, best_cnt = None, 0
+    for raw in img_list:
+        for ver in _preprocess_for_ocr(raw):
+            words_list = _baidu_gen_call(ver, token)
+            if words_list and len(words_list) > 2:
+                r = _parse_general(words_list)
+                cnt = sum(1 for v in r.values() if v)
+                if cnt > best_cnt:
+                    best, best_cnt = r, cnt
+                    if cnt >= 3:
+                        return best
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -472,50 +563,49 @@ def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
 # ---------------------------------------------------------------------------
 def _parse_vat(words: dict) -> dict:
     """
-    解析百度增值税发票识别结果。
-    兼容传统增值税发票和全电发票两种格式。
-    实测字段映射（全电发票）:
-      AmountInFiguers = 价税合计(小写)  480.00 ← 总额
-      TotalAmount     = 不含税金额       475.25 ← 税前
-    税额为 480.00 - 475.25 = 4.75
+    解析百度增值税发票识别结果。兼容全电发票和传统发票。
     """
     def _g(f):
         v = words.get(f, "")
-        return v[0] if isinstance(v, list) and v else (str(v) if v else "")
+        if isinstance(v, list) and v:
+            item = v[0]
+            # 全电发票返回 [{"row":"1","word":"*餐费"}] 格式
+            if isinstance(item, dict) and "word" in item:
+                return item["word"]
+            return item if isinstance(item, str) else str(item)
+        return str(v) if v and not isinstance(v, (list, dict)) else ""
 
-    # 全电发票: AmountInFiguers=价税合计, TotalAmount=不含税金额
-    # 传统发票: AmountInFiguers=价税合计, TotalAmount 可能也是总额
+    # 金额字段：全电发票 AmountInFiguers=价税合计, TotalAmount=不含税
     total = _g("AmountInFiguers") or _g("TotalAmount") or ""
     no_tax = _g("TotalAmount") or ""
     tax = _g("TaxAmount") or ""
 
-    # 推测逻辑：如果 total != no_tax，差额即为税额
     if not tax and total and no_tax:
         try:
             diff = round(float(total) - float(no_tax), 2)
             if diff > 0: tax = str(diff)
         except: pass
-
-    # 如果 total==no_tax 或无 no_tax，税额归零
     if not tax and total:
         try:
             if not no_tax or abs(float(total) - float(no_tax)) < 0.005:
-                no_tax = str(float(total))
-                tax = "0.00"
+                no_tax = str(float(total)); tax = "0.00"
         except: pass
-
-    # 交叉补全
     if not total and no_tax: total = no_tax
     if not no_tax and total and tax:
         try: no_tax = str(round(float(total) - float(tax), 2))
         except: pass
 
-    # description: 可能是字符串、或 [{"row":"1","word":"*餐费"}]
+    # 明细：全电发票 CommodityName 是 [{"row":"1","word":"*餐费"}]
     desc = _g("CommodityName") or _g("CommodityType") or ""
     if not desc:
         items = words.get("CommodityName", [])
         if isinstance(items, list) and items:
-            parts = [item.get("word","") if isinstance(item,dict) else str(item) for item in items if item]
+            parts = []
+            for item in items:
+                if isinstance(item, dict) and "word" in item:
+                    parts.append(item["word"])
+                elif isinstance(item, str):
+                    parts.append(item)
             desc = "；".join(p.strip() for p in parts[:3] if p.strip())
 
     return {
@@ -525,7 +615,7 @@ def _parse_vat(words: dict) -> dict:
         "amount_excluding_tax": no_tax,
         "tax_amount": tax,
         "total_amount": total,
-        "description": (desc or "")[:80],
+        "description": str(desc or "")[:80],
     }
 
 
