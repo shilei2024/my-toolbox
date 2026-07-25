@@ -44,6 +44,8 @@
   .ze-file-item .ze-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ze-file-item .ze-meta { font-size: 0.72rem; color: #6c757d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ze-file-item .ze-dl { flex-shrink: 0; }
+  .ze-file-item.deselected { opacity: 0.45; background: #f8f9fa; }
+  .ze-file-item .ze-cb { flex-shrink: 0; width: 16px; height: 16px; cursor: pointer; accent-color: var(--ze-primary); }
 
   .ze-summary {
     display: flex;
@@ -147,7 +149,7 @@ async function handleFiles(files) {
       throw new Error(`服务器返回非 JSON（HTTP ${resp.status}）：` + (text.substring(0, 150) || resp.statusText));
     }
     if (data.success) {
-      STATE.files = data.files;
+      STATE.files = data.files.map(f => ({ ...f, _selected: true }));
       renderResult(data);
     } else {
       alert('处理失败: ' + (data.error || '未知错误'));
@@ -161,14 +163,20 @@ async function handleFiles(files) {
 
 function renderResult(data) {
   const el = document.getElementById('zeResult');
-  const totalSize = data.files.reduce((s, f) => s + (f.size || 0), 0);
+  const selectedCount = STATE.files.filter(f => f._selected !== false).length;
 
   let html = `
     <div class="ze-summary">
-      <span class="badge bg-success">${data.total} 个 PDF 文件</span>
-      <span class="text-muted">共 ${(totalSize / 1024 / 1024).toFixed(1)} MB</span>
-      <button class="btn btn-outline-primary btn-sm ms-auto" onclick="downloadAll()">
-        <i class="bi bi-download"></i> 全部下载 (ZIP)
+      <span class="badge bg-success">${selectedCount}/${data.total} 个 PDF 文件</span>
+      <span class="text-muted">共 ${(data.files.reduce((s, f) => s + (f.size || 0), 0) / 1024 / 1024).toFixed(1)} MB</span>
+      <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
+        <input type="checkbox" id="zeSelectAll" onchange="toggleSelectAll(this)" checked style="accent-color:var(--ze-primary);"> 全选
+      </label>
+      <button class="btn btn-outline-danger btn-sm me-1" onclick="deleteSelected()" title="删除选中">
+        <i class="bi bi-trash"></i>
+      </button>
+      <button class="btn btn-outline-primary btn-sm" onclick="downloadSelected()">
+        <i class="bi bi-download"></i> 导出选中 (ZIP)
       </button>
     </div>
     <div class="ze-file-list">
@@ -176,14 +184,16 @@ function renderResult(data) {
 
   data.files.forEach((f, i) => {
     const chain = (f.path_chain || []).slice(-2).join(' / ');
+    const checked = f._selected !== false ? 'checked' : '';
     html += `
-      <div class="ze-file-item">
+      <div class="ze-file-item${checked ? '' : ' deselected'}" id="zeFile${i}">
+        <input type="checkbox" class="ze-cb" ${checked} onchange="onFileToggle(${i},this.checked)" data-idx="${i}">
         <span class="ze-icon"><i class="bi bi-file-pdf"></i></span>
         <div class="ze-info">
           <div class="ze-name" title="${f.filename}">${f.filename}</div>
           <div class="ze-meta" title="${chain}">${chain} · ${f.size_kb} KB</div>
         </div>
-        <button class="btn btn-outline-danger btn-sm ze-dl" onclick="downloadSingle(${i})" title="下载">
+        <button class="btn btn-outline-danger btn-sm ze-dl" onclick="downloadSingle(${i})" title="单独下载">
           <i class="bi bi-download"></i>
         </button>
       </div>
@@ -209,23 +219,78 @@ function downloadSingle(idx) {
   URL.revokeObjectURL(url);
 }
 
-function downloadAll() {
-  if (STATE.files.length === 0) return;
+// ===== 选择与导出 =====
+function toggleSelectAll(cb) {
+  STATE.files.forEach((f, i) => { f._selected = cb.checked; });
+  document.querySelectorAll('.ze-cb').forEach(c => c.checked = cb.checked);
+  document.querySelectorAll('.ze-file-item').forEach(el => {
+    el.classList.toggle('deselected', !cb.checked);
+  });
+  refreshSummary();
+}
+
+function onFileToggle(idx, checked) {
+  STATE.files[idx]._selected = checked;
+  document.getElementById('zeFile'+idx)?.classList.toggle('deselected', !checked);
+  // 检查是否需要更新全选复选框
+  const allCbs = document.querySelectorAll('.ze-cb');
+  const allSel = document.getElementById('zeSelectAll');
+  if (allSel) allSel.checked = Array.from(allCbs).every(c => c.checked);
+  refreshSummary();
+}
+
+function deleteSelected() {
+  const before = STATE.files.length;
+  STATE.files = STATE.files.filter(f => f._selected !== false);
+  const removed = before - STATE.files.length;
+  if (removed === 0) { alert('请先勾选要删除的文件'); return; }
+  if (!confirm(`确定删除 ${removed} 个文件吗？`)) return;
+  // 重新渲染
+  renderResult({ total: STATE.files.length, files: STATE.files });
+}
+
+function downloadSelected() {
   if (typeof JSZip === 'undefined') {
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-    s.onload = () => downloadAll();
+    s.onload = () => downloadSelected();
     document.head.appendChild(s);
     return;
   }
+  const selected = STATE.files.filter(f => f._selected !== false);
+  if (selected.length === 0) { alert('没有选中的文件'); return; }
+  if (selected.length === 1) {
+    // 单文件直接下载，不走zip打包
+    const idx = STATE.files.indexOf(selected[0]);
+    downloadSingle(idx);
+    return;
+  }
   const zip = new JSZip();
-  STATE.files.forEach(f => { if (f.data_b64) zip.file(f.filename, f.data_b64, {base64:true}); });
-  zip.generateAsync({type:'blob'}).then(blob => {
+  const names = {};
+  selected.forEach(f => {
+    if (!f.data_b64) return;
+    // 处理重名
+    let name = f.filename;
+    names[name] = (names[name] || 0) + 1;
+    if (names[name] > 1) {
+      const dot = name.lastIndexOf('.');
+      name = dot > 0 ? name.slice(0, dot) + `_${names[name]-1}` + name.slice(dot) : name + `_${names[name]-1}`;
+    }
+    zip.file(name, f.data_b64, { base64: true });
+  });
+  zip.generateAsync({ type: 'blob' }).then(blob => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = '提取的发票文件.zip'; a.click();
     URL.revokeObjectURL(url);
-  }).catch(err => alert('打包失败: '+err.message));
+  }).catch(err => alert('打包失败: ' + err.message));
+}
+
+function refreshSummary() {
+  const total = STATE.files.length;
+  const selected = STATE.files.filter(f => f._selected !== false).length;
+  const badge = document.querySelector('.ze-summary .badge');
+  if (badge) badge.textContent = `${selected}/${total} 个 PDF 文件`;
 }
 </script>
 {% endraw %}
