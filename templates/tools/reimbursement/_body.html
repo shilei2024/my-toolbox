@@ -728,19 +728,49 @@ function entRow(e,i) {
 }
 
 function vehRow(v,i) {
+  const kmTotal = calcKmTotal(v);
   return `<tr>
     <td><input type="date" value="${esc(v.date)}" onchange="updateAux('veh',${i},'date',this.value)"></td>
     <td><input value="${esc(v.from_location)}" style="width:50px" onchange="updateAux('veh',${i},'from_location',this.value)"></td>
     <td><input value="${esc(v.to_location)}" style="width:100px" onchange="updateAux('veh',${i},'to_location',this.value)"></td>
     <td><input value="${esc(v.contact)}" style="width:70px" onchange="updateAux('veh',${i},'contact',this.value)"></td>
-    <td><input type="number" value="${esc(v.km_start)}" style="width:70px" onchange="updateAux('veh',${i},'km_start',this.value)"></td>
-    <td><input type="number" value="${esc(v.km_end)}" style="width:70px" onchange="updateAux('veh',${i},'km_end',this.value)"></td>
-    <td><input type="number" step="0.1" value="${esc(v.km_total)}" style="width:60px" onchange="updateAux('veh',${i},'km_total',this.value)"></td>
+    <td><input type="number" step="0.1" value="${esc(v.km_start)}" style="width:70px" onchange="updateAuxKm(${i},'km_start',this.value)"></td>
+    <td><input type="number" step="0.1" value="${esc(v.km_end)}" style="width:70px" onchange="updateAuxKm(${i},'km_end',this.value)"></td>
+    <td class="text-center" style="font-weight:600;min-width:60px;" id="kmTotal${i}">${kmTotal || '-'}</td>
     <td><input type="number" step="0.01" value="${esc(v.toll_fee)}" style="width:60px" onchange="updateAux('veh',${i},'toll_fee',this.value)"></td>
     <td><input type="number" step="0.01" value="${esc(v.parking_fee)}" style="width:60px" onchange="updateAux('veh',${i},'parking_fee',this.value)"></td>
     <td><input value="${esc(v.remarks)}" style="width:80px" onchange="updateAux('veh',${i},'remarks',this.value)"></td>
     <td><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeAux('veh',${i})">✕</button></td>
   </tr>`;
+}
+
+function calcKmTotal(v) {
+  const start = parseFloat(v.km_start);
+  const end = parseFloat(v.km_end);
+  if (!isNaN(start) && !isNaN(end) && end >= start) {
+    return (end - start).toFixed(1);
+  }
+  return '';
+}
+
+function updateAuxKm(idx, field, val) {
+  const arr = STATE.vehicles;
+  if (!arr[idx]) return;
+  arr[idx][field] = val;
+  // 自动计算公里数
+  const start = parseFloat(arr[idx].km_start);
+  const end = parseFloat(arr[idx].km_end);
+  if (!isNaN(start) && !isNaN(end) && end >= start) {
+    arr[idx].km_total = (end - start).toFixed(1);
+  } else {
+    arr[idx].km_total = '';
+  }
+  // 更新显示
+  const td = document.getElementById('kmTotal' + idx);
+  if (td) {
+    td.textContent = arr[idx].km_total || '-';
+  }
+  saveState();
 }
 
 function travelRow(t,i) {
