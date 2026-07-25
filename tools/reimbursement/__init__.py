@@ -388,22 +388,50 @@ def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
 
 
 def _file_to_image_list(filepath: Path) -> list[bytes]:
-    """文件→图片字节列表。PDF 多页取前 3 页，其他格式直接读取。"""
+    """文件→图片字节列表。PDF 输出压缩 JPEG（<500KB），非 PDF 大图自动压缩。"""
     import io as _io
     ext = filepath.suffix.lower()
+
     if ext == ".pdf":
         try:
-            from pdf2image import convert_from_path
-            imgs = convert_from_path(str(filepath), dpi=250, first_page=1, last_page=3, fmt="png")
+            import fitz
+            doc = fitz.open(str(filepath))
             result = []
-            for im in imgs:
-                b = _io.BytesIO(); im.save(b, format="PNG"); result.append(b.getvalue())
+            for page_num in range(min(len(doc), 3)):
+                page = doc[page_num]
+                mat = fitz.Matrix(200 / 72, 200 / 72)
+                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                jpg = pix.tobytes("jpeg")
+                if len(jpg) > 800_000:
+                    mat2 = fitz.Matrix(150 / 72, 150 / 72)
+                    pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
+                    jpg = pix2.tobytes("jpeg")
+                result.append(jpg)
+            doc.close()
             return result
         except Exception as e:
-            current_app.logger.warning("PDF→image: %s", e)
+            current_app.logger.warning("PyMuPDF: %s", e)
+
+        try:
+            from pdf2image import convert_from_path
+            imgs = convert_from_path(str(filepath), dpi=200, first_page=1, last_page=3, fmt="jpeg")
+            return [im.tobytes() if hasattr(im,'tobytes') else (lambda b: (b.seek(0),b.getvalue())[1])((lambda: (_io.BytesIO(),im.save(_io.BytesIO(),format='JPEG',quality=85))[0])()) for im in imgs]
+        except: pass
+        return []
+
+    # 非 PDF
     try:
-        return [filepath.read_bytes()]
-    except Exception:
+        raw = filepath.read_bytes()
+        if len(raw) > 2_000_000:
+            from PIL import Image
+            img = Image.open(_io.BytesIO(raw))
+            w, h = img.size
+            if max(w, h) > 2000:
+                img = img.resize((int(w*2000/max(w,h)), int(h*2000/max(w,h))), Image.LANCZOS)
+            buf = _io.BytesIO(); img.convert("RGB").save(buf, format="JPEG", quality=85)
+            return [buf.getvalue()]
+        return [raw]
+    except:
         return []
 
 
@@ -443,23 +471,61 @@ def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
 # 结果解析
 # ---------------------------------------------------------------------------
 def _parse_vat(words: dict) -> dict:
+    """
+    解析百度增值税发票识别结果。
+    兼容传统增值税发票和全电发票两种格式。
+    实测字段映射（全电发票）:
+      AmountInFiguers = 价税合计(小写)  480.00 ← 总额
+      TotalAmount     = 不含税金额       475.25 ← 税前
+    税额为 480.00 - 475.25 = 4.75
+    """
     def _g(f):
         v = words.get(f, "")
         return v[0] if isinstance(v, list) and v else (str(v) if v else "")
-    amt = _g("AmountInFiguers") or _g("TotalAmount") or ""
+
+    # 全电发票: AmountInFiguers=价税合计, TotalAmount=不含税金额
+    # 传统发票: AmountInFiguers=价税合计, TotalAmount 可能也是总额
+    total = _g("AmountInFiguers") or _g("TotalAmount") or ""
+    no_tax = _g("TotalAmount") or ""
     tax = _g("TaxAmount") or ""
-    no_tax = ""
-    try:
-        if amt and tax: no_tax = str(round(float(amt) - float(tax), 2))
-    except: pass
+
+    # 推测逻辑：如果 total != no_tax，差额即为税额
+    if not tax and total and no_tax:
+        try:
+            diff = round(float(total) - float(no_tax), 2)
+            if diff > 0: tax = str(diff)
+        except: pass
+
+    # 如果 total==no_tax 或无 no_tax，税额归零
+    if not tax and total:
+        try:
+            if not no_tax or abs(float(total) - float(no_tax)) < 0.005:
+                no_tax = str(float(total))
+                tax = "0.00"
+        except: pass
+
+    # 交叉补全
+    if not total and no_tax: total = no_tax
+    if not no_tax and total and tax:
+        try: no_tax = str(round(float(total) - float(tax), 2))
+        except: pass
+
+    # description: 可能是字符串、或 [{"row":"1","word":"*餐费"}]
+    desc = _g("CommodityName") or _g("CommodityType") or ""
+    if not desc:
+        items = words.get("CommodityName", [])
+        if isinstance(items, list) and items:
+            parts = [item.get("word","") if isinstance(item,dict) else str(item) for item in items if item]
+            desc = "；".join(p.strip() for p in parts[:3] if p.strip())
+
     return {
-        "invoice_number": _g("InvoiceNum") or _g("InvoiceCodeConfirm"),
-        "invoice_date": _g("InvoiceDate"),
-        "seller_name": _g("SellerName"),
+        "invoice_number": _g("InvoiceNum") or _g("InvoiceCodeConfirm") or "",
+        "invoice_date": _g("InvoiceDate") or _g("InvoiceTime") or "",
+        "seller_name": _g("SellerName") or "",
         "amount_excluding_tax": no_tax,
         "tax_amount": tax,
-        "total_amount": amt,
-        "description": _g("CommodityName") or _g("CommodityType") or "",
+        "total_amount": total,
+        "description": (desc or "")[:80],
     }
 
 
