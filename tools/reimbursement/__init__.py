@@ -315,45 +315,52 @@ def preview(filename):
 @require_usage("reimbursement")
 def ocr():
     """
-    OCR 识别发票信息。接收 JSON: {"image_base64": "..."} 或 {"file_id": "..."} (兼容旧版)
+    OCR 识别发票信息。
+    接收 JSON: {"file_id": "...", "image_base64": "..."}
 
-    Vercel 兼容：不依赖跨请求文件系统，图片数据通过 base64 直接传入。
+    优先级：file_id（原始文件，质量最高）> image_base64（Vercel 兼容降级）
+    OCR 策略：百度增值税发票识别 → 百度通用 OCR → PaddleOCR 本地识别 → 模拟降级
     """
     data = request.get_json(silent=True) or {}
+    img_bytes = None
 
-    # 方案 A：base64 直接传入（推荐，Vercel 兼容）
-    img_b64 = (data.get("image_base64") or "").strip()
-    if img_b64:
-        import base64
-        # 移除可能的 data:xxx;base64, 前缀
-        if "," in img_b64 and "base64" in img_b64:
-            img_b64 = img_b64.split(",", 1)[1]
-        try:
-            img_bytes = base64.b64decode(img_b64)
-        except Exception:
-            return jsonify(error="base64 解码失败"), 400
-    else:
-        # 方案 B：文件上传（兼容旧版），从 request.files 或磁盘查找
-        f = request.files.get("file")
+    # 方案 A：通过 file_id 读取服务器上的原始文件（质量最高，推荐）
+    file_id = (data.get("file_id") or "").strip()
+    if file_id:
         upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
-        file_id = data.get("file_id", "")
-
-        if f and f.filename:
-            img_bytes = f.read()
-        elif file_id:
-            filepath = None
-            for p in upload_dir.glob(f"{file_id}.*"):
-                filepath = p; break
-            if not filepath or not filepath.exists():
-                return jsonify(error="文件未找到，请重新上传"), 404
+        filepath = None
+        for p in upload_dir.glob(f"{file_id}.*"):
+            filepath = p
+            break
+        if filepath and filepath.exists():
             img_bytes = filepath.read_bytes()
+            current_app.logger.info("OCR using original file: %s (%d bytes)", filepath.name, len(img_bytes))
+
+    # 方案 B：base64 直接传入（Vercel 兼容，或前端降级）
+    if not img_bytes:
+        img_b64 = (data.get("image_base64") or "").strip()
+        if img_b64:
+            import base64
+            # 移除可能的 data:xxx;base64, 前缀
+            if "," in img_b64 and "base64" in img_b64:
+                img_b64 = img_b64.split(",", 1)[1]
+            try:
+                img_bytes = base64.b64decode(img_b64)
+                current_app.logger.info("OCR using base64: %d bytes", len(img_bytes))
+            except Exception:
+                return jsonify(error="base64 解码失败"), 400
         else:
-            return jsonify(error="请提供 image_base64 或 file_id + 文件"), 400
+            # 方案 C：文件上传（兼容旧版）
+            f = request.files.get("file")
+            if f and f.filename:
+                img_bytes = f.read()
+            else:
+                return jsonify(error="请提供 file_id 或 image_base64"), 400
 
     if not img_bytes:
         return jsonify(error="图片数据为空"), 400
 
-    # 尝试百度云 OCR
+    # --- 策略 1: 百度云 OCR（优先，增值税发票识别 + 通用 OCR） ---
     baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
     baidu_secret = os.environ.get("BAIDU_OCR_SECRET_KEY", "").strip()
 
@@ -361,11 +368,56 @@ def ocr():
         try:
             result = _baidu_ocr_from_bytes(img_bytes, baidu_key, baidu_secret)
             if result:
-                return jsonify(success=True, data=result, provider="baidu")
+                has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
+                if has_data:
+                    return jsonify(success=True, data=result, provider="baidu")
+                else:
+                    current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
         except Exception as e:
             current_app.logger.warning("Baidu OCR error: %s", e)
+    else:
+        current_app.logger.info("Baidu OCR keys not configured, skipping...")
 
-    # 模拟降级
+    # --- 策略 2: PaddleOCR 本地识别 ---
+    try:
+        # 先保存为临时文件（PaddleOCR 需要文件路径）
+        upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
+        tmp_path = upload_dir / f"_ocr_tmp_{uuid.uuid4().hex[:8]}.png"
+        try:
+            # 如果是 PDF 或大图片，先转为 PNG
+            from PIL import Image
+            import io as _io
+            if img_bytes[:5] == b"%PDF-":
+                import fitz
+                doc = fitz.open(stream=img_bytes, filetype="pdf")
+                page = doc[0]
+                mat = fitz.Matrix(300 / 72, 300 / 72)  # 300 DPI for OCR
+                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                pix.save(str(tmp_path))
+                doc.close()
+            else:
+                img = Image.open(_io.BytesIO(img_bytes))
+                if img.mode in ("RGBA", "LA", "P"):
+                    img = img.convert("RGB")
+                w, h = img.size
+                if max(w, h) > 4000:
+                    ratio = 4000 / max(w, h)
+                    img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+                img.save(str(tmp_path), format="PNG")
+
+            result = _paddle_ocr_invoice(tmp_path)
+            if result and (result.get("invoice_number") or result.get("total_amount")):
+                return jsonify(success=True, data=result, provider="paddleocr")
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+    except Exception as e:
+        current_app.logger.warning("PaddleOCR fallback error: %s", e)
+
+    # --- 策略 3: 模拟降级 ---
     return jsonify(
         success=True,
         data={
@@ -384,11 +436,11 @@ def ocr():
 def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> dict | None:
     """
     完整 OCR 流程（接收字节，无需文件路径）。
-    PDF 字节 → PyMuPDF 转图片 → 预处理多版本 → 增值税发票识别 → 通用 OCR 降级
+    PDF 字节 → PyMuPDF 转高分辨率图片 → 预处理多版本 → 增值税发票识别 → 通用 OCR 降级
     """
     import io as _io
 
-    # Step 0: 检测是否为 PDF，是则转图片
+    # Step 0: 检测是否为 PDF，是则转高分辨率图片
     img_list = []
     if img_bytes[:5] == b"%PDF-":
         try:
@@ -396,11 +448,12 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
             doc = fitz.open(stream=img_bytes, filetype="pdf")
             for page_num in range(min(len(doc), 3)):
                 page = doc[page_num]
-                mat = fitz.Matrix(200 / 72, 200 / 72)
+                # 提高渲染 DPI 以获得更好的 OCR 效果
+                mat = fitz.Matrix(300 / 72, 300 / 72)
                 pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
                 jpg = pix.tobytes("jpeg")
-                if len(jpg) > 800_000:
-                    mat2 = fitz.Matrix(150 / 72, 150 / 72)
+                if len(jpg) > 2_500_000:
+                    mat2 = fitz.Matrix(200 / 72, 200 / 72)
                     pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
                     jpg = pix2.tobytes("jpeg")
                 img_list.append(jpg)
@@ -409,15 +462,16 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
             current_app.logger.warning("PyMuPDF stream: %s", e)
             img_list = [img_bytes]
     else:
-        if len(img_bytes) > 2_000_000:
+        # 非 PDF：大图片适度压缩，小图片保持原样
+        if len(img_bytes) > 4_000_000:
             try:
                 from PIL import Image
                 img = Image.open(_io.BytesIO(img_bytes))
                 w, h = img.size
-                if max(w, h) > 2000:
-                    img = img.resize((int(w * 2000 / max(w, h)), int(h * 2000 / max(w, h))), Image.LANCZOS)
+                if max(w, h) > 3000:
+                    img = img.resize((int(w * 3000 / max(w, h)), int(h * 3000 / max(w, h))), Image.LANCZOS)
                 buf = _io.BytesIO()
-                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                img.convert("RGB").save(buf, format="JPEG", quality=90)
                 img_list = [buf.getvalue()]
             except:
                 img_list = [img_bytes]
@@ -638,47 +692,82 @@ def _parse_vat(words: dict) -> dict:
 
 
 def _parse_general(words_list: list) -> dict:
+    """用增强正则模式从 OCR 文本中提取发票字段。"""
     import re
     text = " ".join([w.get("words", "") for w in (words_list or [])])
-    def _first(patterns):
+    # 也准备一个无空格版本用于某些模式
+    text_nospace = "".join([w.get("words", "") for w in (words_list or [])])
+
+    def _first(patterns, source=text):
         for p in patterns:
-            m = re.search(p, text)
-            if m: return m.group(1).replace(",", "").strip()
+            m = re.search(p, source)
+            if m:
+                # 取最后一个有值的捕获组
+                for g in reversed(m.groups()):
+                    if g is not None:
+                        return g.replace(",", "").replace("，", "").strip()
+        return ""
+
+    def _first_amt(patterns, source=text):
+        """专门匹配金额的模式。"""
+        for p in patterns:
+            m = re.search(p, source)
+            if m:
+                for g in reversed(m.groups()):
+                    if g is not None:
+                        val = g.replace(",", "").replace("，", "").strip()
+                        # 验证是否为有效金额格式
+                        if re.match(r'^\d+\.?\d*$', val):
+                            return val
         return ""
 
     return {
         "invoice_number": _first([
             r"发票号码[：:\s]*([A-Za-z0-9\-]{8,30})",
-            r"No[\.\s]*([A-Za-z0-9\-]{8,30})", r"号码[：:\s]*([A-Za-z0-9\-]{8,30})",
-            r"(\d{10,12})",
+            r"No[\.\s]*([A-Za-z0-9\-]{8,30})",
+            r"号码[：:\s]*([A-Za-z0-9\-]{8,30})",
+            r"发票代码[：:\s]*(\d{10,12})\s*[,\s]+\s*(\d{8,10})",  # 发票代码 + 发票号码
+            r"(\d{20})",  # 全电发票 20 位号码
+            r"(\d{10,12})\s+[¥￥]\s*\d",  # 10-12位数字后跟金额符号
+            r"(\d{8,12})",  # 传统发票号码
         ]),
         "invoice_date": _first([
             r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)",
-            r"开票日期[：:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})",
-            r"日期[：:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})",
+            r"开票日期[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})",
+            r"日期[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})",
+            r"(\d{4}-\d{2}-\d{2})",
+            r"(\d{4}/\d{2}/\d{2})",
+            r"(\d{4}年\d{1,2}月\d{1,2}日)",
         ]),
         "seller_name": _first([
-            r"[销銷]售方[名称稱][：:\s]*([^\s，,]{4,40}?(?:有限公司|股份有限公司|有限责任公司|科技|电子|实业|集团|工厂|中心|经营部|商店)[^\s]{0,10})",
-            r"[销銷]售?[方务][：:\s]*([^\s，,]{4,40}?(?:公司|科技|工厂|中心)[^\s]{0,10})",
-            r"名称[：:\s]*([^\s，,]{4,40}?(?:有限公司|股份有限公司|科技|电子|实业)[^\s]{0,10})",
+            r"[销銷]售方[名称稱][：:\s]*([^\s，\n,]{4,60}?(?:有限公司|股份有限公司|有限责任公司|科技|电子|实业|集团|工厂|中心|经营部|商店|事务所|工作室|商行|服务部)[^\s，\n]{0,20})",
+            r"[销銷]售?[方务][：:\s]*([^\s，\n,]{4,60}?(?:公司|科技|工厂|中心|事务所)[^\s，\n]{0,20})",
+            r"名称[：:\s]*([^\s，\n,]{4,60}?(?:有限公司|股份有限公司|科技|电子|实业|集团|经营部)[^\s，\n]{0,20})",
+            r"销货单位[名称稱]?[：:\s]*([^\s，\n,]{4,60}?(?:公司|工厂|商店)[^\s，\n]{0,20})",
         ]),
-        "amount_excluding_tax": _first([
+        "amount_excluding_tax": _first_amt([
             r"金额[\(（]不含税[\)）]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
-            r"不含税金额\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"不含税金额[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"不含税价[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})",
         ]),
-        "tax_amount": _first([
-            r"税额\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
-            r"税[额費]\s*([\d,]+\.?\d{0,2})",
+        "tax_amount": _first_amt([
+            r"[税稅]额[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"税[额費金][：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})",
         ]),
-        "total_amount": _first([
-            r"[价稅税]税?[合計]计[\(（]?[小写]?[\)）]?\s*[¥￥]\s*([\d,]+\.?\d{0,2})",
-            r"合[计計]\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
-            r"小写\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
-            r"[¥￥]\s*([\d,]+\.\d{2})",
+        "total_amount": _first_amt([
+            r"价税合计[\(（]?\s*[小写大写]?[\)）]?\s*[¥￥]\s*([\d,]+\.?\d{0,2})",
+            r"价税[合計]计[\(（]?[小写]?[\)）]?\s*[¥￥]\s*([\d,]+\.?\d{0,2})",
+            r"[合計]计[金]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"小写[金额]?\s*[¥￥]?\s*([\d,]+\.\d{2})",
+            r"[¥￥]\s*([\d,]+\.\d{2})",  # ¥符号后金额
+            r"金额[合計]?[计]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
         ]),
         "description": _first([
-            r"[货貨]物[或及].*?[名称稱][：:\s]*(.+)",
-            r"项目[名称稱][：:\s]*(.+)",
+            r"[货貨]物[或及].*?[名称稱][：:\s]*(.{1,60})",
+            r"项目[名称稱][：:\s]*(.{1,60})",
+            r"货物名称[：:\s]*(.{1,60})",
+            r"[\\*\\*](\S{2,20})",  # *商品名* 格式
+            r"[*＊](\S{2,20})[*＊]",  # *餐费* 等
         ])[:80],
     }
 

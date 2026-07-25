@@ -35,6 +35,20 @@
   .rb-thumb-card .ocr-badge { position: absolute; bottom: 4px; right: 4px; padding: 1px 6px; border-radius: 3px; font-size: 0.65rem; }
   .ocr-done { background: #d1e7dd; color: #0f5132; }
   .ocr-pending { background: #fff3cd; color: #664d03; }
+  .rb-thumb-card img { cursor: pointer; transition: transform 0.2s; }
+  .rb-thumb-card img:hover { transform: scale(1.03); }
+
+  /* 图片放大预览 Lightbox */
+  .rb-lightbox { display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); justify-content: center; align-items: center; flex-direction: column; }
+  .rb-lightbox.active { display: flex; }
+  .rb-lightbox img { max-width: 92vw; max-height: 80vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+  .rb-lightbox .lb-filename { color: #fff; margin-top: 16px; font-size: 0.9rem; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rb-lightbox .lb-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.12); border-radius: 50%; transition: background 0.2s; }
+  .rb-lightbox .lb-close:hover { background: rgba(255,255,255,0.25); }
+  .rb-lightbox .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); color: #fff; font-size: 2.2rem; cursor: pointer; width: 50px; height: 60px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border-radius: 8px; transition: background 0.2s; user-select: none; }
+  .rb-lightbox .lb-nav:hover { background: rgba(255,255,255,0.25); }
+  .rb-lightbox .lb-prev { left: 16px; }
+  .rb-lightbox .lb-next { right: 16px; }
 
   /* 编辑表格 */
   .rb-table-wrapper { overflow-x: auto; max-height: 55vh; }
@@ -258,6 +272,15 @@
 <!-- ===== 隐藏打印区 ===== -->
 <div id="rbPrintArea" style="display:none;"></div>
 
+<!-- ===== 图片放大预览 Lightbox ===== -->
+<div class="rb-lightbox" id="rbLightbox" onclick="closeLightbox(event)">
+  <span class="lb-close" onclick="closeLightbox()">&times;</span>
+  <span class="lb-nav lb-prev" onclick="event.stopPropagation();navLightbox(-1)">&#8249;</span>
+  <span class="lb-nav lb-next" onclick="event.stopPropagation();navLightbox(1)">&#8250;</span>
+  <img id="rbLightboxImg" src="" alt="" onclick="event.stopPropagation()">
+  <div class="lb-filename" id="rbLightboxName"></div>
+</div>
+
 <script>
 // ===== 全局状态 =====
 const STATE = {
@@ -407,11 +430,13 @@ function renderThumbnails() {
   grid.innerHTML = STATE.invoices.map((inv, i) => `
     <div class="rb-thumb-card" draggable="true" data-idx="${i}">
       <span class="drag-handle">☰</span>
-      <button class="btn-remove" onclick="removeInvoice(${i})">✕</button>
-      <img src="${inv.preview_url}" alt="${inv.original_name}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22140%22 height=%22120%22><rect fill=%22%23e9ecef%22 width=%22140%22 height=%22120%22/><text x=%2270%22 y=%2265%22 text-anchor=%22middle%22 fill=%22%236c757d%22 font-size=%2212%22>发票 ${i+1}</text></svg>'">
+      <button class="btn-remove" onclick="event.stopPropagation();removeInvoice(${i})">✕</button>
+      <img src="${inv.preview_url}" alt="${inv.original_name}" data-filename="${inv.original_name}" data-idx="${i}"
+           onclick="event.stopPropagation();openLightbox(${i})"
+           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22140%22 height=%22120%22><rect fill=%22%23e9ecef%22 width=%22140%22 height=%22120%22/><text x=%2270%22 y=%2265%22 text-anchor=%22middle%22 fill=%22%236c757d%22 font-size=%2212%22>发票 ${i+1}</text></svg>'">
       <div class="card-body">
-        <span class="name" style="display:block;margin-bottom:4px;">${inv.original_name}</span>
-        <button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:0.65rem;width:100%;" onclick="ocrInvoice(${i})" id="ocrBtn${i}">
+        <span class="name" style="display:block;margin-bottom:4px;" title="${inv.original_name}">${inv.original_name}</span>
+        <button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:0.65rem;width:100%;" onclick="event.stopPropagation();ocrInvoice(${i})" id="ocrBtn${i}">
           <i class="bi bi-cpu"></i> ${inv.ocr_done ? '重新识别' : 'OCR 识别'}
         </button>
       </div>
@@ -421,6 +446,44 @@ function renderThumbnails() {
   // 拖拽排序
   setupDragSort();
 }
+
+// ===== Lightbox 图片放大预览 =====
+let lightboxIdx = -1;
+
+function openLightbox(idx) {
+  lightboxIdx = idx;
+  const inv = STATE.invoices[idx];
+  if (!inv) return;
+  const lb = document.getElementById('rbLightbox');
+  document.getElementById('rbLightboxImg').src = inv.preview_url;
+  document.getElementById('rbLightboxName').textContent = inv.original_name;
+  lb.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox(e) {
+  // 如果点击的是 lightbox 背景（非图片），也关闭
+  if (e && e.target !== document.getElementById('rbLightbox')) return;
+  document.getElementById('rbLightbox').classList.remove('active');
+  document.body.style.overflow = '';
+  lightboxIdx = -1;
+}
+
+function navLightbox(dir) {
+  if (lightboxIdx < 0) return;
+  const newIdx = lightboxIdx + dir;
+  if (newIdx >= 0 && newIdx < STATE.invoices.length) {
+    openLightbox(newIdx);
+  }
+}
+
+// 键盘导航：ESC关闭，左右箭头切换
+document.addEventListener('keydown', function(e) {
+  if (!document.getElementById('rbLightbox').classList.contains('active')) return;
+  if (e.key === 'Escape') closeLightbox();
+  if (e.key === 'ArrowLeft') navLightbox(-1);
+  if (e.key === 'ArrowRight') navLightbox(1);
+});
 
 function setupDragSort() {
   const cards = document.querySelectorAll('.rb-thumb-card');
@@ -1030,7 +1093,7 @@ function autoCategorize(inv) {
   }
 }
 
-// ===== OCR 识别（Vercel 兼容：前端读取文件 base64 直传） =====
+// ===== OCR 识别（优先使用服务器原始文件，base64 作为降级） =====
 async function ocrInvoice(idx) {
   const inv = STATE.invoices[idx];
   if (!inv || !inv.preview_url) return;
@@ -1039,21 +1102,29 @@ async function ocrInvoice(idx) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 识别中...'; }
 
   try {
-    // 从预览 URL 获取图片 blob，转 base64
-    const resp = await fetch(inv.preview_url);
-    const blob = await resp.blob();
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // 构建请求体：file_id 优先（后端会用原始文件，质量最高）
+    const payload = { file_id: inv.id };
+
+    // 同时附带 base64 作为降级（当服务器上没有原始文件时使用）
+    try {
+      const imgResp = await fetch(inv.preview_url);
+      const blob = await imgResp.blob();
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      payload.image_base64 = base64;
+    } catch(e) {
+      console.warn('无法读取预览图用作降级:', e);
+    }
 
     // 发送到 OCR 端点
     const ocrResp = await fetch('/tools/reimbursement/ocr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_base64: base64 }),
+      body: JSON.stringify(payload),
     });
     const ocrData = await ocrResp.json();
     
@@ -1068,18 +1139,23 @@ async function ocrInvoice(idx) {
       if (d.total_amount) inv.data.total_amount = d.total_amount;
       if (d.description) inv.data.description = d.description;
       inv.ocr_done = true;
-      inv.ocr_provider = ocrData.provider;
+      inv.ocr_provider = ocrData.provider || 'unknown';
 
       // ===== OCR 后自动分类 =====
       autoCategorize(inv);
 
       saveState();
       
-      if (btn) { btn.classList.remove('btn-outline-primary'); btn.classList.add('btn-outline-success'); btn.innerHTML = '<i class="bi bi-check-circle"></i> 已识别'; }
+      if (btn) {
+        const providerLabel = ocrData.provider === 'baidu' ? '百度' : ocrData.provider === 'paddleocr' ? 'Paddle' : '已';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-outline-success');
+        btn.innerHTML = `<i class="bi bi-check-circle"></i> ${providerLabel}识别`;
+      }
       renderEditTable(); // 如果正在步骤2，刷新表格
     } else {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> 重试识别'; }
-      alert('识别失败，请手动填写或重试。');
+      alert('识别失败，请手动填写或重试。' + (ocrData.note ? '\n' + ocrData.note : ''));
     }
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> 重试识别'; }
