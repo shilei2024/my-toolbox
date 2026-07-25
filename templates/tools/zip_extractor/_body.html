@@ -95,7 +95,7 @@
 </div>
 
 <script>
-const STATE = { workId: null, files: [] };
+const STATE = { files: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   const zone = document.getElementById('zeUploadZone');
@@ -127,7 +127,6 @@ async function handleFiles(files) {
     const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
     const data = await resp.json();
     if (data.success) {
-      STATE.workId = data.work_id;
       STATE.files = data.files;
       renderResult(data);
     } else {
@@ -155,7 +154,7 @@ function renderResult(data) {
     <div class="ze-file-list">
   `;
 
-  data.files.forEach(f => {
+  data.files.forEach((f, i) => {
     const chain = (f.path_chain || []).slice(-2).join(' / ');
     html += `
       <div class="ze-file-item">
@@ -164,9 +163,9 @@ function renderResult(data) {
           <div class="ze-name" title="${f.filename}">${f.filename}</div>
           <div class="ze-meta" title="${chain}">${chain} · ${f.size_kb} KB</div>
         </div>
-        <a class="btn btn-outline-danger btn-sm ze-dl" href="/tools/zip-extractor/download/${STATE.workId}/${f.download_id}" download>
+        <button class="btn btn-outline-danger btn-sm ze-dl" onclick="downloadSingle(${i})" title="下载">
           <i class="bi bi-download"></i>
-        </a>
+        </button>
       </div>
     `;
   });
@@ -177,24 +176,36 @@ function renderResult(data) {
   document.getElementById('zeEmpty').classList.add('hidden');
 }
 
+function downloadSingle(idx) {
+  const f = STATE.files[idx];
+  if (!f || !f.data_b64) return;
+  const byteStr = atob(f.data_b64);
+  const bytes = new Uint8Array(byteStr.length);
+  for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = f.filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 function downloadAll() {
-  if (!STATE.workId) return;
-  // 用fetch下载zip blob
-  fetch('/tools/zip-extractor/download-all', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ work_id: STATE.workId }),
-  }).then(resp => {
-    if (!resp.ok) return resp.json().then(e => { throw new Error(e.error); });
-    return resp.blob();
-  }).then(blob => {
+  if (STATE.files.length === 0) return;
+  if (typeof JSZip === 'undefined') {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload = () => downloadAll();
+    document.head.appendChild(s);
+    return;
+  }
+  const zip = new JSZip();
+  STATE.files.forEach(f => { if (f.data_b64) zip.file(f.filename, f.data_b64, {base64:true}); });
+  zip.generateAsync({type:'blob'}).then(blob => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = '提取的发票文件.zip';
-    a.click();
+    a.href = url; a.download = '提取的发票文件.zip'; a.click();
     URL.revokeObjectURL(url);
-  }).catch(err => alert('下载失败: ' + err.message));
+  }).catch(err => alert('打包失败: '+err.message));
 }
 </script>
 {% endraw %}
