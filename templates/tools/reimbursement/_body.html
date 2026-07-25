@@ -357,7 +357,7 @@ function bindEvents() {
   });
 }
 
-// ===== 文件处理 =====
+// ===== 文件处理（上传 + 自动 OCR） =====
 async function handleFiles(files) {
   for (const f of files) {
     const fd = new FormData();
@@ -372,7 +372,7 @@ async function handleFiles(files) {
       });
       const data = await resp.json();
       if (data.success) {
-        STATE.invoices.push({
+        const newInv = {
           id: data.file_id,
           filename: data.filename,
           original_name: data.original_name,
@@ -384,7 +384,14 @@ async function handleFiles(files) {
           },
           product_line: '', product_line_code: '', expense_type: '', office: STATE.header.office || '深圳办',
           customer_level: '', remarks: '',
-        });
+        };
+        STATE.invoices.push(newInv);
+        renderThumbnails();
+        saveState();
+
+        // 上传完成后自动 OCR
+        const idx = STATE.invoices.length - 1;
+        ocrInvoice(idx);
       } else {
         alert('上传失败: ' + (data.error || '未知错误'));
       }
@@ -392,7 +399,6 @@ async function handleFiles(files) {
       alert('上传异常: ' + e.message);
     }
   }
-  renderThumbnails();
   saveState();
 }
 
@@ -973,6 +979,57 @@ function printInvoices() {
 window.removeInvoice = removeInvoice;
 window.ocrInvoice = ocrInvoice;
 
+// ===== OCR 后自动分类费用类型 =====
+function autoCategorize(inv) {
+  const seller = (inv.data.seller_name || '').toLowerCase();
+  const desc = (inv.data.description || '').toLowerCase();
+  const filename = (inv.original_name || '').toLowerCase();
+  const combined = seller + ' ' + desc + ' ' + filename;
+
+  // 餐饮类 → 招待费
+  const mealKw = ['餐', '餐饮', '食', '饭', '菜', '火锅', '烧烤', '酒楼', '餐厅', '饭店', '美食', '快餐', '外卖', '咖啡', '茶'];
+  if (mealKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'entertainment';
+    return;
+  }
+  // 交通类 → 市内交通费 / 车辆费用
+  const transportKw = ['交通', '出租车', '打车', '滴滴', '高德', '地铁', '公交', '高铁', '火车', '机票', '航班', '机场', '加油', '停车', '过路', '高速', 'etc', '充电'];
+  if (transportKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'local_transport';
+    return;
+  }
+  // 车辆费用
+  const vehicleKw = ['加油', '洗车', '保养', '维修', '年检', '车险', '车', 'etc', '高速费', '过路费'];
+  if (vehicleKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'vehicle';
+    return;
+  }
+  // 住宿类 → 出差住宿费
+  const hotelKw = ['酒店', '宾馆', '住宿', '民宿', '客栈', '旅馆', '公寓'];
+  if (hotelKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'travel_hotel';
+    return;
+  }
+  // 办公类
+  const officeKw = ['办公', '文具', '耗材', '打印', '复印', '纸张', '硒鼓', '墨盒'];
+  if (officeKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'office_supplies';
+    return;
+  }
+  // 快递类
+  const deliveryKw = ['快递', '物流', '顺丰', '邮政', 'ems', '圆通', '中通', '韵达', '申通', '京东快递'];
+  if (deliveryKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'delivery';
+    return;
+  }
+  // 通讯类
+  const commKw = ['话费', '通讯', '宽带', '流量', '移动', '联通', '电信', '月租'];
+  if (commKw.some(k => combined.includes(k))) {
+    inv.expense_type = 'communication';
+    return;
+  }
+}
+
 // ===== OCR 识别（Vercel 兼容：前端读取文件 base64 直传） =====
 async function ocrInvoice(idx) {
   const inv = STATE.invoices[idx];
@@ -1012,6 +1069,10 @@ async function ocrInvoice(idx) {
       if (d.description) inv.data.description = d.description;
       inv.ocr_done = true;
       inv.ocr_provider = ocrData.provider;
+
+      // ===== OCR 后自动分类 =====
+      autoCategorize(inv);
+
       saveState();
       
       if (btn) { btn.classList.remove('btn-outline-primary'); btn.classList.add('btn-outline-success'); btn.innerHTML = '<i class="bi bi-check-circle"></i> 已识别'; }

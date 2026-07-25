@@ -253,6 +253,24 @@ def upload():
     filepath = upload_dir / safe_name
     f.save(str(filepath))
 
+    # PDF → 生成缩略图 PNG
+    preview_filename = safe_name
+    if ext == ".pdf":
+        try:
+            import fitz
+            doc = fitz.open(str(filepath))
+            page = doc[0]
+            # 缩略图：200px 高度
+            zoom = 200 / page.rect.height
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+            thumb_name = f"{file_id}_thumb.png"
+            pix.save(str(upload_dir / thumb_name))
+            doc.close()
+            preview_filename = thumb_name
+        except Exception:
+            pass
+
     commit_usage("reimbursement")
 
     return jsonify(
@@ -260,7 +278,7 @@ def upload():
         file_id=file_id,
         filename=safe_name,
         original_name=f.filename,
-        preview_url=f"/tools/reimbursement/preview/{safe_name}",
+        preview_url=f"/tools/reimbursement/preview/{preview_filename}",
         size=filepath.stat().st_size,
     )
 
