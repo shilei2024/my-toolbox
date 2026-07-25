@@ -626,7 +626,24 @@ function levelOpts(selected) {
   return levels.map(l => `<option value="${l.name}" ${selected===l.name?'selected':''}>${l.label}</option>`).join('');
 }
 
+// ===== 工具函数 =====
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function normalizeDate(raw) {
+  // 将各种日期格式统一转为 YYYY-MM-DD
+  if (!raw || !raw.trim()) return '';
+  raw = raw.trim();
+  // 已经是 YYYY-MM-DD 或 YYYY/MM/DD
+  let m = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  // 中文格式：2024年01月15日
+  m = raw.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日$/);
+  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  // 纯数字
+  m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  return raw;
+}
 
 function updateField(idx, field, val) {
   if (STATE.invoices[idx]) STATE.invoices[idx].data[field] = val;
@@ -1171,7 +1188,7 @@ async function ocrInvoice(idx) {
       // 回填发票数据
       const d = ocrData.data;
       if (d.invoice_number) inv.data.invoice_number = d.invoice_number;
-      if (d.invoice_date) inv.data.invoice_date = d.invoice_date;
+      if (d.invoice_date) inv.data.invoice_date = normalizeDate(d.invoice_date);
       if (d.seller_name) inv.data.seller_name = d.seller_name;
       if (d.amount_excluding_tax) inv.data.amount_excluding_tax = d.amount_excluding_tax;
       if (d.tax_amount) inv.data.tax_amount = d.tax_amount;

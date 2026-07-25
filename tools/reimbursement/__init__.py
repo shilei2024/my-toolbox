@@ -645,6 +645,29 @@ def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
 # ---------------------------------------------------------------------------
 # 结果解析
 # ---------------------------------------------------------------------------
+def _normalize_date(raw: str) -> str:
+    """将各种中文/数字日期格式统一转为 YYYY-MM-DD。"""
+    import re
+    if not raw or not raw.strip():
+        return ""
+    raw = raw.strip()
+    # 已经是 YYYY-MM-DD 或 YYYY/MM/DD
+    m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", raw)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # 中文格式：2024年01月15日 / 2024年1月15日 / 2024年 01月 15日
+    m = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", raw)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # 纯数字：20240115
+    m = re.search(r"(\d{4})(\d{2})(\d{2})", raw)
+    if m and 8 <= len(raw.replace(" ", "")) <= 10:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 2000 <= y <= 2100 and 1 <= mo <= 12 and 1 <= d <= 31:
+            return f"{y}-{mo:02d}-{d:02d}"
+    return raw
+
+
 def _parse_vat(words: dict) -> dict:
     """
     解析百度增值税发票识别结果。兼容全电发票和传统发票。
@@ -694,7 +717,7 @@ def _parse_vat(words: dict) -> dict:
 
     return {
         "invoice_number": _g("InvoiceNum") or _g("InvoiceCodeConfirm") or "",
-        "invoice_date": _g("InvoiceDate") or _g("InvoiceTime") or "",
+        "invoice_date": _normalize_date(_g("InvoiceDate") or _g("InvoiceTime") or ""),
         "seller_name": _g("SellerName") or "",
         "amount_excluding_tax": no_tax,
         "tax_amount": tax,
@@ -743,14 +766,14 @@ def _parse_general(words_list: list) -> dict:
             r"(\d{10,12})\s+[¥￥]\s*\d",  # 10-12位数字后跟金额符号
             r"(\d{8,12})",  # 传统发票号码
         ]),
-        "invoice_date": _first([
+        "invoice_date": _normalize_date(_first([
             r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)",
             r"开票日期[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})",
             r"日期[：:\s]*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})",
             r"(\d{4}-\d{2}-\d{2})",
             r"(\d{4}/\d{2}/\d{2})",
             r"(\d{4}年\d{1,2}月\d{1,2}日)",
-        ]),
+        ])),
         "seller_name": _first([
             r"[销銷]售方[名称稱][：:\s]*([^\s，\n,]{4,60}?(?:有限公司|股份有限公司|有限责任公司|科技|电子|实业|集团|工厂|中心|经营部|商店|事务所|工作室|商行|服务部)[^\s，\n]{0,20})",
             r"[销銷]售?[方务][：:\s]*([^\s，\n,]{4,60}?(?:公司|科技|工厂|中心|事务所)[^\s，\n]{0,20})",
@@ -878,7 +901,7 @@ def _paddle_ocr_invoice(filepath: Path) -> dict | None:
         # 开票日期
         m = re.search(r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)", full_text)
         if m:
-            invoice_date = m.group(1)
+            invoice_date = _normalize_date(m.group(1))
 
         # 价税合计
         m = re.search(r"[价税合计小写].*?[¥￥]\s*(\d+\.?\d*)", full_text)
