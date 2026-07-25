@@ -2,20 +2,22 @@
 批量压缩包 PDF 提取 — 递归解压多层嵌套 zip，筛选出所有 PDF 文件。
 
 Vercel 兼容：分析结果直接返回 base64 数据，不依赖跨请求文件系统。
-支持：zip 嵌套 zip、不同目录层级。
 """
 from __future__ import annotations
 
 import base64
-import io
 import hashlib
-import re
+import io
+import logging
 import zipfile
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file
+from flask import Blueprint, jsonify, render_template, request
 
 from auth.decorators import remaining_for
+from extensions import csrf, limiter
+
+log = logging.getLogger(__name__)
 
 tool_bp = Blueprint("zip_extractor", __name__, template_folder="templates")
 
@@ -41,7 +43,7 @@ def index():
 def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[dict]:
     """
     递归解压 zip 字节流，最深 8 层。
-    返回找到的所有 PDF 文件列表 [{filename, size, path_chain}].
+    返回找到的所有 PDF 文件列表 [{filename, size, path_chain, data}].
     """
     if depth > 8:
         return []
@@ -51,35 +53,35 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             for info in zf.infolist():
                 name = info.filename.rstrip("/")
-                # 跳过目录和隐藏文件
-                if info.is_dir() or name.startswith("__MACOSX") or name.startswith("."):
+                # 跳过目录、macOS 资源、隐藏文件
+                if info.is_dir() or name.startswith("__MACOSX") or Path(name).name.startswith("."):
                     continue
                 basename = Path(name).name
 
-                # PDF 文件 → 直接收集
                 if basename.lower().endswith(".pdf"):
-                    data = zf.read(info)
-                    results.append({
-                        "filename": basename,
-                        "size": len(data),
-                        "path_chain": [source_name, *info.filename.split("/")],
-                        "data": data,
-                    })
+                    try:
+                        data = zf.read(info)
+                        results.append({
+                            "filename": basename,
+                            "size": len(data),
+                            "path_chain": [source_name, *info.filename.split("/")],
+                            "data": data,
+                        })
+                    except Exception as e:
+                        log.warning("read PDF failed %s: %s", info.filename, e)
 
-                # 嵌套 zip → 递归解压
                 elif basename.lower().endswith(".zip"):
                     try:
                         inner_data = zf.read(info)
-                        inner_chain = f"{source_name} → {basename}"
-                        sub = _extract_deep(inner_data, inner_chain, depth + 1)
-                        results.extend(sub)
-                    except Exception:
-                        pass
+                        inner_source = f"{source_name} → {basename}"
+                        results.extend(_extract_deep(inner_data, inner_source, depth + 1))
+                    except Exception as e:
+                        log.warning("read inner zip failed %s: %s", info.filename, e)
 
     except zipfile.BadZipFile:
-        pass
-    except Exception:
-        pass
+        log.warning("BadZipFile from %s", source_name)
+    except Exception as e:
+        log.warning("extract exception %s: %s", source_name, e)
 
     return results
 
@@ -88,46 +90,58 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
 # API：上传并分析
 # ---------------------------------------------------------------------------
 @tool_bp.post("/analyze")
+@csrf.exempt
+@limiter.limit(lambda: "20/minute")
 def analyze():
-    """接收多个 zip 文件，递归解压找出所有 PDF，返回 base64 数据（Vercel 兼容）。"""
-    files = request.files.getlist("files")
-    if not files or all(not f.filename for f in files):
-        return jsonify(error="请选择至少一个 zip 文件"), 400
+    """接收多个 zip 文件，递归解压找出所有 PDF。"""
+    try:
+        files = request.files.getlist("files")
+        if not files or all(not (f and f.filename) for f in files):
+            return jsonify(success=False, error="请选择至少一个 zip 文件"), 400
 
-    all_pdfs = []
+        all_pdfs = []
 
-    for f in files:
-        if not f.filename:
-            continue
-        zip_bytes = f.read()
-        pdfs = _extract_deep(zip_bytes, f.filename)
-        all_pdfs.extend(pdfs)
+        for f in files:
+            if not f.filename:
+                continue
+            if not f.filename.lower().endswith(".zip"):
+                continue
+            try:
+                zip_bytes = f.read()
+                if not zip_bytes:
+                    continue
+                log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
+                pdfs = _extract_deep(zip_bytes, f.filename)
+                all_pdfs.extend(pdfs)
+            except Exception as e:
+                log.warning("Failed to read %s: %s", f.filename, e)
 
-    # 按内容哈希去重
-    seen = set()
-    unique = []
-    for p in all_pdfs:
-        data = p.pop("data")
-        h = _quick_hash(data)
-        if h not in seen:
+        # 按内容哈希去重
+        seen = set()
+        unique = []
+        for p in all_pdfs:
+            data = p.pop("data")
+            h = _quick_hash(data)
+            if h in seen:
+                continue
             seen.add(h)
-            # 编码为 base64 直接返回（Vercel 无状态兼容）
             p["data_b64"] = base64.b64encode(data).decode("ascii")
             p["size_kb"] = round(len(data) / 1024, 1)
             unique.append(p)
-        else:
-            p.pop("data", None)
 
-    # 限制总返回大小 ~50MB
-    total_b64 = sum(len(p["data_b64"]) for p in unique)
-    if total_b64 > 50_000_000:
-        return jsonify(error=f"PDF 总大小过大（{total_b64/1e6:.0f}MB），请分批上传"), 413
+        # 限制总返回 ~50MB
+        total_b64 = sum(len(p["data_b64"]) for p in unique)
+        if total_b64 > 50_000_000:
+            return jsonify(
+                success=False,
+                error=f"PDF 总大小过大（{total_b64/1e6:.0f}MB），请分批上传",
+            ), 413
 
-    return jsonify(
-        success=True,
-        total=len(unique),
-        files=unique,
-    )
+        return jsonify(success=True, total=len(unique), files=unique)
+
+    except Exception as e:
+        log.exception("analyze fatal error")
+        return jsonify(success=False, error=f"服务器错误：{type(e).__name__}: {str(e)[:200]}"), 500
 
 
 def _quick_hash(data: bytes) -> str:

@@ -113,8 +113,21 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function handleFiles(files) {
-  const zipFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.zip'));
-  if (zipFiles.length === 0) { alert('请选择 .zip 文件'); return; }
+  // 只保留 zip 文件
+  const zipFiles = Array.from(files).filter(f =>
+    f && f.name && f.name.toLowerCase().endsWith('.zip') && f.size > 0
+  );
+  if (zipFiles.length === 0) {
+    alert('请选择至少一个有效的 .zip 文件');
+    return;
+  }
+  // 单文件 50MB 上限
+  for (const f of zipFiles) {
+    if (f.size > 50 * 1024 * 1024) {
+      alert(`文件 ${f.name} 超过 50MB 上限`);
+      return;
+    }
+  }
 
   document.getElementById('zeLoading').classList.remove('hidden');
   document.getElementById('zeEmpty').classList.add('hidden');
@@ -125,7 +138,14 @@ async function handleFiles(files) {
 
   try {
     const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
-    const data = await resp.json();
+    const text = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error('Non-JSON response:', text.substring(0, 500));
+      throw new Error(`服务器返回非 JSON（HTTP ${resp.status}）：` + (text.substring(0, 150) || resp.statusText));
+    }
     if (data.success) {
       STATE.files = data.files;
       renderResult(data);
