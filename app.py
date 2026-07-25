@@ -285,6 +285,14 @@ def create_app() -> Flask:
             category_meta=CATEGORY_META,
         )
 
+    @app.get("/privacy")
+    def privacy():
+        return render_template("privacy.html")
+
+    @app.get("/terms")
+    def terms():
+        return render_template("terms.html")
+
     return app
 
 
