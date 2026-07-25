@@ -62,6 +62,18 @@
   .td-amount input { text-align: right; }
   .low-confidence { background: #fff3cd !important; }
 
+  /* 辅助表（应酬费/派车/出差） */
+  .rb-aux-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: -0.5rem; padding: 0.5rem; }
+  .rb-aux-wrapper table { font-size: 0.8rem; white-space: nowrap; margin-bottom: 0; }
+  .rb-aux-wrapper th { background: #f0f2f5; font-size: 0.75rem; font-weight: 600; padding: 0.4rem 0.5rem; position: sticky; top: 0; z-index: 1; }
+  .rb-aux-wrapper td { padding: 0.3rem 0.4rem; vertical-align: middle; }
+  .rb-aux-wrapper input, .rb-aux-wrapper select { font-size: 0.8rem; padding: 0.25rem 0.4rem; border: 1px solid #dee2e6; border-radius: 4px; background: #fff; }
+  .rb-aux-wrapper input:focus, .rb-aux-wrapper select:focus { border-color: var(--rb-primary); outline: none; box-shadow: 0 0 0 0.15rem rgba(25,135,84,.15); }
+  .rb-aux-wrapper input[type="date"] { min-width: 110px; }
+  .rb-aux-wrapper input[type="number"] { min-width: 70px; text-align: right; }
+  .rb-aux-wrapper .td-delete { width: 32px; text-align: center; }
+  .rb-aux-wrapper .btn-del-aux { padding: 0 4px; font-size: 0.75rem; line-height: 1.4; }
+
   /* 封面预览 */
   .rb-cover-preview { border: 1px solid var(--rb-border); border-radius: var(--rb-radius); padding: 2rem; background: #fff; max-width: 800px; margin: 0 auto; }
   .rb-cover-preview h4 { text-align: center; font-size: 1.2rem; margin-bottom: 1rem; }
@@ -204,10 +216,12 @@
       <button class="btn btn-outline-success btn-sm" id="rbAddEntRow"><i class="bi bi-plus-circle"></i> 添加</button>
     </div>
     <div class="card-body p-2">
-      <table class="table table-bordered table-sm" id="rbEntTable">
-        <thead><tr><th>日期</th><th>费用类别</th><th>用餐地点/名称</th><th>客户名称</th><th>参与人</th><th>金额</th><th>事由/产品线</th><th></th></tr></thead>
-        <tbody id="rbEntTbody"></tbody>
-      </table>
+      <div class="rb-aux-wrapper">
+        <table class="table table-bordered table-sm mb-0" id="rbEntTable">
+          <thead><tr><th>日期</th><th>费用类别</th><th>用餐地点/名称</th><th>客户名称</th><th>参与人</th><th>金额</th><th>事由/产品线</th><th class="td-delete"></th></tr></thead>
+          <tbody id="rbEntTbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -218,10 +232,12 @@
       <button class="btn btn-outline-success btn-sm" id="rbAddVehRow"><i class="bi bi-plus-circle"></i> 添加</button>
     </div>
     <div class="card-body p-2">
-      <table class="table table-bordered table-sm" id="rbVehTable">
-        <thead><tr><th>日期</th><th>出发地</th><th>目的地</th><th>联系人</th><th>起</th><th>止</th><th>公里</th><th>过桥费</th><th>停车费</th><th>备注</th><th></th></tr></thead>
-        <tbody id="rbVehTbody"></tbody>
-      </table>
+      <div class="rb-aux-wrapper">
+        <table class="table table-bordered table-sm mb-0" id="rbVehTable">
+          <thead><tr><th>日期</th><th>出发地</th><th>目的地</th><th>联系人</th><th>起</th><th>止</th><th>公里</th><th>过桥费</th><th>停车费</th><th>备注</th><th class="td-delete"></th></tr></thead>
+          <tbody id="rbVehTbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -232,10 +248,12 @@
       <button class="btn btn-outline-success btn-sm" id="rbAddTravelRow"><i class="bi bi-plus-circle"></i> 添加</button>
     </div>
     <div class="card-body p-2">
-      <table class="table table-bordered table-sm" id="rbTravelTable">
-        <thead><tr><th>日期</th><th>出差地</th><th>客户名称</th><th>费用类型</th><th>金额</th><th>事由/产品线</th><th></th></tr></thead>
-        <tbody id="rbTravelTbody"></tbody>
-      </table>
+      <div class="rb-aux-wrapper">
+        <table class="table table-bordered table-sm mb-0" id="rbTravelTable">
+          <thead><tr><th>日期</th><th>出差地</th><th>客户名称</th><th>费用类型</th><th>金额</th><th>事由/产品线</th><th class="td-delete"></th></tr></thead>
+          <tbody id="rbTravelTbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -718,12 +736,12 @@ function entRow(e,i) {
   return `<tr>
     <td><input type="date" value="${esc(e.date)}" onchange="updateAux('ent',${i},'date',this.value)"></td>
     <td><select onchange="updateAux('ent',${i},'category',this.value)">${STATE.reference?.entertainment_categories?.map(c=>`<option ${e.category===c?'selected':''}>${c}</option>`).join('')||''}</select></td>
-    <td><input value="${esc(e.place)}" onchange="updateAux('ent',${i},'place',this.value)"></td>
-    <td><input value="${esc(e.customer)}" onchange="updateAux('ent',${i},'customer',this.value)"></td>
-    <td><input value="${esc(e.participants)}" onchange="updateAux('ent',${i},'participants',this.value)"></td>
-    <td class="td-amount"><input type="number" step="0.01" value="${esc(e.amount)}" onchange="updateAux('ent',${i},'amount',this.value)"></td>
-    <td><input value="${esc(e.purpose)}" onchange="updateAux('ent',${i},'purpose',this.value)"></td>
-    <td><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeAux('ent',${i})">✕</button></td>
+    <td><input value="${esc(e.place)}" placeholder="如：某某酒楼" onchange="updateAux('ent',${i},'place',this.value)"></td>
+    <td><input value="${esc(e.customer)}" placeholder="客户名称" onchange="updateAux('ent',${i},'customer',this.value)"></td>
+    <td><input value="${esc(e.participants)}" placeholder="参与人" onchange="updateAux('ent',${i},'participants',this.value)"></td>
+    <td><input type="number" step="0.01" value="${esc(e.amount)}" placeholder="0.00" onchange="updateAux('ent',${i},'amount',this.value)"></td>
+    <td><input value="${esc(e.purpose)}" placeholder="事由" onchange="updateAux('ent',${i},'purpose',this.value)"></td>
+    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('ent',${i})">✕</button></td>
   </tr>`;
 }
 
@@ -731,16 +749,16 @@ function vehRow(v,i) {
   const kmTotal = calcKmTotal(v);
   return `<tr>
     <td><input type="date" value="${esc(v.date)}" onchange="updateAux('veh',${i},'date',this.value)"></td>
-    <td><input value="${esc(v.from_location)}" style="width:50px" onchange="updateAux('veh',${i},'from_location',this.value)"></td>
-    <td><input value="${esc(v.to_location)}" style="width:100px" onchange="updateAux('veh',${i},'to_location',this.value)"></td>
-    <td><input value="${esc(v.contact)}" style="width:70px" onchange="updateAux('veh',${i},'contact',this.value)"></td>
-    <td><input type="number" step="0.1" value="${esc(v.km_start)}" style="width:70px" onchange="updateAuxKm(${i},'km_start',this.value)"></td>
-    <td><input type="number" step="0.1" value="${esc(v.km_end)}" style="width:70px" onchange="updateAuxKm(${i},'km_end',this.value)"></td>
-    <td class="text-center" style="font-weight:600;min-width:60px;" id="kmTotal${i}">${kmTotal || '-'}</td>
-    <td><input type="number" step="0.01" value="${esc(v.toll_fee)}" style="width:60px" onchange="updateAux('veh',${i},'toll_fee',this.value)"></td>
-    <td><input type="number" step="0.01" value="${esc(v.parking_fee)}" style="width:60px" onchange="updateAux('veh',${i},'parking_fee',this.value)"></td>
-    <td><input value="${esc(v.remarks)}" style="width:80px" onchange="updateAux('veh',${i},'remarks',this.value)"></td>
-    <td><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeAux('veh',${i})">✕</button></td>
+    <td><input value="${esc(v.from_location)}" placeholder="出发地" onchange="updateAux('veh',${i},'from_location',this.value)"></td>
+    <td><input value="${esc(v.to_location)}" placeholder="目的地" onchange="updateAux('veh',${i},'to_location',this.value)"></td>
+    <td><input value="${esc(v.contact)}" placeholder="联系人" onchange="updateAux('veh',${i},'contact',this.value)"></td>
+    <td><input type="number" step="0.1" value="${esc(v.km_start)}" placeholder="0" onchange="updateAuxKm(${i},'km_start',this.value)"></td>
+    <td><input type="number" step="0.1" value="${esc(v.km_end)}" placeholder="0" onchange="updateAuxKm(${i},'km_end',this.value)"></td>
+    <td class="text-center fw-bold" id="kmTotal${i}">${kmTotal || '-'}</td>
+    <td><input type="number" step="0.01" value="${esc(v.toll_fee)}" placeholder="0.00" onchange="updateAux('veh',${i},'toll_fee',this.value)"></td>
+    <td><input type="number" step="0.01" value="${esc(v.parking_fee)}" placeholder="0.00" onchange="updateAux('veh',${i},'parking_fee',this.value)"></td>
+    <td><input value="${esc(v.remarks)}" placeholder="备注" onchange="updateAux('veh',${i},'remarks',this.value)"></td>
+    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('veh',${i})">✕</button></td>
   </tr>`;
 }
 
@@ -776,12 +794,12 @@ function updateAuxKm(idx, field, val) {
 function travelRow(t,i) {
   return `<tr>
     <td><input type="date" value="${esc(t.date)}" onchange="updateAux('travel',${i},'date',this.value)"></td>
-    <td><input value="${esc(t.location)}" onchange="updateAux('travel',${i},'location',this.value)"></td>
-    <td><input value="${esc(t.customer)}" onchange="updateAux('travel',${i},'customer',this.value)"></td>
-    <td><input value="${esc(t.expense_type)}" onchange="updateAux('travel',${i},'expense_type',this.value)"></td>
-    <td class="td-amount"><input type="number" step="0.01" value="${esc(t.amount)}" onchange="updateAux('travel',${i},'amount',this.value)"></td>
-    <td><input value="${esc(t.purpose)}" onchange="updateAux('travel',${i},'purpose',this.value)"></td>
-    <td><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeAux('travel',${i})">✕</button></td>
+    <td><input value="${esc(t.location)}" placeholder="出差地" onchange="updateAux('travel',${i},'location',this.value)"></td>
+    <td><input value="${esc(t.customer)}" placeholder="客户名称" onchange="updateAux('travel',${i},'customer',this.value)"></td>
+    <td><input value="${esc(t.expense_type)}" placeholder="费用类型" onchange="updateAux('travel',${i},'expense_type',this.value)"></td>
+    <td><input type="number" step="0.01" value="${esc(t.amount)}" placeholder="0.00" onchange="updateAux('travel',${i},'amount',this.value)"></td>
+    <td><input value="${esc(t.purpose)}" placeholder="事由" onchange="updateAux('travel',${i},'purpose',this.value)"></td>
+    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('travel',${i})">✕</button></td>
   </tr>`;
 }
 
