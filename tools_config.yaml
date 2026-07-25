@@ -319,3 +319,14 @@ tools:
     category: business
     enabled: true
     order: 65
+
+  - id: zip_extractor
+    name: 批量提取PDF发票
+    description: 上传多个压缩包，递归解压多层嵌套.zip，自动提取所有PDF发票文件。
+    icon: bi-file-zip
+    color: "#6f42c1"
+    route: /tools/zip-extractor
+    blueprint_module: tools.zip_extractor
+    category: business
+    enabled: true
+    order: 66

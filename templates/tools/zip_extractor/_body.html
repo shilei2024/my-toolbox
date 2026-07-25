@@ -1,0 +1,200 @@
+{% raw %}
+<style>
+  :root {
+    --ze-primary: #6f42c1;
+  }
+
+  .ze-upload-zone {
+    border: 2px dashed #adb5bd;
+    border-radius: 0.5rem;
+    padding: 2.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s;
+    background: #f8f9fa;
+  }
+  .ze-upload-zone:hover, .ze-upload-zone.dragover {
+    border-color: var(--ze-primary);
+    background: #f3f0ff;
+  }
+  .ze-upload-zone i { font-size: 2.5rem; color: var(--ze-primary); }
+
+  .ze-file-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.6rem;
+    max-height: 60vh;
+    overflow-y: auto;
+    margin-top: 1rem;
+  }
+  .ze-file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.4rem;
+    font-size: 0.82rem;
+    transition: all 0.15s;
+  }
+  .ze-file-item:hover { background: #f8f9fa; border-color: #adb5bd; }
+  .ze-file-item .ze-icon { font-size: 1.3rem; color: #dc3545; flex-shrink: 0; }
+  .ze-file-item .ze-info { flex: 1; overflow: hidden; }
+  .ze-file-item .ze-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ze-file-item .ze-meta { font-size: 0.72rem; color: #6c757d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ze-file-item .ze-dl { flex-shrink: 0; }
+
+  .ze-summary {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: #f0f2f5;
+    border-radius: 0.4rem;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+  }
+  .ze-summary .badge { font-size: 0.8rem; }
+
+  .ze-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #adb5bd;
+  }
+  .ze-empty i { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+
+  .ze-loading { text-align: center; padding: 2rem; }
+</style>
+
+<div class="mb-3">
+  <h5><i class="bi bi-file-zip"></i> 批量压缩包 PDF 提取</h5>
+  <p class="text-muted small mb-0">上传多个压缩包，自动递归解压并提取出所有 PDF 发票文件（支持多层嵌套 zip）。</p>
+</div>
+
+<!-- 上传区 -->
+<div class="ze-upload-zone" id="zeUploadZone">
+  <i class="bi bi-cloud-upload"></i>
+  <p class="mt-2 mb-1 fw-bold">拖拽或点击选择 zip 文件</p>
+  <p class="text-muted small mb-0">支持同时选择多个，自动递归解压多层嵌套</p>
+  <input type="file" id="zeFileInput" multiple accept=".zip" hidden>
+</div>
+
+<!-- 加载中 -->
+<div class="ze-loading hidden" id="zeLoading">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="mt-2 text-muted small">正在递归解压并提取 PDF …</p>
+</div>
+
+<!-- 结果展示 -->
+<div id="zeResult" class="hidden"></div>
+
+<div class="ze-empty" id="zeEmpty">
+  <i class="bi bi-inbox"></i>
+  <p>还没上传任何压缩包</p>
+</div>
+
+<script>
+const STATE = { workId: null, files: [] };
+
+document.addEventListener('DOMContentLoaded', () => {
+  const zone = document.getElementById('zeUploadZone');
+  const input = document.getElementById('zeFileInput');
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+  input.addEventListener('change', () => handleFiles(input.files));
+});
+
+async function handleFiles(files) {
+  const zipFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.zip'));
+  if (zipFiles.length === 0) { alert('请选择 .zip 文件'); return; }
+
+  document.getElementById('zeLoading').classList.remove('hidden');
+  document.getElementById('zeEmpty').classList.add('hidden');
+  document.getElementById('zeResult').classList.add('hidden');
+
+  const fd = new FormData();
+  zipFiles.forEach(f => fd.append('files', f));
+
+  try {
+    const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (data.success) {
+      STATE.workId = data.work_id;
+      STATE.files = data.files;
+      renderResult(data);
+    } else {
+      alert('处理失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) {
+    alert('网络异常: ' + e.message);
+  } finally {
+    document.getElementById('zeLoading').classList.add('hidden');
+  }
+}
+
+function renderResult(data) {
+  const el = document.getElementById('zeResult');
+  const totalSize = data.files.reduce((s, f) => s + (f.size || 0), 0);
+
+  let html = `
+    <div class="ze-summary">
+      <span class="badge bg-success">${data.total} 个 PDF 文件</span>
+      <span class="text-muted">共 ${(totalSize / 1024 / 1024).toFixed(1)} MB</span>
+      <button class="btn btn-outline-primary btn-sm ms-auto" onclick="downloadAll()">
+        <i class="bi bi-download"></i> 全部下载 (ZIP)
+      </button>
+    </div>
+    <div class="ze-file-list">
+  `;
+
+  data.files.forEach(f => {
+    const chain = (f.path_chain || []).slice(-2).join(' / ');
+    html += `
+      <div class="ze-file-item">
+        <span class="ze-icon"><i class="bi bi-file-pdf"></i></span>
+        <div class="ze-info">
+          <div class="ze-name" title="${f.filename}">${f.filename}</div>
+          <div class="ze-meta" title="${chain}">${chain} · ${f.size_kb} KB</div>
+        </div>
+        <a class="btn btn-outline-danger btn-sm ze-dl" href="/tools/zip-extractor/download/${STATE.workId}/${f.download_id}" download>
+          <i class="bi bi-download"></i>
+        </a>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+  document.getElementById('zeEmpty').classList.add('hidden');
+}
+
+function downloadAll() {
+  if (!STATE.workId) return;
+  // 用fetch下载zip blob
+  fetch('/tools/zip-extractor/download-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ work_id: STATE.workId }),
+  }).then(resp => {
+    if (!resp.ok) return resp.json().then(e => { throw new Error(e.error); });
+    return resp.blob();
+  }).then(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '提取的发票文件.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  }).catch(err => alert('下载失败: ' + err.message));
+}
+</script>
+{% endraw %}
