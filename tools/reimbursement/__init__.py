@@ -1045,11 +1045,11 @@ def _excel_styles():
 def _build_cover_file(cover_data):
     """
     生成文件1：报销封面及费用分类表.xlsx
-    两张表：「费用报销单」封面 +「费用分类表」
-    格式严格参照原始模板。
+    严格按原始 Excel 行列布局（对照 xlrd 0-based → openpyxl 1-based）。
     """
     import io, openpyxl
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
     s = _excel_styles()
 
     wb = openpyxl.Workbook()
@@ -1058,126 +1058,136 @@ def _build_cover_file(cover_data):
     expense_cats = EXPENSE_CATEGORIES
     total_all = cover_data.get("total_all", 0)
     total_cn = cover_data.get("total_cn", "")
-
-    # ===== Sheet 1: 费用报销单 =====
-    ws = wb.active
-    ws.title = "封面"
-    # 页面设置 A4 纵向
-    ws.sheet_properties.pageSetUpPr = openpyxl.worksheet.properties.PageSetupProperties(fitToPage=True)
-    ws.page_setup.orientation = "portrait"
-    ws.page_setup.paperSize = 9  # A4
-
-    # 标题
-    ws.merge_cells("A1:O1")
-    c = ws["A1"]; c.value = "费 用 报 销 单"; c.font = s["title"]; c.alignment = s["center"]
-    ws.row_dimensions[1].height = 36
-
-    # 空行
-    ws.row_dimensions[2].height = 6
-    ws.row_dimensions[3].height = 6
-
-    # 信息行
     EMP = header.get("employee_name", "")
     DEPT = header.get("department", "")
     DATE = header.get("date", "")
-    ws.merge_cells("A4:C4"); ws["A4"].value = f"员工姓名：{EMP}"; ws["A4"].font = s["normal"]
-    ws.merge_cells("G4:I4"); ws["G4"].value = f"部门：{DEPT}"; ws["G4"].font = s["normal"]
+    PERIOD = header.get("period", "")
+
+    # ========== Sheet 1: 封面 (费用报销单) ==========
+    ws = wb.active
+    ws.title = "封面"
+
+    # Row 1 (原始 row 0): 标题 "费用报销单"
+    ws.merge_cells("A1:O1")
+    ws["A1"].value = "费用报销单"; ws["A1"].font = Font(name="微软雅黑", size=16, bold=True); ws["A1"].alignment = s["center"]
+    ws.row_dimensions[1].height = 40
+
+    # Rows 2-3: 空行
+    ws.row_dimensions[2].height = 8
+    ws.row_dimensions[3].height = 8
+
+    # Row 4 (原始 row 3): 信息行 — B=员工姓名, G=部门, L=报销日期
+    ws.merge_cells("B4:C4"); ws["B4"].value = f"员工姓名：{EMP}"; ws["B4"].font = s["normal"]
+    ws.merge_cells("G4:H4"); ws["G4"].value = f"部门：{DEPT}"; ws["G4"].font = s["normal"]
     ws.merge_cells("L4:M4"); ws["L4"].value = f"报销日期：{DATE}"; ws["L4"].font = s["normal"]
 
-    ws.row_dimensions[4].height = 6
+    # Row 5: 空行
+    ws.row_dimensions[5].height = 8
 
-    # 表头行
-    row = 6
+    # Row 6 (原始 row 5): 表头 — cols A-O
     col_headers = ["序号", "产品线", "代码", "办事处", "费用期间"]
     for cat in expense_cats:
         col_headers.append(cat["label"])
     col_headers.append("备注栏")
 
-    for ci, h in enumerate(col_headers, 1):
-        cell = ws.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
-    ws.row_dimensions[row].height = 22
+    thin = Border(left=Side("thin"), right=Side("thin"), top=Side("thin"), bottom=Side("thin"))
+    hfill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    hfont = Font(name="微软雅黑", size=10, bold=True)
+    nfont = Font(name="微软雅黑", size=10)
+    bfont = Font(name="微软雅黑", size=10, bold=True)
 
-    # 数据行
+    for ci, h in enumerate(col_headers, 1):
+        cell = ws.cell(row=6, column=ci, value=h)
+        cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
+    ws.row_dimensions[6].height = 24
+
+    # Rows 7-18 (原始 rows 6-17): 数据行
+    row = 6
     for gi, g in enumerate(groups):
         row += 1
-        vals = [gi + 1, g["product_line"], g["code"], g.get("office", ""), header.get("period", "")]
+        vals = [gi + 1, g["product_line"], g["code"], g.get("office", ""), PERIOD]
         for cat in expense_cats:
             v = g["totals"].get(cat["key"], 0)
             vals.append(v if v != 0 else "")
         vals.append("；".join(g.get("remarks", [])))
-
         for ci, v in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=v)
-            cell.font = s["normal"]; cell.border = s["thin"]
+            cell.font = nfont; cell.border = thin
             cell.alignment = s["right"] if isinstance(v, (int, float)) and v != "" else s["center"]
 
-    # 合计行
+    # Row 19 (原始 row 18): 合计行 — "合计"在 E 列(第5列)，后面跟各费用类别合计
     row += 1
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    for ci2 in range(1, len(col_headers) + 1):
-        ws.cell(row=row, column=ci2).border = s["thin"]
-    ws.cell(row=row, column=2).value = "合 计"
-    ws.cell(row=row, column=2).font = s["bold"]; ws.cell(row=row, column=2).alignment = s["center"]
-
+    # 所有列都画边框
+    for ci in range(1, len(col_headers) + 1):
+        ws.cell(row=row, column=ci).border = thin
+    # "合计" 在 E 列 (费用期间列)
+    ws.cell(row=row, column=5).value = "合计"; ws.cell(row=row, column=5).font = bfont; ws.cell(row=row, column=5).alignment = s["center"]
+    # 各费用类别合计（从 F 列开始）
     for ci, cat in enumerate(expense_cats, 6):
         v = cover_data["grand_totals"].get(cat["key"], 0)
         cell = ws.cell(row=row, column=ci, value=v if v != 0 else "")
-        cell.font = s["bold"]; cell.alignment = s["right"]
+        cell.font = bfont; cell.alignment = s["right"]; cell.border = thin
 
-    # 总金额区
-    row += 2
-    INV_COUNT = cover_data.get("invoice_count", 0)
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-    ws.cell(row=row, column=1).value = f"费用总额（小写）：¥ {total_all:,.2f}"; ws.cell(row=row, column=1).font = s["normal"]
-    ws.cell(row=row, column=6).value = f"单据张数：{INV_COUNT} 张"; ws.cell(row=row, column=6).font = s["normal"]
+    # Row 20: 空行
     row += 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
-    ws.cell(row=row, column=1).value = f"费用总额（大写）：{total_cn}"; ws.cell(row=row, column=1).font = s["normal"]
 
-    # 签字区
-    row += 2
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws.cell(row=row, column=2).value = f"申请人：{EMP}"; ws.cell(row=row, column=2).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=7, end_row=row, end_column=8)
-    ws.cell(row=row, column=7).value = "财务审核："; ws.cell(row=row, column=7).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=10, end_row=row, end_column=11)
-    ws.cell(row=row, column=10).value = "部门主管："; ws.cell(row=row, column=10).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=13, end_row=row, end_column=14)
-    ws.cell(row=row, column=13).value = "总经理："; ws.cell(row=row, column=13).font = s["normal"]
-
+    # Row 21 (原始 row 20): 费用总额（小写）— F=费用总额, G=（小写）, H=值
     row += 1
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws.cell(row=row, column=2).value = f"日期：{DATE}"; ws.cell(row=row, column=2).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=7, end_row=row, end_column=8)
-    ws.cell(row=row, column=7).value = "日期："; ws.cell(row=row, column=7).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=10, end_row=row, end_column=11)
-    ws.cell(row=row, column=10).value = "日期："; ws.cell(row=row, column=10).font = s["normal"]
-    ws.merge_cells(start_row=row, start_column=13, end_row=row, end_column=14)
-    ws.cell(row=row, column=13).value = "日期："; ws.cell(row=row, column=13).font = s["normal"]
+    ws.cell(row=row, column=6).value = "费用总额："; ws.cell(row=row, column=6).font = nfont
+    ws.cell(row=row, column=7).value = "（小写）"; ws.cell(row=row, column=7).font = nfont
+    ws.cell(row=row, column=8).value = round(total_all, 2); ws.cell(row=row, column=8).font = nfont
+
+    # Row 22 (原始 row 21): 费用总额（大写）— F=费用总额, G=（大写）, H=中文大写
+    row += 1
+    ws.cell(row=row, column=6).value = "费用总额："; ws.cell(row=row, column=6).font = nfont
+    ws.cell(row=row, column=7).value = "（大写）"; ws.cell(row=row, column=7).font = nfont
+    ws.cell(row=row, column=8).value = total_cn; ws.cell(row=row, column=8).font = nfont
+
+    # Row 23 (原始 row 22): 空行
+    row += 1
+
+    # Row 24 (原始 row 23): 签字行 — B=申请人, F=财务审核, I=部门主管, M=总经理
+    row += 1
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    ws.cell(row=row, column=2).value = f"申请人:{EMP}"; ws.cell(row=row, column=2).font = nfont
+    ws.cell(row=row, column=6).value = "财务审核:"; ws.cell(row=row, column=6).font = nfont
+    ws.cell(row=row, column=9).value = "部门主管:"; ws.cell(row=row, column=9).font = nfont
+    ws.cell(row=row, column=13).value = "总经理："; ws.cell(row=row, column=13).font = nfont
+
+    # Row 25 (原始 row 24): 日期行 — B=日期, F=日期, I=日期, M=日期
+    row += 1
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    ws.cell(row=row, column=2).value = f"日期：{DATE}"; ws.cell(row=row, column=2).font = nfont
+    ws.cell(row=row, column=6).value = "日期："; ws.cell(row=row, column=6).font = nfont
+    ws.cell(row=row, column=9).value = "日期："; ws.cell(row=row, column=9).font = nfont
+    ws.cell(row=row, column=13).value = "日期："; ws.cell(row=row, column=13).font = nfont
 
     # 列宽
-    col_widths = [6, 18, 6, 8, 10] + [9] * len(expense_cats) + [16]
+    col_widths = [5, 16, 5, 7, 9] + [9] * len(expense_cats) + [14]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    # ===== Sheet 2: 按客户等级费用分类明细表 =====
+    # ========== Sheet 2: 费用分类表 ==========
     ws2 = wb.create_sheet("费用分类表")
-    ws2.merge_cells("A1:H1")
-    ws2["A1"].value = "按客户等级费用分类明细表"; ws2["A1"].font = s["title"]; ws2["A1"].alignment = s["center"]
-    ws2.row_dimensions[1].height = 36
-    ws2.row_dimensions[2].height = 6
 
-    row = 4
+    # Row 1: 标题
+    ws2.merge_cells("A1:H1")
+    ws2["A1"].value = "按客户等级费用分类明细表"; ws2["A1"].font = Font(name="微软雅黑", size=14, bold=True); ws2["A1"].alignment = s["center"]
+    ws2.row_dimensions[1].height = 36
+
+    # Row 2 (原始 row 1): 表头 — A=序号, B=客户等级, C=招待费, D=差旅费, E=空, F=其他费用, G=费用合计, H=备注
     cls_h = ["序号", "客户等级", "招待费", "差旅费", "", "其他费用", "费用合计", "备注"]
     for ci, h in enumerate(cls_h, 1):
-        cell = ws2.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
+        cell = ws2.cell(row=2, column=ci, value=h)
+        cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
 
+    # Rows 3-6 (原始 rows 2-5): 数据行（4 levels，固定顺序）
     level_groups = cover_data.get("level_groups", [])
+    # 按 0-1, level 1, level 2, level 3 固定顺序排列
     lvl_order = {"0-1": 0, "level 1": 1, "level 2": 2, "level 3": 3}
     level_groups.sort(key=lambda lg: lvl_order.get(lg.get("level", ""), 99))
 
+    row = 2
     for li, lg in enumerate(level_groups):
         row += 1
         vs = [li + 1, lg.get("level", ""),
@@ -1185,30 +1195,42 @@ def _build_cover_file(cover_data):
               lg.get("other", 0) or "", lg.get("total", 0) or "", ""]
         for ci, v in enumerate(vs, 1):
             cell = ws2.cell(row=row, column=ci, value=v)
-            cell.font = s["normal"]; cell.border = s["thin"]
+            cell.font = nfont; cell.border = thin
             cell.alignment = s["right"] if isinstance(v, (int, float)) else s["center"]
 
-    # 合计
+    # Row 7: 空行
     row += 1
-    for ci2 in range(1, 9):
-        ws2.cell(row=row, column=ci2).border = s["thin"]
-    ws2.cell(row=row, column=2).value = "合 计"; ws2.cell(row=row, column=2).font = s["bold"]; ws2.cell(row=row, column=2).alignment = s["center"]
-    lvl_tot = [
-        sum(lg.get("entertainment", 0) for lg in level_groups),
-        sum(lg.get("travel", 0) for lg in level_groups), "",
-        sum(lg.get("other", 0) for lg in level_groups),
-        total_all, "",
-    ]
-    for ci, v in enumerate(lvl_tot, 3):
-        cell = ws2.cell(row=row, column=ci, value=v if v not in (0, "") else "")
-        cell.font = s["bold"]; cell.alignment = s["right"]
 
-    row += 2
-    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws2.cell(row=row, column=2).value = f"费用总额（小写）：¥ {total_all:,.2f}"; ws2.cell(row=row, column=2).font = s["normal"]
+    # Row 8 (原始 row 7): 费用总额（小写）— C=费用总额, D=（小写）, E=值
     row += 1
-    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws2.cell(row=row, column=2).value = f"费用总额（大写）：{total_cn}"; ws2.cell(row=row, column=2).font = s["normal"]
+    ws2.cell(row=row, column=3).value = "费用总额："; ws2.cell(row=row, column=3).font = nfont
+    ws2.cell(row=row, column=4).value = "（小写）"; ws2.cell(row=row, column=4).font = nfont
+    ws2.cell(row=row, column=5).value = round(total_all, 2); ws2.cell(row=row, column=5).font = nfont
+
+    # Row 9 (原始 row 8): 费用总额（大写）— C=费用总额, D=（大写）, E=中文大写
+    row += 1
+    ws2.cell(row=row, column=3).value = "费用总额："; ws2.cell(row=row, column=3).font = nfont
+    ws2.cell(row=row, column=4).value = "（大写）"; ws2.cell(row=row, column=4).font = nfont
+    ws2.cell(row=row, column=5).value = total_cn; ws2.cell(row=row, column=5).font = nfont
+
+    # Row 10: 空行
+    row += 1
+
+    # Row 11 (原始 row 10): 签字 — B=申请人, F=部门主管
+    row += 1
+    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    ws2.cell(row=row, column=2).value = f"申请人:{EMP}"; ws2.cell(row=row, column=2).font = nfont
+    ws2.cell(row=row, column=6).value = "部门主管:"; ws2.cell(row=row, column=6).font = nfont
+
+    # Row 12 (原始 row 11): 日期 — B=日期, F=日期
+    row += 1
+    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    ws2.cell(row=row, column=2).value = f"日期：{DATE}"; ws2.cell(row=row, column=2).font = nfont
+    ws2.cell(row=row, column=6).value = "日期："; ws2.cell(row=row, column=6).font = nfont
+
+    # 列宽
+    for i, w in enumerate([6, 12, 12, 12, 4, 12, 12, 12], 1):
+        ws2.column_dimensions[get_column_letter(i)].width = w
 
     row += 2
     ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
@@ -1233,32 +1255,45 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
     """
     生成文件2：应酬费_出差明细_派车单.xlsx
     三张表：应酬费明细表 + 派车单 + 出差明细表
-    格式严格参照原始模板。
+    严格按原始 Excel 行列布局（对照 xlrd 0-based → openpyxl 1-based）。
     """
     import io, openpyxl
-    from openpyxl.styles import Alignment
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
     from openpyxl.utils import get_column_letter
     s = _excel_styles()
+
+    thin = Border(left=Side("thin"), right=Side("thin"), top=Side("thin"), bottom=Side("thin"))
+    hfill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    hfont = Font(name="微软雅黑", size=10, bold=True)
+    nfont = Font(name="微软雅黑", size=10)
+    bfont = Font(name="微软雅黑", size=10, bold=True)
+    tfont = Font(name="微软雅黑", size=14, bold=True)
+
     header = cover_data.get("header", {})
+    EMP = header.get("employee_name", "")
+    PERIOD = header.get("period", "")
 
     wb = openpyxl.Workbook()
 
-    # ===== Sheet 1: 应酬费明细表 =====
+    # ========== Sheet 1: 应酬费明细表 ==========
     ws = wb.active
     ws.title = "应酬费明细"
+
+    # Row 1: 标题
     ws.merge_cells("A1:H1")
-    ws["A1"].value = "应酬费报销明细"; ws["A1"].font = s["title"]; ws["A1"].alignment = s["center"]
-    ws.row_dimensions[1].height = 36
+    ws["A1"].value = "应酬费报销明细"; ws["A1"].font = tfont; ws["A1"].alignment = s["center"]
 
-    ws.merge_cells("A2:C2")
-    ws["A2"].value = f"员工姓名：{header.get('employee_name', '')}"; ws["A2"].font = s["normal"]
+    # Row 2: 员工姓名（不合并，直接放 A2）
+    ws.cell(row=2, column=1, value=f"员工姓名：{EMP}").font = nfont
 
-    row = 4
+    # Row 3: 表头
     eh = ["时间", "费用类别", "用餐地点、名称", "客户名称", "主要参与人全称", "金额", "事由（请注明是 主要推广哪条产品线）", "主管审批（超金额）"]
     for ci, h in enumerate(eh, 1):
-        cell = ws.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
+        cell = ws.cell(row=3, column=ci, value=h)
+        cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
 
+    # Rows 4+: 数据
+    row = 3
     ent_total = 0
     for e in entertainment:
         row += 1
@@ -1268,47 +1303,48 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
                 e.get("purpose", ""), ""]
         for ci, v in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=v)
-            cell.font = s["normal"]; cell.border = s["thin"]
+            cell.font = nfont; cell.border = thin
             cell.alignment = s["right"] if ci == 6 else s["left"]
         ent_total += amt
 
-    # 合计行
+    # 合计行：只在 F 列（col 6）放总金额，无"合计"标签
     row += 1
-    for ci2 in range(1, 9):
-        ws.cell(row=row, column=ci2).border = s["thin"]
-    ws.cell(row=row, column=1).value = "合计"; ws.cell(row=row, column=1).font = s["bold"]; ws.cell(row=row, column=1).alignment = s["center"]
-    ws.cell(row=row, column=6).value = ent_total or ""; ws.cell(row=row, column=6).font = s["bold"]; ws.cell(row=row, column=6).alignment = s["right"]
+    for ci in range(1, 9):
+        ws.cell(row=row, column=ci).border = thin
+    ws.cell(row=row, column=6).value = round(ent_total, 2) if ent_total else ""; ws.cell(row=row, column=6).font = bfont; ws.cell(row=row, column=6).alignment = s["right"]
 
     for i, w in enumerate([12, 10, 18, 14, 18, 10, 18, 12], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    # ===== Sheet 2: 派车单 =====
+    # ========== Sheet 2: 派车单 ==========
     ws2 = wb.create_sheet("派车单")
+
+    # Row 1: 公司名
     ws2.merge_cells("A1:J1")
-    ws2["A1"].value = "威欣电子有限公司"; ws2["A1"].font = s["title"]; ws2["A1"].alignment = s["center"]
-    ws2.row_dimensions[1].height = 36
+    ws2["A1"].value = "威欣电子有限公司"; ws2["A1"].font = tfont; ws2["A1"].alignment = s["center"]
 
-    period_text = f" {header.get('period', '')}派车单" if header.get("period") else "派车单"
-    ws2.merge_cells("A2:C2")
-    ws2["A2"].value = f"员工姓名：{header.get('employee_name', '')}"; ws2["A2"].font = s["normal"]
-    ws2.cell(row=2, column=8).value = period_text; ws2.cell(row=2, column=8).font = s["normal"]
-    ws2.cell(row=2, column=8).alignment = Alignment(horizontal="right")
+    # Row 2: 员工姓名 + 期间（J 列右对齐）
+    ws2.cell(row=2, column=1, value=f"员工姓名：{EMP}").font = nfont
+    period_text = f" {PERIOD}派车单" if PERIOD else "派车单"
+    ws2.cell(row=2, column=10, value=period_text).font = nfont
+    ws2.cell(row=2, column=10).alignment = Alignment(horizontal="right")
 
-    row = 4
+    # Row 3: 表头 — "行车路程"合并 D:E
+    ws2.merge_cells(start_row=3, start_column=4, end_row=3, end_column=5)
+    ws2.cell(row=3, column=4).value = "行车路程"; ws2.cell(row=3, column=4).font = hfont; ws2.cell(row=3, column=4).fill = hfill; ws2.cell(row=3, column=4).alignment = s["center"]; ws2.cell(row=3, column=4).border = thin
+
     vh1 = ["日期", "出发地", "目的地", "客户联系人", "行车路程", "", "公里数", "过桥费", "停车费", "备注"]
-    ws2.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
     for ci, h in enumerate(vh1, 1):
-        if h == "" and ci == 6:
-            continue  # 跳过合并单元格的非左上角
-        cell = ws2.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
+        if ci in (5, 6): continue  # 跳过已合并的单元格
+        cell = ws2.cell(row=3, column=ci, value=h)
+        cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
 
-    row += 1
-    vh2 = ["", "", "", "", "起", "止", "", "", "", ""]
-    for ci, h in enumerate(vh2, 1):
-        cell = ws2.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
+    # Row 4: 子表头 — 起/止
+    ws2.cell(row=4, column=4).value = "起"; ws2.cell(row=4, column=4).font = hfont; ws2.cell(row=4, column=4).fill = hfill; ws2.cell(row=4, column=4).alignment = s["center"]; ws2.cell(row=4, column=4).border = thin
+    ws2.cell(row=4, column=5).value = "止"; ws2.cell(row=4, column=5).font = hfont; ws2.cell(row=4, column=5).fill = hfill; ws2.cell(row=4, column=5).alignment = s["center"]; ws2.cell(row=4, column=5).border = thin
 
+    # Rows 5+: 数据
+    row = 4
     km_t, toll_t, park_t = 0, 0, 0
     for v in vehicles:
         row += 1
@@ -1318,36 +1354,40 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
                 km or "", toll or "", park or "", v.get("remarks", "")]
         for ci, val in enumerate(vals, 1):
             cell = ws2.cell(row=row, column=ci, value=val)
-            cell.font = s["normal"]; cell.border = s["thin"]
+            cell.font = nfont; cell.border = thin
             cell.alignment = s["right"] if ci >= 7 else s["left"]
         km_t += km; toll_t += toll; park_t += park
 
+    # 合计行 — A=合计, G=公里数合计, H=过桥费合计, I=停车费合计
     row += 1
-    for ci2 in range(1, 11):
-        ws2.cell(row=row, column=ci2).border = s["thin"]
-    ws2.cell(row=row, column=1).value = "合计"; ws2.cell(row=row, column=1).font = s["bold"]; ws2.cell(row=row, column=1).alignment = s["center"]
-    ws2.cell(row=row, column=7).value = km_t or ""; ws2.cell(row=row, column=7).font = s["bold"]; ws2.cell(row=row, column=7).alignment = s["right"]
-    ws2.cell(row=row, column=8).value = toll_t or ""; ws2.cell(row=row, column=8).font = s["bold"]; ws2.cell(row=row, column=8).alignment = s["right"]
-    ws2.cell(row=row, column=9).value = park_t or ""; ws2.cell(row=row, column=9).font = s["bold"]; ws2.cell(row=row, column=9).alignment = s["right"]
+    for ci in range(1, 11):
+        ws2.cell(row=row, column=ci).border = thin
+    ws2.cell(row=row, column=1).value = "合计"; ws2.cell(row=row, column=1).font = bfont; ws2.cell(row=row, column=1).alignment = s["center"]
+    ws2.cell(row=row, column=7).value = round(km_t, 1) if km_t else ""; ws2.cell(row=row, column=7).font = bfont; ws2.cell(row=row, column=7).alignment = s["right"]
+    ws2.cell(row=row, column=8).value = round(toll_t, 2) if toll_t else ""; ws2.cell(row=row, column=8).font = bfont; ws2.cell(row=row, column=8).alignment = s["right"]
+    ws2.cell(row=row, column=9).value = round(park_t, 2) if park_t else ""; ws2.cell(row=row, column=9).font = bfont; ws2.cell(row=row, column=9).alignment = s["right"]
 
     for i, w in enumerate([12, 8, 18, 12, 8, 8, 8, 8, 8, 14], 1):
         ws2.column_dimensions[get_column_letter(i)].width = w
 
-    # ===== Sheet 3: 出差明细表 =====
+    # ========== Sheet 3: 出差明细表 ==========
     ws3 = wb.create_sheet("出差明细")
+
+    # Row 1: 标题
     ws3.merge_cells("A1:F1")
-    ws3["A1"].value = "出差明细表"; ws3["A1"].font = s["title"]; ws3["A1"].alignment = s["center"]
-    ws3.row_dimensions[1].height = 36
+    ws3["A1"].value = "出差明细表"; ws3["A1"].font = tfont; ws3["A1"].alignment = s["center"]
 
-    ws3.merge_cells("A2:C2")
-    ws3["A2"].value = f"员工姓名：{header.get('employee_name', '')}"; ws3["A2"].font = s["normal"]
+    # Row 2: 员工姓名
+    ws3.cell(row=2, column=1, value=f"员工姓名：{EMP}").font = nfont
 
-    row = 4
+    # Row 3: 表头
     th = ["日期", "出差地", "客户名称", "费用类型", "金额", "事由（请注明是 主要推广哪条产品线）"]
     for ci, h in enumerate(th, 1):
-        cell = ws3.cell(row=row, column=ci, value=h)
-        cell.font = s["header"]; cell.fill = s["header_fill"]; cell.alignment = s["center"]; cell.border = s["thin"]
+        cell = ws3.cell(row=3, column=ci, value=h)
+        cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
 
+    # Rows 4+: 数据
+    row = 3
     tr_total = 0
     for t in travels:
         row += 1
@@ -1356,15 +1396,16 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
                 t.get("expense_type", ""), amt or "", t.get("purpose", "")]
         for ci, v in enumerate(vals, 1):
             cell = ws3.cell(row=row, column=ci, value=v)
-            cell.font = s["normal"]; cell.border = s["thin"]
+            cell.font = nfont; cell.border = thin
             cell.alignment = s["right"] if ci == 5 else s["left"]
         tr_total += amt
 
-    row += 1
-    for ci2 in range(1, 7):
-        ws3.cell(row=row, column=ci2).border = s["thin"]
-    ws3.cell(row=row, column=1).value = "合计"; ws3.cell(row=row, column=1).font = s["bold"]; ws3.cell(row=row, column=1).alignment = s["center"]
-    ws3.cell(row=row, column=5).value = tr_total or ""; ws3.cell(row=row, column=5).font = s["bold"]; ws3.cell(row=row, column=5).alignment = s["right"]
+    # 合计行：只在有数据时添加
+    if tr_total > 0:
+        row += 1
+        for ci in range(1, 7):
+            ws3.cell(row=row, column=ci).border = thin
+        ws3.cell(row=row, column=5).value = round(tr_total, 2); ws3.cell(row=row, column=5).font = bfont; ws3.cell(row=row, column=5).alignment = s["right"]
 
     for i, w in enumerate([12, 14, 14, 10, 10, 20], 1):
         ws3.column_dimensions[get_column_letter(i)].width = w
