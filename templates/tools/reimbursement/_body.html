@@ -721,11 +721,30 @@ function addAuxRow(type) {
 function renderAuxTables() {
   // 应酬费
   const entBody = document.getElementById('rbEntTbody');
-  entBody.innerHTML = STATE.entertainment.map((e,i) => entRow(e,i)).join('');
+  let entHtml = STATE.entertainment.map((e,i) => entRow(e,i)).join('');
+  // 合计行
+  const entTotal = STATE.entertainment.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  entHtml += `<tr class="table-secondary fw-bold">
+    <td colspan="5" class="text-end">合计</td>
+    <td class="text-end">${entTotal > 0 ? entTotal.toFixed(2) : '-'}</td>
+    <td colspan="2"></td>
+  </tr>`;
+  entBody.innerHTML = entHtml;
 
   // 派车
   const vehBody = document.getElementById('rbVehTbody');
-  vehBody.innerHTML = STATE.vehicles.map((v,i) => vehRow(v,i)).join('');
+  let vehHtml = STATE.vehicles.map((v,i) => vehRow(v,i)).join('');
+  const kmTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.km_total) || 0), 0);
+  const tollTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.toll_fee) || 0), 0);
+  const parkTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.parking_fee) || 0), 0);
+  vehHtml += `<tr class="table-secondary fw-bold">
+    <td colspan="6" class="text-end">合计</td>
+    <td class="text-end">${kmTotal > 0 ? kmTotal.toFixed(1) : '-'}</td>
+    <td class="text-end">${tollTotal > 0 ? tollTotal.toFixed(2) : '-'}</td>
+    <td class="text-end">${parkTotal > 0 ? parkTotal.toFixed(2) : '-'}</td>
+    <td colspan="2"></td>
+  </tr>`;
+  vehBody.innerHTML = vehHtml;
 
   // 出差
   const trBody = document.getElementById('rbTravelTbody');
@@ -783,11 +802,13 @@ function updateAuxKm(idx, field, val) {
   } else {
     arr[idx].km_total = '';
   }
-  // 更新显示
+  // 更新单行公里显示
   const td = document.getElementById('kmTotal' + idx);
   if (td) {
     td.textContent = arr[idx].km_total || '-';
   }
+  // 刷新合计行
+  refreshVehTotal();
   saveState();
 }
 
@@ -806,7 +827,39 @@ function travelRow(t,i) {
 function updateAux(type, idx, field, val) {
   const arr = type === 'ent' ? STATE.entertainment : type === 'veh' ? STATE.vehicles : STATE.travels;
   if (arr[idx]) arr[idx][field] = val;
+  // 金额相关字段变动时，刷新合计行
+  if (type === 'ent' && field === 'amount') refreshEntTotal();
+  if (type === 'veh' && (field === 'km_total' || field === 'toll_fee' || field === 'parking_fee')) refreshVehTotal();
+  if (type === 'veh' && (field === 'km_start' || field === 'km_end')) {
+    // 起止里程变化由 updateAuxKm 处理
+  }
   saveState();
+}
+
+function refreshEntTotal() {
+  const total = STATE.entertainment.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const rows = document.querySelectorAll('#rbEntTbody tr');
+  const last = rows[rows.length - 1];
+  if (last && last.classList.contains('table-secondary')) {
+    const tds = last.querySelectorAll('td');
+    if (tds.length >= 6) tds[5].textContent = total > 0 ? total.toFixed(2) : '-';
+  }
+}
+
+function refreshVehTotal() {
+  const kmTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.km_total) || 0), 0);
+  const tollTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.toll_fee) || 0), 0);
+  const parkTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.parking_fee) || 0), 0);
+  const rows = document.querySelectorAll('#rbVehTbody tr');
+  const last = rows[rows.length - 1];
+  if (last && last.classList.contains('table-secondary')) {
+    const tds = last.querySelectorAll('td');
+    if (tds.length >= 9) {
+      tds[6].textContent = kmTotal > 0 ? kmTotal.toFixed(1) : '-';
+      tds[7].textContent = tollTotal > 0 ? tollTotal.toFixed(2) : '-';
+      tds[8].textContent = parkTotal > 0 ? parkTotal.toFixed(2) : '-';
+    }
+  }
 }
 
 function removeAux(type, idx) {
