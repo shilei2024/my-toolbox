@@ -253,23 +253,34 @@ def upload():
     filepath = upload_dir / safe_name
     f.save(str(filepath))
 
-    # PDF → 生成缩略图 PNG
+    # PDF → 生成缩略图 PNG + 高清预览图
     preview_filename = safe_name
+    full_preview_filename = safe_name  # 默认和预览相同（非PDF图片用原图）
     if ext == ".pdf":
         try:
             import fitz
             doc = fitz.open(str(filepath))
             page = doc[0]
-            # 缩略图：200px 高度
+
+            # 缩略图：200px 高度（卡���列表用）
             zoom = 200 / page.rect.height
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
             thumb_name = f"{file_id}_thumb.png"
             pix.save(str(upload_dir / thumb_name))
-            doc.close()
             preview_filename = thumb_name
+
+            # 高清预览图：1600px 高度（灯箱放大用，保持原始清晰度）
+            full_zoom = 1600 / page.rect.height
+            full_mat = fitz.Matrix(full_zoom, full_zoom)
+            full_pix = page.get_pixmap(matrix=full_mat, colorspace=fitz.csRGB)
+            full_name = f"{file_id}_full.png"
+            full_pix.save(str(upload_dir / full_name))
+            full_preview_filename = full_name
+
+            doc.close()
         except Exception:
-            pass
+            full_preview_filename = preview_filename
 
     commit_usage("reimbursement")
 
@@ -279,6 +290,7 @@ def upload():
         filename=safe_name,
         original_name=f.filename,
         preview_url=f"/tools/reimbursement/preview/{preview_filename}",
+        full_url=f"/tools/reimbursement/preview/{full_preview_filename}",
         size=filepath.stat().st_size,
     )
 

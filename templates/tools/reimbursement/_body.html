@@ -244,7 +244,8 @@
 <div id="rbStep3" class="hidden">
   <div class="d-flex gap-2 mb-3 flex-wrap">
     <button class="btn btn-outline-secondary btn-sm" id="rbBackToStep2"><i class="bi bi-arrow-left"></i> 返回编辑</button>
-    <button class="btn btn-success ms-auto" id="rbPrintCover"><i class="bi bi-printer"></i> 打印报销封面</button>
+    <button class="btn btn-primary btn-sm ms-auto" id="rbNextToStep4">下一步：批量打印原始发票 <i class="bi bi-arrow-right"></i></button>
+    <button class="btn btn-success btn-sm" id="rbPrintCover"><i class="bi bi-printer"></i> 打印报销封面</button>
     <button class="btn btn-outline-success btn-sm" id="rbExportCover"><i class="bi bi-file-earmark-excel"></i> 导出封面文件</button>
     <button class="btn btn-outline-success btn-sm" id="rbExportDetails"><i class="bi bi-file-earmark-excel"></i> 导出明细文件</button>
   </div>
@@ -308,6 +309,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const parsed = JSON.parse(saved);
       STATE.invoices = parsed.invoices || [];
+      // 兼容旧数据：没有 full_url 时用 preview_url 代替
+      STATE.invoices.forEach(inv => {
+        if (!inv.full_url) inv.full_url = inv.preview_url || '';
+        if (!inv.ocr_provider) inv.ocr_provider = '';
+      });
       STATE.header = parsed.header || STATE.header;
       STATE.entertainment = parsed.entertainment || [];
       STATE.vehicles = parsed.vehicles || [];
@@ -357,6 +363,7 @@ function bindEvents() {
   document.getElementById('rbBackToStep1').addEventListener('click', () => switchStep(1));
   document.getElementById('rbBackToStep2').addEventListener('click', () => switchStep(2));
   document.getElementById('rbBackToStep3').addEventListener('click', () => switchStep(3));
+  document.getElementById('rbNextToStep4').addEventListener('click', () => switchStep(4));
   document.getElementById('rbGenCover').addEventListener('click', genCover);
   document.getElementById('rbPrintCover').addEventListener('click', () => {
     const area = document.getElementById('rbCoverPreview');
@@ -400,6 +407,7 @@ async function handleFiles(files) {
           filename: data.filename,
           original_name: data.original_name,
           preview_url: data.preview_url,
+          full_url: data.full_url || data.preview_url,
           ocr_done: false,
           data: {
             invoice_number: '', invoice_date: '', seller_name: '',
@@ -455,7 +463,8 @@ function openLightbox(idx) {
   const inv = STATE.invoices[idx];
   if (!inv) return;
   const lb = document.getElementById('rbLightbox');
-  document.getElementById('rbLightboxImg').src = inv.preview_url;
+  // 优先使用高清大图，降级到缩略图
+  document.getElementById('rbLightboxImg').src = inv.full_url || inv.preview_url;
   document.getElementById('rbLightboxName').textContent = inv.original_name;
   lb.classList.add('active');
   document.body.style.overflow = 'hidden';
@@ -538,8 +547,22 @@ function switchStep(n) {
       if (i === n) stepEl.classList.add('active');
     }
   });
-  if (n === 2) renderEditTable();
-  if (n === 3) genCover();
+  // 根据不同步骤初始化对应的UI
+  if (n === 1) {
+    // 返回上传步骤时，刷新缩略图（可能OCR状态变了）
+    renderThumbnails();
+  }
+  if (n === 2) {
+    // 返回编辑步骤时，刷新编辑表格和汇总
+    renderEditTable();
+    renderAuxTables();
+    updateSummary();
+  }
+  if (n === 3) {
+    // 进入预览步骤时，重新生成封面（确保数据最新）
+    genCover();
+    return; // genCover 内部会调用 switchStep(3) 或 alert，不要重复 saveState
+  }
   saveState();
 }
 
@@ -774,7 +797,23 @@ async function genCover() {
 
   // 渲染封面 HTML
   renderCoverHTML(cover);
-  switchStep(3);
+  // 直接切换到步骤3（不触发 genCover 递归）
+  switchStepOnly(3);
+}
+
+// 纯步骤切换（不触发 genCover/renderEditTable 等副作用）
+function switchStepOnly(n) {
+  syncHeader();
+  [1,2,3,4].forEach(i => {
+    document.getElementById('rbStep'+i).classList.toggle('hidden', i !== n);
+    const stepEl = document.querySelector(`.rb-step[data-step="${i}"]`);
+    if (stepEl) {
+      stepEl.classList.remove('active','done');
+      if (i < n) stepEl.classList.add('done');
+      if (i === n) stepEl.classList.add('active');
+    }
+  });
+  saveState();
 }
 
 function renderCoverHTML(cover) {
