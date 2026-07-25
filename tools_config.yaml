@@ -308,3 +308,14 @@ tools:
     category: pdf
     enabled: true
     order: 37
+
+  - id: reimbursement
+    name: 报销助手
+    description: 上传发票自动生成报销封面，支持应酬费/派车/出差明细，一键批量打印。
+    icon: bi-receipt
+    color: "#198754"
+    route: /tools/reimbursement
+    blueprint_module: tools.reimbursement
+    category: business
+    enabled: true
+    order: 65
