@@ -357,175 +357,211 @@ def ocr(file_id):
     )
 
 
-def _baidu_ocr_invoice(filepath: Path, api_key: str, secret_key: str) -> dict | None:
-    """调用百度智能云增值税发票识别 API。"""
-    import base64
-    from urllib.parse import quote
-
+# ---------------------------------------------------------------------------
+# 图片预处理
+# ---------------------------------------------------------------------------
+def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
+    """生成多个预处理版本：原图 / 灰度增强 / 强对比度。"""
+    import io as _io
     try:
-        # Step 1: 获取 access_token
-        token_url = (
-            "https://aip.baidubce.com/oauth/2.0/token"
-            f"?grant_type=client_credentials&client_id={api_key}&client_secret={secret_key}"
-        )
-        token_resp = __import__("requests").get(token_url, timeout=10)
-        token_data = token_resp.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            current_app.logger.warning("Baidu token failed: %s", token_data)
-            return None
+        from PIL import Image, ImageEnhance, ImageFilter
+    except ImportError:
+        return [img_bytes]
+    results = [img_bytes]
+    try:
+        img = Image.open(_io.BytesIO(img_bytes))
+        w, h = img.size
+        if max(w, h) > 3000:
+            ratio = 3000 / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        gray = img.convert("L")
+        enhancer = ImageEnhance.Contrast(gray)
+        gray_enh = enhancer.enhance(2.0).filter(ImageFilter.SHARPEN)
+        buf = _io.BytesIO(); gray_enh.save(buf, format="PNG"); results.append(buf.getvalue())
+        strong = enhancer.enhance(3.0)
+        buf2 = _io.BytesIO(); strong.save(buf2, format="PNG"); results.append(buf2.getvalue())
+    except Exception:
+        pass
+    return results
 
-        # Step 2: 读取图片，PDF 需转换
-        ext = filepath.suffix.lower()
-        img_bytes = None
 
-        if ext == ".pdf":
-            # PDF 转图片（取第一页）
-            try:
-                from pdf2image import convert_from_path
-                images = convert_from_path(str(filepath), first_page=1, last_page=1, dpi=200)
-                if images:
-                    import io as _io
-                    buf = _io.BytesIO()
-                    images[0].save(buf, format="PNG")
-                    img_bytes = buf.getvalue()
-            except Exception as e:
-                current_app.logger.warning("PDF to image failed: %s", e)
-                return None
-        else:
-            with open(filepath, "rb") as f:
-                img_bytes = f.read()
-
-        if not img_bytes:
-            return None
-
-        # Step 3: Base64 编码并显式 URL 编码
-        img_b64 = base64.b64encode(img_bytes).decode("ascii")
-        img_encoded = quote(img_b64, safe="")  # 对 + / = 等字符做百分号编码
-
-        # Step 4: 调用增值税发票识别
-        ocr_url = (
-            "https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice"
-            f"?access_token={access_token}"
-        )
-        # 必须手动拼接 form body，确保 image 值被正确 urlencode
-        body = f"image={img_encoded}"
-        ocr_resp = __import__("requests").post(
-            ocr_url,
-            data=body.encode("utf-8"),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=20,
-        )
-        ocr_data = ocr_resp.json()
-
-        # 检查错误
-        err_code = ocr_data.get("error_code")
-        if err_code:
-            err_msg = ocr_data.get("error_msg", "")
-            current_app.logger.warning(
-                "Baidu VAT OCR error [%s]: %s", err_code, err_msg
-            )
-
-            # 如果不是增值税发票，尝试通用 OCR
-            if err_code in (216100, 216101, 216102, 282103, 282104):
-                return _baidu_general_ocr(img_bytes, access_token)
-
-            return None
-
-        words = ocr_data.get("words_result", {})
-
-        def _get(field: str) -> str:
-            val = words.get(field, "")
-            if isinstance(val, list):
-                return val[0] if val else ""
-            return str(val) if val else ""
-
-        amount = _get("AmountInFiguers") or _get("TotalAmount") or ""
-        tax = _get("TaxAmount") or ""
-        amount_no_tax = ""
+def _file_to_image_list(filepath: Path) -> list[bytes]:
+    """文件→图片字节列表。PDF 多页取前 3 页，其他格式直接读取。"""
+    import io as _io
+    ext = filepath.suffix.lower()
+    if ext == ".pdf":
         try:
-            if amount and tax:
-                amount_no_tax = str(round(float(amount) - float(tax), 2))
-        except (ValueError, TypeError):
-            pass
-
-        return {
-            "invoice_number": _get("InvoiceNum") or _get("InvoiceCodeConfirm"),
-            "invoice_date": _get("InvoiceDate"),
-            "seller_name": _get("SellerName"),
-            "seller_tax_id": _get("SellerRegisterNum"),
-            "buyer_name": _get("PurchaserName"),
-            "buyer_tax_id": _get("PurchaserRegisterNum"),
-            "amount_excluding_tax": amount_no_tax,
-            "tax_amount": tax,
-            "total_amount": amount,
-            "description": _get("CommodityName") or "",
-        }
-
-    except Exception as exc:
-        current_app.logger.warning("Baidu OCR exception: %s", exc)
-        return None
-
-
-def _baidu_general_ocr(img_bytes: bytes, access_token: str) -> dict | None:
-    """通用 OCR 作为增值税发票识别的降级方案。"""
-    import base64
-    from urllib.parse import quote
-
+            from pdf2image import convert_from_path
+            imgs = convert_from_path(str(filepath), dpi=250, first_page=1, last_page=3, fmt="png")
+            result = []
+            for im in imgs:
+                b = _io.BytesIO(); im.save(b, format="PNG"); result.append(b.getvalue())
+            return result
+        except Exception as e:
+            current_app.logger.warning("PDF→image: %s", e)
     try:
-        img_b64 = base64.b64encode(img_bytes).decode("ascii")
-        img_encoded = quote(img_b64, safe="")
+        return [filepath.read_bytes()]
+    except Exception:
+        return []
 
-        url = (
-            "https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic"
-            f"?access_token={access_token}"
-        )
-        body = f"image={img_encoded}"
-        resp = __import__("requests").post(
-            url,
-            data=body.encode("utf-8"),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=15,
-        )
-        data = resp.json()
 
-        if data.get("error_code"):
-            current_app.logger.warning(
-                "Baidu general OCR error [%s]: %s",
-                data.get("error_code"), data.get("error_msg", ""),
-            )
+# ---------------------------------------------------------------------------
+# 百度 OCR 调用
+# ---------------------------------------------------------------------------
+def _baidu_vat_call(img_bytes: bytes, access_token: str) -> dict | None:
+    """增值税发票识别 → words_result 或 None。"""
+    import base64; from urllib.parse import quote
+    b64 = base64.b64encode(img_bytes).decode("ascii")
+    body = f"image={quote(b64, safe='')}".encode("utf-8")
+    resp = __import__("requests").post(
+        f"https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice?access_token={access_token}",
+        data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=20,
+    )
+    data = resp.json()
+    if data.get("error_code"):
+        current_app.logger.debug("Baidu VAT [%s]: %s", data["error_code"], data.get("error_msg", ""))
+        return None
+    return data.get("words_result")
+
+
+def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
+    """通用 OCR → words_result 列表。"""
+    import base64; from urllib.parse import quote
+    b64 = base64.b64encode(img_bytes).decode("ascii")
+    body = f"image={quote(b64, safe='')}".encode("utf-8")
+    resp = __import__("requests").post(
+        f"https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token={access_token}",
+        data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15,
+    )
+    data = resp.json()
+    return data.get("words_result") if not data.get("error_code") else None
+
+
+# ---------------------------------------------------------------------------
+# 结果解析
+# ---------------------------------------------------------------------------
+def _parse_vat(words: dict) -> dict:
+    def _g(f):
+        v = words.get(f, "")
+        return v[0] if isinstance(v, list) and v else (str(v) if v else "")
+    amt = _g("AmountInFiguers") or _g("TotalAmount") or ""
+    tax = _g("TaxAmount") or ""
+    no_tax = ""
+    try:
+        if amt and tax: no_tax = str(round(float(amt) - float(tax), 2))
+    except: pass
+    return {
+        "invoice_number": _g("InvoiceNum") or _g("InvoiceCodeConfirm"),
+        "invoice_date": _g("InvoiceDate"),
+        "seller_name": _g("SellerName"),
+        "amount_excluding_tax": no_tax,
+        "tax_amount": tax,
+        "total_amount": amt,
+        "description": _g("CommodityName") or _g("CommodityType") or "",
+    }
+
+
+def _parse_general(words_list: list) -> dict:
+    import re
+    text = " ".join([w.get("words", "") for w in (words_list or [])])
+    def _first(patterns):
+        for p in patterns:
+            m = re.search(p, text)
+            if m: return m.group(1).replace(",", "").strip()
+        return ""
+
+    return {
+        "invoice_number": _first([
+            r"发票号码[：:\s]*([A-Za-z0-9\-]{8,30})",
+            r"No[\.\s]*([A-Za-z0-9\-]{8,30})", r"号码[：:\s]*([A-Za-z0-9\-]{8,30})",
+            r"(\d{10,12})",
+        ]),
+        "invoice_date": _first([
+            r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)",
+            r"开票日期[：:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})",
+            r"日期[：:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})",
+        ]),
+        "seller_name": _first([
+            r"[销銷]售方[名称稱][：:\s]*([^\s，,]{4,40}?(?:有限公司|股份有限公司|有限责任公司|科技|电子|实业|集团|工厂|中心|经营部|商店)[^\s]{0,10})",
+            r"[销銷]售?[方务][：:\s]*([^\s，,]{4,40}?(?:公司|科技|工厂|中心)[^\s]{0,10})",
+            r"名称[：:\s]*([^\s，,]{4,40}?(?:有限公司|股份有限公司|科技|电子|实业)[^\s]{0,10})",
+        ]),
+        "amount_excluding_tax": _first([
+            r"金额[\(（]不含税[\)）]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"不含税金额\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+        ]),
+        "tax_amount": _first([
+            r"税额\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"税[额費]\s*([\d,]+\.?\d{0,2})",
+        ]),
+        "total_amount": _first([
+            r"[价稅税]税?[合計]计[\(（]?[小写]?[\)）]?\s*[¥￥]\s*([\d,]+\.?\d{0,2})",
+            r"合[计計]\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"小写\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"[¥￥]\s*([\d,]+\.\d{2})",
+        ]),
+        "description": _first([
+            r"[货貨]物[或及].*?[名称稱][：:\s]*(.+)",
+            r"项目[名称稱][：:\s]*(.+)",
+        ])[:80],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 主 OCR 流程：多版本 + 多策略
+# ---------------------------------------------------------------------------
+def _baidu_ocr_invoice(filepath: Path, api_key: str, secret_key: str) -> dict | None:
+    """
+    OCR 主流程：
+      1. PDF→图片（多页取前 3 页）
+      2. 每页生成 3 个预处理版本（原图/灰度增强/强对比度）
+      3. 增值税发票识别（页×版本 穷举）
+      4. 失败降级 → 通用 OCR + 增强正则提取
+    """
+    try:
+        resp = __import__("requests").get(
+            "https://aip.baidubce.com/oauth/2.0/token",
+            params={"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key},
+            timeout=10,
+        )
+        token = resp.json().get("access_token")
+        if not token:
+            current_app.logger.warning("Baidu token failed")
             return None
 
-        # 提取文本
-        words = data.get("words_result", [])
-        lines = [w.get("words", "") for w in words]
-        full_text = " ".join(lines)
+        images = _file_to_image_list(filepath)
+        if not images:
+            return None
 
-        # 尝试用正则提取关键字段
-        import re
-        inv_num = ""
-        inv_date = ""
-        total = ""
+        # --- 策略 A: 增值税发票识别（多页×多版本） ---
+        for pi, raw in enumerate(images):
+            for vi, ver in enumerate(_preprocess_for_ocr(raw)):
+                words = _baidu_vat_call(ver, token)
+                if words:
+                    r = _parse_vat(words)
+                    if r.get("invoice_number") or r.get("total_amount"):
+                        current_app.logger.info("VAT OK p%d v%d", pi + 1, vi + 1)
+                        return r
 
-        m = re.search(r"发票号码[：:]\s*(\S+)", full_text)
-        if m: inv_num = m.group(1)
-        m = re.search(r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)", full_text)
-        if m: inv_date = m.group(1)
-        m = re.search(r"[价税合计小写]+\s*[¥￥]\s*(\d+\.?\d*)", full_text)
-        if m: total = m.group(1)
-
-        return {
-            "invoice_number": inv_num,
-            "invoice_date": inv_date,
-            "seller_name": "",
-            "amount_excluding_tax": "",
-            "tax_amount": "",
-            "total_amount": total,
-            "description": "",
-        }
+        # --- 策略 B: 通用 OCR（取字段最多的结果） ---
+        best, best_cnt = None, 0
+        for pi, raw in enumerate(images):
+            for vi, ver in enumerate(_preprocess_for_ocr(raw)):
+                words_list = _baidu_gen_call(ver, token)
+                if words_list and len(words_list) > 2:
+                    r = _parse_general(words_list)
+                    cnt = sum(1 for v in r.values() if v)
+                    if cnt > best_cnt:
+                        best, best_cnt = r, cnt
+                        if cnt >= 3:
+                            current_app.logger.info("General OK p%d v%d cnt=%d", pi + 1, vi + 1, cnt)
+                            return best
+        return best
 
     except Exception as exc:
-        current_app.logger.warning("Baidu general OCR exception: %s", exc)
+        current_app.logger.warning("Baidu OCR: %s", exc)
         return None
 
 
