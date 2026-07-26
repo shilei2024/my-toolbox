@@ -30,9 +30,26 @@
   .ze-queue-item .ze-q-icon { color: #6f42c1; font-size: 1.1rem; flex-shrink: 0; }
   .ze-queue-item .ze-q-name { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ze-queue-item .ze-q-size { color: #6c757d; font-size: 0.75rem; flex-shrink: 0; white-space: nowrap; }
+  .ze-q-tag {
+    flex-shrink: 0; font-size: 0.7rem; padding: 1px 6px;
+    border-radius: 8px; background: #fff3cd; color: #856404;
+  }
+  .ze-q-tag.ok { background: #d1e7dd; color: #0f5132; }
+  .ze-q-tag.bad { background: #f8d7da; color: #842029; }
   .ze-queue-item .ze-q-del { flex-shrink: 0; cursor: pointer; color: #dc3545; font-size: 1rem; padding: 0 4px; }
 
   .ze-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+
+  /* 进度条 */
+  .ze-progress-wrap { width: 100%; margin-top: 0.5rem; }
+  .ze-progress {
+    height: 6px; background: #e9ecef; border-radius: 3px; overflow: hidden;
+  }
+  .ze-progress-bar {
+    height: 100%; background: var(--ze-primary);
+    width: 0%; transition: width 0.3s ease;
+  }
+  .ze-progress-text { font-size: 0.78rem; color: #6c757d; margin-top: 0.25rem; }
 
   /* PDF 结果列表 */
   .ze-file-list {
@@ -67,6 +84,12 @@
     text-align: center; padding: 3rem 1rem; color: #adb5bd;
   }
   .ze-empty i { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+
+  .ze-warn-box {
+    margin-top: 0.75rem; padding: 0.6rem 0.8rem;
+    background: #fff3cd; color: #664d03; border-radius: 0.35rem;
+    font-size: 0.82rem; border-left: 3px solid #ffc107;
+  }
 </style>
 
 <div class="mb-3">
@@ -78,7 +101,7 @@
 <div class="ze-upload-zone" id="zeUploadZone">
   <i class="bi bi-cloud-upload"></i>
   <p class="mt-2 mb-1 fw-bold">拖拽或点击选择 zip 文件</p>
-  <p class="text-muted small mb-0">支持同时选择多个，可继续追加</p>
+  <p class="text-muted small mb-0">支持同时选择多个，可继续追加 · 单文件 ≤ 4MB · 多文件自动分批</p>
   <input type="file" id="zeFileInput" multiple accept=".zip" hidden>
 </div>
 
@@ -96,6 +119,15 @@
   <span class="text-muted small" id="zeQueueCount"></span>
 </div>
 
+<!-- 进度条 -->
+<div class="ze-progress-wrap hidden" id="zeProgressWrap">
+  <div class="ze-progress"><div class="ze-progress-bar" id="zeProgressBar"></div></div>
+  <div class="ze-progress-text" id="zeProgressText"></div>
+</div>
+
+<!-- 警告 / 提示 -->
+<div id="zeWarn" class="hidden"></div>
+
 <!-- 结果展示 -->
 <div id="zeResult" class="hidden"></div>
 
@@ -105,6 +137,13 @@
 </div>
 
 <script>
+// ================ 配置（与后端一致） ================
+const ZE_CFG = {
+  MAX_SINGLE_FILE_MB: 4,        // 单文件上限，Vercel 网关层 4.5MB 留 buffer
+  MAX_BATCH_BYTES: 3 * 1024 * 1024,  // 单批 zip 总大小上限 3MB
+  MAX_FILE_COUNT_PER_BATCH: 50,     // 单批文件数上限（防止极端情况）
+};
+
 const STATE = { queue: [], files: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -126,7 +165,10 @@ function addToQueue(files) {
   for (const f of files) {
     if (!f || !f.name || f.size === 0) continue;
     if (!f.name.toLowerCase().endsWith('.zip')) continue;
-    if (f.size > 50 * 1024 * 1024) { alert(`文件 ${f.name} 超过 50MB 上限`); continue; }
+    if (f.size > ZE_CFG.MAX_SINGLE_FILE_MB * 1024 * 1024) {
+      alert(`文件 ${f.name} 超过 ${ZE_CFG.MAX_SINGLE_FILE_MB}MB 单文件上限，已跳过`);
+      continue;
+    }
     STATE.queue.push({ file: f, name: f.name, size: f.size, sizeStr: formatSize(f.size) });
     added.push(f.name);
   }
@@ -160,7 +202,8 @@ function renderQueue() {
   document.getElementById('zeEmpty').classList.add('hidden');
 
   const totalSize = STATE.queue.reduce((s, q) => s + q.size, 0);
-  countEl.textContent = `${STATE.queue.length} 个文件，共 ${formatSize(totalSize)}`;
+  const batches = planBatches(STATE.queue);
+  countEl.textContent = `${STATE.queue.length} 个文件，共 ${formatSize(totalSize)}（约 ${batches.length} 批）`;
 
   el.innerHTML = STATE.queue.map((q, i) => `
     <div class="ze-queue-item">
@@ -178,40 +221,139 @@ function formatSize(bytes) {
   return (bytes/(1024*1024)).toFixed(1) + ' MB';
 }
 
-// ===== 步骤 2：发送后端解压 =====
+// ===== 步骤 2：分批发送 =====
+/**
+ * 把队列按"单批总字节数 ≤ MAX_BATCH_BYTES 且 文件数 ≤ 上限"切分成多批。
+ * 单个文件即使超过 MAX_BATCH_BYTES 也会独占一批（虽然前端拦过，但兜底）。
+ */
+function planBatches(queue) {
+  const batches = [];
+  let cur = [];
+  let curBytes = 0;
+  for (const q of queue) {
+    if (cur.length === 0) {
+      cur.push(q);
+      curBytes = q.size;
+      continue;
+    }
+    if (curBytes + q.size > ZE_CFG.MAX_BATCH_BYTES
+        || cur.length >= ZE_CFG.MAX_FILE_COUNT_PER_BATCH) {
+      batches.push(cur);
+      cur = [q];
+      curBytes = q.size;
+    } else {
+      cur.push(q);
+      curBytes += q.size;
+    }
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
+}
+
+function showProgress(pct, text) {
+  document.getElementById('zeProgressWrap').classList.remove('hidden');
+  document.getElementById('zeProgressBar').style.width = pct + '%';
+  document.getElementById('zeProgressText').textContent = text;
+}
+function hideProgress() {
+  document.getElementById('zeProgressWrap').classList.add('hidden');
+}
+
+function showWarn(msg, type = 'warn') {
+  const el = document.getElementById('zeWarn');
+  if (!msg) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="ze-warn-box"><i class="bi bi-exclamation-triangle"></i> ${msg}</div>`;
+}
+
 async function startExtract(btn) {
   if (STATE.queue.length === 0) return;
 
   document.getElementById('zeResult').classList.add('hidden');
+  showWarn('');
   const originalHTML = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在解压…';
 
-  const fd = new FormData();
-  STATE.queue.forEach(q => fd.append('files', q.file, q.name));
+  const batches = planBatches(STATE.queue);
+  const allResults = [];
+  const allSkipped = [];
+  const truncations = [];
+  let okBatches = 0;
 
-  try {
-    const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
-    const text = await resp.text();
-    let data;
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+    const batchBytes = batch.reduce((s, q) => s + q.size, 0);
+    showProgress(
+      Math.round(bi / batches.length * 100),
+      `第 ${bi + 1}/${batches.length} 批 · ${batch.length} 个文件 · ${formatSize(batchBytes)}`
+    );
+
+    const fd = new FormData();
+    batch.forEach(q => fd.append('files', q.file, q.name));
+
     try {
-      data = JSON.parse(text);
+      const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
+      const text = await resp.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error('Non-JSON response:', text.substring(0, 500));
+        throw new Error(
+          `第 ${bi + 1} 批返回非 JSON（HTTP ${resp.status}）：` +
+          (text.substring(0, 150) || resp.statusText) +
+          '\n建议：刷新页面后单批少选几个文件重试。'
+        );
+      }
+      if (!data.success) {
+        throw new Error(`第 ${bi + 1} 批失败：${data.error || '未知错误'}`);
+      }
+      if (Array.isArray(data.files)) allResults.push(...data.files);
+      if (Array.isArray(data.skipped_oversize)) allSkipped.push(...data.skipped_oversize);
+      if (data.truncated) {
+        truncations.push({ batchIdx: bi + 1, count: data.truncated_count, msg: data.truncated_msg });
+      }
+      okBatches++;
     } catch (e) {
-      console.error('Non-JSON response:', text.substring(0, 500));
-      throw new Error(`服务器返回非 JSON（HTTP ${resp.status}）：` + (text.substring(0, 150) || resp.statusText));
+      // 单批失败不致命，把已成功的展示出来 + 提示
+      showWarn(`部分批次失败：${e.message}`, 'warn');
+      console.error(e);
+      break;
     }
-    if (data.success) {
-      STATE.files = data.files.map(f => ({ ...f, _selected: true }));
-      renderResult(data);
-    } else {
-      alert('处理失败: ' + (data.error || '未知错误'));
-    }
-  } catch(e) {
-    alert('网络异常: ' + e.message);
-  } finally {
+  }
+
+  showProgress(100, `完成：${okBatches}/${batches.length} 批`);
+  setTimeout(hideProgress, 1500);
+
+  if (allResults.length === 0 && truncations.length === 0) {
     btn.disabled = false;
     btn.innerHTML = originalHTML;
+    if (!document.getElementById('zeWarn').classList.contains('hidden')) return; // 已有错误提示
+    alert('未提取到任何 PDF，请确认压缩包内确实包含 PDF 文件');
+    btn.disabled = false;
+    btn.innerHTML = originalHTML;
+    return;
   }
+
+  STATE.files = allResults.map(f => ({ ...f, _selected: true }));
+  renderResult({ total: allResults.length, files: allResults });
+
+  // 顶部汇总：跳过的 + 截断的
+  const warns = [];
+  if (allSkipped.length) {
+    warns.push(`<b>${allSkipped.length} 个文件被跳过</b>（单文件/单批超限）：<br>` +
+      allSkipped.slice(0, 5).map(s => '· ' + s).join('<br>') +
+      (allSkipped.length > 5 ? `<br>…还有 ${allSkipped.length - 5} 个` : ''));
+  }
+  if (truncations.length) {
+    warns.push(`<b>${truncations.length} 个批次被截断</b>：` +
+      truncations.map(t => `第 ${t.batchIdx} 批：${t.msg}`).join('<br>'));
+  }
+  if (warns.length) showWarn(warns.join('<hr style="margin:0.4rem 0">'), 'warn');
+
+  btn.disabled = false;
+  btn.innerHTML = originalHTML;
 }
 
 // ===== 步骤 3：结果展示 =====

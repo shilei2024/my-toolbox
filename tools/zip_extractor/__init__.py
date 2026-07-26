@@ -1,7 +1,9 @@
 """
 批量压缩包 PDF 提取 — 递归解压多层嵌套 zip，筛选出所有 PDF 文件。
 
-Vercel 兼容：分析结果直接返回 base64 数据，不依赖跨请求文件系统。
+Vercel 兼容：单次请求/响应体严格控制在 3MB 以内（Vercel Serverless
+Function 上限 4.5MB，留出 multipart boundary 与 base64 膨胀空间）。
+超出时返回 413 + 明确提示，前端会自动拆分分批。
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ import logging
 import zipfile
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from auth.decorators import remaining_for
 from extensions import csrf, limiter
@@ -20,6 +22,17 @@ from extensions import csrf, limiter
 log = logging.getLogger(__name__)
 
 tool_bp = Blueprint("zip_extractor", __name__, template_folder="templates")
+
+# ---------------------------------------------------------------------------
+# Vercel-friendly 上限
+# ---------------------------------------------------------------------------
+# Vercel Serverless Function 单次请求/响应上限 4.5MB。multipart 边界、filename、
+# base64 膨胀（×1.33）都要扣掉，单批 zip 净数据 ≤ 3MB、返回 PDF base64 ≤ 3MB
+# 比较稳。超出后端会显式 413，前端据此自动分批。
+MAX_REQUEST_ZIP_BYTES = 3 * 1024 * 1024       # 3 MB（本批 zip 总大小上限）
+MAX_RESPONSE_B64_BYTES = 3 * 1024 * 1024      # 3 MB（返回 PDF base64 总大小上限）
+MAX_SINGLE_FILE_BYTES = 4 * 1024 * 1024       # 4 MB（单 zip 上限，超出直接拒收）
+MAX_DEPTH = 8                                 # 递归层数上限
 
 
 @tool_bp.route("/")
@@ -45,7 +58,7 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
     递归解压 zip 字节流，最深 8 层。
     返回找到的所有 PDF 文件列表 [{filename, size, path_chain, data}].
     """
-    if depth > 8:
+    if depth > MAX_DEPTH:
         return []
 
     results = []
@@ -93,13 +106,29 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
 @csrf.exempt
 @limiter.limit(lambda: "20/minute")
 def analyze():
-    """接收多个 zip 文件，递归解压找出所有 PDF。"""
+    """接收本批 zip 文件，递归解压找出 PDF，按大小上限截断返回。
+
+    入参：本批 zip 总大小 ≤ MAX_REQUEST_ZIP_BYTES。
+    出参：本批 PDF base64 总大小 ≤ MAX_RESPONSE_B64_BYTES；超出则返回部分 + truncated=true。
+    """
     try:
         files = request.files.getlist("files")
         if not files or all(not (f and f.filename) for f in files):
             return jsonify(success=False, error="请选择至少一个 zip 文件"), 400
 
-        all_pdfs = []
+        # ---- 单批请求体大小门禁：避免到 Vercel 网关层才被 413 砍掉 ----
+        # 用 Content-Length 提前拦截，不必真把全部流读完。
+        cl = request.content_length or 0
+        if cl > MAX_REQUEST_ZIP_BYTES * 2:  # multipart 边界等约 1 倍开销
+            return jsonify(
+                success=False,
+                error=f"本批上传体积过大（{cl/1024/1024:.1f}MB），前端应已自动分批；"
+                      f"若仍失败请刷新页面或单批 ≤ {MAX_REQUEST_ZIP_BYTES//(1024*1024)}MB",
+            ), 413
+
+        all_pdfs: list[dict] = []
+        received_bytes = 0
+        skipped_oversize: list[str] = []
 
         for f in files:
             if not f.filename:
@@ -107,18 +136,35 @@ def analyze():
             if not f.filename.lower().endswith(".zip"):
                 continue
             try:
-                zip_bytes = f.read()
-                if not zip_bytes:
+                # 先看 stream 长度，提前拦掉超大单文件
+                f.stream.seek(0, io.SEEK_END)
+                size = f.stream.tell()
+                f.stream.seek(0)
+                if size == 0:
                     continue
+                if size > MAX_SINGLE_FILE_BYTES:
+                    skipped_oversize.append(f"{f.filename}（{size/1024/1024:.1f}MB）")
+                    continue
+                # 累加本批总大小，提前拦
+                if received_bytes + size > MAX_REQUEST_ZIP_BYTES:
+                    skipped_oversize.append(
+                        f"{f.filename}（{size/1024/1024:.1f}MB，超出本批 {MAX_REQUEST_ZIP_BYTES//(1024*1024)}MB 上限）"
+                    )
+                    continue
+                zip_bytes = f.read()
+                received_bytes += len(zip_bytes)
                 log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
                 pdfs = _extract_deep(zip_bytes, f.filename)
                 all_pdfs.extend(pdfs)
             except Exception as e:
                 log.warning("Failed to read %s: %s", f.filename, e)
 
+        if not all_pdfs and not skipped_oversize:
+            return jsonify(success=False, error="本批没有可解压的 zip 或未提取到 PDF"), 400
+
         # 按内容哈希去重
-        seen = set()
-        unique = []
+        seen: set[str] = set()
+        unique: list[dict] = []
         for p in all_pdfs:
             data = p.pop("data")
             h = _quick_hash(data)
@@ -129,15 +175,33 @@ def analyze():
             p["size_kb"] = round(len(data) / 1024, 1)
             unique.append(p)
 
-        # 限制总返回 ~50MB
-        total_b64 = sum(len(p["data_b64"]) for p in unique)
-        if total_b64 > 50_000_000:
-            return jsonify(
-                success=False,
-                error=f"PDF 总大小过大（{total_b64/1e6:.0f}MB），请分批上传",
-            ), 413
+        # ---- 响应体大小门禁：按 base64 累计截断 ----
+        kept: list[dict] = []
+        truncated: list[dict] = []  # 没塞下的，附带 client 可继续请求的提示
+        acc = 0
+        for p in unique:
+            sz = len(p["data_b64"])
+            if acc + sz > MAX_RESPONSE_B64_BYTES:
+                truncated.append(p)
+                continue
+            acc += sz
+            kept.append(p)
 
-        return jsonify(success=True, total=len(unique), files=unique)
+        body: dict = {
+            "success": True,
+            "total": len(kept),
+            "files": kept,
+            "skipped_oversize": skipped_oversize,
+        }
+        if truncated:
+            body["truncated"] = True
+            body["truncated_count"] = len(truncated)
+            body["truncated_msg"] = (
+                f"本批还剩 {len(truncated)} 个 PDF 未返回（响应体超 "
+                f"{MAX_RESPONSE_B64_BYTES//(1024*1024)}MB 上限）。"
+                f"建议：① 改用更小的压缩包分批；② 减少单包内文件数。"
+            )
+        return jsonify(body)
 
     except Exception as e:
         log.exception("analyze fatal error")
