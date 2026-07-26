@@ -161,6 +161,23 @@ ENTERTAINMENT_CATEGORIES = ["餐费", "送礼", "其他"]
 
 
 # ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
+def _safe_float(val, default: float = 0.0) -> float:
+    """安全转换为 float，非数字返回 default。"""
+    try:
+        return float(val) if val not in (None, "", "-") else default
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_filename(name: str) -> str:
+    """过滤文件名中的非法字符。"""
+    import re
+    return re.sub(r'[\\/:*?"<>|]', '_', name)[:100]
+
+
+# ---------------------------------------------------------------------------
 # 金额大写转换
 # ---------------------------------------------------------------------------
 def _number_to_chinese(amount: float) -> str:
@@ -172,8 +189,10 @@ def _number_to_chinese(amount: float) -> str:
     fraction_cn = ["角", "分"]
 
     yuan = int(amount)
-    jiao = int(round((amount - yuan) * 10))
-    fen = int(round((amount - yuan - jiao / 10) * 100))
+    # 用整数运算避免浮点精度问题：5616.10 → 561610 分
+    total_fen = int(round(amount * 100))
+    jiao = (total_fen // 10) % 10
+    fen = total_fen % 10
 
     # 整数部分
     result = ""
@@ -302,7 +321,17 @@ def preview(filename):
     """返回上传文件的缩略图/预览。"""
     from flask import send_file
 
+    # 安全校验：防止路径遍历
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return jsonify(error="非法文件名"), 400
+
     filepath = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement" / filename
+    # 确保解析后的路径仍在上传目录内
+    try:
+        filepath.resolve().relative_to((Path(current_app.config["UPLOAD_DIR"]) / "reimbursement").resolve())
+    except ValueError:
+        return jsonify(error="非法路径"), 400
+
     if not filepath.exists():
         return jsonify(error="文件不存在"), 404
 
@@ -564,54 +593,6 @@ def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
     return results
 
 
-def _file_to_image_list(filepath: Path) -> list[bytes]:
-    """文件→图片字节列表。PDF 输出压缩 JPEG（<500KB），非 PDF 大图自动压缩。"""
-    import io as _io
-    ext = filepath.suffix.lower()
-
-    if ext == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(str(filepath))
-            result = []
-            for page_num in range(min(len(doc), 3)):
-                page = doc[page_num]
-                mat = fitz.Matrix(200 / 72, 200 / 72)
-                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                jpg = pix.tobytes("jpeg")
-                if len(jpg) > 800_000:
-                    mat2 = fitz.Matrix(150 / 72, 150 / 72)
-                    pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
-                    jpg = pix2.tobytes("jpeg")
-                result.append(jpg)
-            doc.close()
-            return result
-        except Exception as e:
-            current_app.logger.warning("PyMuPDF: %s", e)
-
-        try:
-            from pdf2image import convert_from_path
-            imgs = convert_from_path(str(filepath), dpi=200, first_page=1, last_page=3, fmt="jpeg")
-            return [im.tobytes() if hasattr(im,'tobytes') else (lambda b: (b.seek(0),b.getvalue())[1])((lambda: (_io.BytesIO(),im.save(_io.BytesIO(),format='JPEG',quality=85))[0])()) for im in imgs]
-        except: pass
-        return []
-
-    # 非 PDF
-    try:
-        raw = filepath.read_bytes()
-        if len(raw) > 2_000_000:
-            from PIL import Image
-            img = Image.open(_io.BytesIO(raw))
-            w, h = img.size
-            if max(w, h) > 2000:
-                img = img.resize((int(w*2000/max(w,h)), int(h*2000/max(w,h))), Image.LANCZOS)
-            buf = _io.BytesIO(); img.convert("RGB").save(buf, format="JPEG", quality=85)
-            return [buf.getvalue()]
-        return [raw]
-    except:
-        return []
-
-
 # ---------------------------------------------------------------------------
 # 百度 OCR 调用
 # ---------------------------------------------------------------------------
@@ -809,62 +790,6 @@ def _parse_general(words_list: list) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# 主 OCR 流程：多版本 + 多策略
-# ---------------------------------------------------------------------------
-def _baidu_ocr_invoice(filepath: Path, api_key: str, secret_key: str) -> dict | None:
-    """
-    OCR 主流程：
-      1. PDF→图片（多页取前 3 页）
-      2. 每页生成 3 个预处理版本（原图/灰度增强/强对比度）
-      3. 增值税发票识别（页×版本 穷举）
-      4. 失败降级 → 通用 OCR + 增强正则提取
-    """
-    try:
-        resp = __import__("requests").get(
-            "https://aip.baidubce.com/oauth/2.0/token",
-            params={"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key},
-            timeout=10,
-        )
-        token = resp.json().get("access_token")
-        if not token:
-            current_app.logger.warning("Baidu token failed")
-            return None
-
-        images = _file_to_image_list(filepath)
-        if not images:
-            return None
-
-        # --- 策略 A: 增值税发票识别（多页×多版本） ---
-        for pi, raw in enumerate(images):
-            for vi, ver in enumerate(_preprocess_for_ocr(raw)):
-                words = _baidu_vat_call(ver, token)
-                if words:
-                    r = _parse_vat(words)
-                    if r.get("invoice_number") or r.get("total_amount"):
-                        current_app.logger.info("VAT OK p%d v%d", pi + 1, vi + 1)
-                        return r
-
-        # --- 策略 B: 通用 OCR（取字段最多的结果） ---
-        best, best_cnt = None, 0
-        for pi, raw in enumerate(images):
-            for vi, ver in enumerate(_preprocess_for_ocr(raw)):
-                words_list = _baidu_gen_call(ver, token)
-                if words_list and len(words_list) > 2:
-                    r = _parse_general(words_list)
-                    cnt = sum(1 for v in r.values() if v)
-                    if cnt > best_cnt:
-                        best, best_cnt = r, cnt
-                        if cnt >= 3:
-                            current_app.logger.info("General OK p%d v%d cnt=%d", pi + 1, vi + 1, cnt)
-                            return best
-        return best
-
-    except Exception as exc:
-        current_app.logger.warning("Baidu OCR: %s", exc)
-        return None
-
-
 def _paddle_ocr_invoice(filepath: Path) -> dict | None:
     """本地 PaddleOCR 识别（需提前安装 paddleocr）。"""
     try:
@@ -906,7 +831,7 @@ def _paddle_ocr_invoice(filepath: Path) -> dict | None:
             invoice_date = _normalize_date(m.group(1))
 
         # 价税合计
-        m = re.search(r"[价税合计小写].*?[¥￥]\s*(\d+\.?\d*)", full_text)
+        m = re.search(r"(?:价税合计|小写).*?[¥￥]\s*(\d+\.?\d*)", full_text)
         if m:
             total_amount = m.group(1)
 
@@ -1006,7 +931,7 @@ def list_periods():
             d = json.loads(r.data_json)
             header = d.get("header", {})
             invoices = d.get("invoices", [])
-            total = sum(float(inv.get("data", {}).get("total_amount", 0) or 0) for inv in invoices)
+            total = sum(_safe_float(inv.get("data", {}).get("total_amount")) for inv in invoices)
             periods.append({
                 "period": r.period,
                 "employee": header.get("employee_name", ""),
@@ -1046,7 +971,7 @@ def cover_data():
         office = inv.get("office", "") or ""
         key = f"{pl_code}|{pl_name}"
 
-        total = float(inv.get("total_amount", 0) or 0)
+        total = _safe_float(inv.get("total_amount", 0))
         exp_type = inv.get("expense_type", "")
 
         if key not in groups:
@@ -1085,12 +1010,15 @@ def cover_data():
         for cat in EXPENSE_CATEGORIES
     ]
 
-    # 按客户等级汇总（费用分类表）
+    # 按客户等级汇总（费用分类表）— 仅计入有匹配费用类别的发票
+    valid_exp_keys = {c["key"] for c in EXPENSE_CATEGORIES}
     level_groups: dict[str, dict] = {}
     for inv in invoices:
         level = inv.get("customer_level", "") or "未分类"
-        total = float(inv.get("total_amount", 0) or 0)
+        total = _safe_float(inv.get("total_amount", 0))
         exp_type = inv.get("expense_type", "")
+        if exp_type not in valid_exp_keys:
+            continue  # 跳过无费用类别的发票，与封面 total_all 保持一致
         if level not in level_groups:
             level_groups[level] = {
                 "level": level,
@@ -1108,12 +1036,15 @@ def cover_data():
             level_groups[level]["other"] += total
         level_groups[level]["total"] += total
 
+    # 排序 level_groups 使结果顺序稳定
+    level_groups = sorted(level_groups.values(), key=lambda g: g["level"])
+
     # 应酬费明细——优先取顶层数组（前端 genCover 发送），回退到发票内嵌数据
     entertainment_raw = data.get("entertainment") or []
     entertainment_details = []
     if entertainment_raw:
         for ent in entertainment_raw:
-            amt = float(ent.get("amount", 0) or 0)
+            amt = _safe_float(ent.get("amount"))
             if amt > 0:
                 entertainment_details.append({
                     "date": ent.get("date", ""),
@@ -1134,7 +1065,7 @@ def cover_data():
                     "place": ent.get("place", ""),
                     "customer": ent.get("customer", ""),
                     "participants": ent.get("participants", ""),
-                    "amount": float(ent.get("amount", 0) or 0),
+                    "amount": _safe_float(ent.get("amount")),
                     "purpose": ent.get("purpose", ""),
                 })
 
@@ -1143,9 +1074,7 @@ def cover_data():
     vehicle_details = []
     if vehicles_raw:
         for veh in vehicles_raw:
-            km = float(veh.get("km_total", 0) or 0)
-            toll = float(veh.get("toll_fee", 0) or 0)
-            parking = float(veh.get("parking_fee", 0) or 0)
+            km = _safe_float(veh.get("km_total")); toll = _safe_float(veh.get("toll_fee")); parking = _safe_float(veh.get("parking_fee"))
             if km > 0 or toll > 0 or parking > 0:
                 vehicle_details.append({
                     "date": veh.get("date", ""),
@@ -1162,9 +1091,7 @@ def cover_data():
     else:
         for inv in invoices:
             veh = inv.get("vehicle", {})
-            km = float(veh.get("km_total", 0) or 0)
-            toll = float(veh.get("toll_fee", 0) or 0)
-            parking = float(veh.get("parking_fee", 0) or 0)
+            km = _safe_float(veh.get("km_total")); toll = _safe_float(veh.get("toll_fee")); parking = _safe_float(veh.get("parking_fee"))
             if km > 0 or toll > 0 or parking > 0:
                 vehicle_details.append({
                     "date": veh.get("date", ""),
@@ -1184,7 +1111,7 @@ def cover_data():
     travel_details = []
     if travels_raw:
         for tr in travels_raw:
-            amt = float(tr.get("amount", 0) or 0)
+            amt = _safe_float(tr.get("amount"))
             if amt > 0:
                 travel_details.append({
                     "date": tr.get("date", ""),
@@ -1197,7 +1124,7 @@ def cover_data():
     else:
         for inv in invoices:
             tr = inv.get("travel", {})
-            amt = float(tr.get("amount", 0) or 0)
+            amt = _safe_float(tr.get("amount"))
             if tr and amt > 0:
                 travel_details.append({
                     "date": tr.get("date", ""),
@@ -1489,20 +1416,6 @@ def _build_cover_file(cover_data):
     for i, w in enumerate([6, 12, 12, 12, 4, 12, 12, 12], 1):
         ws2.column_dimensions[get_column_letter(i)].width = w
 
-    row += 2
-    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws2.cell(row=row, column=2).value = f"申请人：{EMP}"; ws2.cell(row=row, column=2).font = s["normal"]
-    ws2.merge_cells(start_row=row, start_column=6, end_row=row, end_column=7)
-    ws2.cell(row=row, column=6).value = "部门主管："; ws2.cell(row=row, column=6).font = s["normal"]
-    row += 1
-    ws2.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    ws2.cell(row=row, column=2).value = f"日期：{DATE}"; ws2.cell(row=row, column=2).font = s["normal"]
-    ws2.merge_cells(start_row=row, start_column=6, end_row=row, end_column=7)
-    ws2.cell(row=row, column=6).value = "日期："; ws2.cell(row=row, column=6).font = s["normal"]
-
-    for i, w in enumerate([6, 12, 12, 12, 4, 12, 12, 12], 1):
-        ws2.column_dimensions[get_column_letter(i)].width = w
-
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
     return buf
@@ -1554,7 +1467,7 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
     ent_total = 0
     for e in entertainment:
         row += 1
-        amt = float(e.get("amount", 0) or 0)
+        amt = _safe_float(e.get("amount"))
         vals = [e.get("date", ""), e.get("category", ""), e.get("place", ""),
                 e.get("customer", ""), e.get("participants", ""), amt or "",
                 e.get("purpose", ""), ""]
@@ -1586,28 +1499,29 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
     ws2.cell(row=2, column=10, value=period_text).font = nfont
     ws2.cell(row=2, column=10).alignment = Alignment(horizontal="right")
 
-    # Row 3: 表头 — "行车路程"合并 D:E
+    # Row 3: 表头 — "行车路程"合并 D:E，客户联系人在 F
     ws2.merge_cells(start_row=3, start_column=4, end_row=3, end_column=5)
     ws2.cell(row=3, column=4).value = "行车路程"; ws2.cell(row=3, column=4).font = hfont; ws2.cell(row=3, column=4).fill = hfill; ws2.cell(row=3, column=4).alignment = s["center"]; ws2.cell(row=3, column=4).border = thin
 
-    vh1 = ["日期", "出发地", "目的地", "客户联系人", "行车路程", "", "公里数", "过桥费", "停车费", "备注"]
+    # 列顺序: A=日期 B=出发地 C=目的地 D:E=行车路程 F=客户联系人 G=公里数 H=过桥费 I=停车费 J=备注
+    vh1 = ["日期", "出发地", "目的地", None, "客户联系人", "公里数", "过桥费", "停车费", "备注"]
     for ci, h in enumerate(vh1, 1):
-        if ci in (5, 6): continue  # 跳过已合并的单元格
+        if h is None: continue  # 跳过 D:E 合并区域
         cell = ws2.cell(row=3, column=ci, value=h)
         cell.font = hfont; cell.fill = hfill; cell.alignment = s["center"]; cell.border = thin
 
-    # Row 4: 子表头 — 起/止
+    # Row 4: 子表头 — D4=起, E4=止
     ws2.cell(row=4, column=4).value = "起"; ws2.cell(row=4, column=4).font = hfont; ws2.cell(row=4, column=4).fill = hfill; ws2.cell(row=4, column=4).alignment = s["center"]; ws2.cell(row=4, column=4).border = thin
     ws2.cell(row=4, column=5).value = "止"; ws2.cell(row=4, column=5).font = hfont; ws2.cell(row=4, column=5).fill = hfill; ws2.cell(row=4, column=5).alignment = s["center"]; ws2.cell(row=4, column=5).border = thin
 
-    # Rows 5+: 数据
+    # Rows 5+: 数据 — D=km_start, E=km_end, F=contact
     row = 4
     km_t, toll_t, park_t = 0, 0, 0
     for v in vehicles:
         row += 1
-        km = float(v.get("km_total", 0) or 0); toll = float(v.get("toll_fee", 0) or 0); park = float(v.get("parking_fee", 0) or 0)
+        km = _safe_float(v.get("km_total")); toll = _safe_float(v.get("toll_fee")); park = _safe_float(v.get("parking_fee"))
         vals = [v.get("date", ""), v.get("from_location", ""), v.get("to_location", ""),
-                v.get("contact", ""), v.get("km_start", ""), v.get("km_end", ""),
+                v.get("km_start", ""), v.get("km_end", ""), v.get("contact", ""),
                 km or "", toll or "", park or "", v.get("remarks", "")]
         for ci, val in enumerate(vals, 1):
             cell = ws2.cell(row=row, column=ci, value=val)
@@ -1683,8 +1597,8 @@ def export_cover():
         return jsonify(error="无封面数据"), 400
     try:
         buf = _build_cover_file(cover_data)
-        emp = cover_data.get("header", {}).get("employee_name", "报销")
-        period = cover_data.get("header", {}).get("period", "").replace(" ", "_")
+        emp = _safe_filename(cover_data.get("header", {}).get("employee_name", "报销"))
+        period = _safe_filename(cover_data.get("header", {}).get("period", ""))
         filename = f"报销封面及费用分类表_{emp}_{period}.xlsx"
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          as_attachment=True, download_name=filename)
@@ -1700,15 +1614,15 @@ def export_details():
     from flask import send_file
     data = request.get_json(silent=True) or {}
     cover_data = data.get("cover_data", {})
-    entertainment = data.get("entertainment", [])
-    vehicles = data.get("vehicles", [])
-    travels = data.get("travels", [])
+    entertainment = data.get("entertainment") or []
+    vehicles = data.get("vehicles") or []
+    travels = data.get("travels") or []
     if not cover_data:
         return jsonify(error="无数据"), 400
     try:
         buf = _build_detail_file(cover_data, entertainment, vehicles, travels)
-        emp = cover_data.get("header", {}).get("employee_name", "报销")
-        period = cover_data.get("header", {}).get("period", "").replace(" ", "_")
+        emp = _safe_filename(cover_data.get("header", {}).get("employee_name", "报销"))
+        period = _safe_filename(cover_data.get("header", {}).get("period", ""))
         filename = f"应酬费_出差明细_派车单_{emp}_{period}.xlsx"
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          as_attachment=True, download_name=filename)
