@@ -386,12 +386,22 @@ async function _doSave() {
         travels: STATE.travels,
       },
     };
-    await rbFetch('/tools/reimbursement/save', {
+    const resp = await rbFetch('/tools/reimbursement/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      console.warn('保存失败 (HTTP %d): %s', resp.status, err.error || resp.statusText);
+    }
   } catch(e) { console.warn('自动保存失败:', e); }
+}
+
+// 上传发票后立即保存（不等防抖）
+function saveStateImmediate() {
+  clearTimeout(STATE._saveTimer);
+  return _doSave();
 }
 
 // ===== 期间管理 =====
@@ -485,8 +495,8 @@ async function startEditPeriod() {
     return;
   }
   try {
-    const resp = await rbFetch('/tools/reimbursement/rename', {
-      method: 'PUT',
+    const resp = await rbFetch('/tools/reimbursement/rename-period', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ old_period: STATE.currentPeriod, new_period: trimmed }),
     });
@@ -509,8 +519,10 @@ async function deletePeriod() {
   if (!STATE.currentPeriod) return;
   if (!confirm(`确定删除期间 "${STATE.currentPeriod}" 的全部数据？此操作不可恢复！`)) return;
   try {
-    const resp = await rbFetch('/tools/reimbursement/delete/' + encodeURIComponent(STATE.currentPeriod), {
-      method: 'DELETE',
+    const resp = await rbFetch('/tools/reimbursement/delete-period', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period: STATE.currentPeriod }),
     });
     const data = await resp.json();
     if (data.success) {
@@ -684,7 +696,7 @@ async function handleFiles(files) {
         };
         STATE.invoices.push(newInv);
         renderThumbnails();
-        saveState();
+        saveStateNow();
 
         // 上传完成后自动 OCR
         const idx = STATE.invoices.length - 1;
@@ -696,7 +708,7 @@ async function handleFiles(files) {
       alert('上传异常: ' + e.message);
     }
   }
-  saveState();
+  saveStateNow();
 }
 
 function renderThumbnails() {

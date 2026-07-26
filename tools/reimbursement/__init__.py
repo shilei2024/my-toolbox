@@ -957,11 +957,12 @@ def list_periods():
     return jsonify(success=True, periods=periods)
 
 
-@tool_bp.delete("/delete/<period>")
+@tool_bp.post("/delete-period")
 @csrf.exempt
-def delete_period(period: str):
-    """删除指定期间的全部数据。"""
-    period = (period or "").strip()
+def delete_period():
+    """删除指定期间的全部数据。JSON: {period}"""
+    payload = request.get_json(silent=True) or {}
+    period = (payload.get("period") or "").strip()
     if not period:
         return jsonify(success=False, error="期间名为空"), 400
     otype, oid = _rb_owner()
@@ -986,7 +987,7 @@ def delete_period(period: str):
     return jsonify(success=True)
 
 
-@tool_bp.put("/rename")
+@tool_bp.post("/rename-period")
 @csrf.exempt
 def rename_period():
     """重命名期间。JSON: {old_period, new_period}"""
