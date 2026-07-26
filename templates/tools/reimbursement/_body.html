@@ -326,6 +326,7 @@ const STATE = {
   currentPeriod: '',   // 当前期间
   allPeriods: [],      // 已有期间列表
   _saveTimer: null,    // 防抖
+  _rawFiles: {},       // file_id → File 对象（浏览器内存，不序列化）
 };
 
 // ===== 初始化 =====
@@ -576,6 +577,7 @@ async function switchToPeriod(period) {
     } else {
       // 新期间，初始化空数据
       STATE.invoices = [];
+      STATE._rawFiles = {};
       STATE.entertainment = [];
       STATE.vehicles = [];
       STATE.travels = [];
@@ -686,6 +688,7 @@ async function handleFiles(files) {
           original_name: data.original_name,
           preview_url: data.preview_url,
           full_url: data.full_url || data.preview_url,
+          thumb_data: data.thumb_b64 ? ('data:image/' + (data.filename.toLowerCase().endsWith('.pdf') ? 'png' : 'jpeg') + ';base64,' + data.thumb_b64) : data.preview_url,
           ocr_done: false,
           data: {
             invoice_number: '', invoice_date: '', seller_name: '',
@@ -695,6 +698,7 @@ async function handleFiles(files) {
           customer_level: '', remarks: '',
         };
         STATE.invoices.push(newInv);
+        STATE._rawFiles[data.file_id] = f;  // 保存原始文件供 OCR 用
         renderThumbnails();
         saveStateNow();
 
@@ -717,7 +721,7 @@ function renderThumbnails() {
     <div class="rb-thumb-card" draggable="true" data-idx="${i}">
       <span class="drag-handle">☰</span>
       <button class="btn-remove" onclick="event.stopPropagation();removeInvoice(${i})">✕</button>
-      <img src="${inv.preview_url}" alt="${inv.original_name}" data-filename="${inv.original_name}" data-idx="${i}"
+      <img src="${inv.thumb_data || inv.preview_url}" alt="${inv.original_name}" data-filename="${inv.original_name}" data-idx="${i}"
            onclick="event.stopPropagation();openLightbox(${i})"
            onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22140%22 height=%22120%22><rect fill=%22%23e9ecef%22 width=%22140%22 height=%22120%22/><text x=%2270%22 y=%2265%22 text-anchor=%22middle%22 fill=%22%236c757d%22 font-size=%2212%22>发票 ${i+1}</text></svg>'">
       <div class="card-body">
@@ -796,6 +800,8 @@ function setupDragSort() {
 
 function removeInvoice(idx) {
   if (confirm('确定删除这张发票？')) {
+    const inv = STATE.invoices[idx];
+    if (inv) delete STATE._rawFiles[inv.id];
     STATE.invoices.splice(idx, 1);
     renderThumbnails();
     saveState();
@@ -805,7 +811,7 @@ function removeInvoice(idx) {
 function clearAll() {
   if (confirm('确定清空所有发票数据？此操作不可恢复。')) {
     STATE.invoices = [];
-    STATE.entertainment = [];
+    STATE._rawFiles = {};
     STATE.vehicles = [];
     STATE.travels = [];
     renderThumbnails();
@@ -1525,28 +1531,45 @@ function autoCategorize(inv) {
 // ===== OCR 识别（优先使用服务器原始文件，base64 作为降级） =====
 async function ocrInvoice(idx) {
   const inv = STATE.invoices[idx];
-  if (!inv || !inv.preview_url) return;
+  if (!inv) return;
   
   const btn = document.getElementById('ocrBtn'+idx);
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 识别中...'; }
 
   try {
-    // 构建请求体：file_id 优先（后端会用原始文件，质量最高）
     const payload = { file_id: inv.id };
 
-    // 同时附带 base64 作为降级（当服务器上没有原始文件时使用）
-    try {
-      const imgResp = await fetch(inv.preview_url);
-      const blob = await imgResp.blob();
+    // 优先从浏览器内存中读取原始文件（Vercel 不共享 /tmp，不能依赖服务器预览 URL）
+    const rawFile = STATE._rawFiles[inv.id];
+    if (rawFile) {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
         reader.onerror = reject;
-        reader.readAsDataURL(blob);
+        reader.readAsDataURL(rawFile);
       });
       payload.image_base64 = base64;
-    } catch(e) {
-      console.warn('无法读取预览图用作降级:', e);
+    } else {
+      // 降级：尝试从服务器获取（页面刷新后 rawFile 已丢失）
+      try {
+        const imgResp = await fetch(inv.preview_url);
+        const blob = await imgResp.blob();
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        payload.image_base64 = base64;
+      } catch(e) {
+        console.warn('无法读取图片:', e);
+      }
+    }
+
+    if (!payload.image_base64) {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> OCR 识别'; }
+      alert('无法获取图片数据，请重新上传发票。');
+      return;
     }
 
     // 发送到 OCR 端点
