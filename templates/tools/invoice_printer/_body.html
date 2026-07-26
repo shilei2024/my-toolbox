@@ -225,12 +225,18 @@ function removeFromQueue(idx) {
 }
 
 function clearAll() {
+  const hasFiles = STATE.files.length > 0;
+  const hasQueue = STATE.queue.length > 0;
+  if ((hasFiles || hasQueue) && !confirm(`确定清空${hasFiles ? '所有已确认文件' : ''}${hasFiles && hasQueue ? '和' : ''}${hasQueue ? '待确认列表' : ''}吗？`)) return;
+
   STATE.queue = [];
-  STATE.files = [];
   revokeAllBlobs();
+  STATE.files = [];
   renderQueue();
   document.getElementById('ipResult').classList.add('hidden');
   document.getElementById('ipEmpty').classList.remove('hidden');
+  restoreSummaryPanel();
+  hideProgress();
 }
 
 function revokeAllBlobs() {
@@ -397,6 +403,9 @@ function renderResult() {
             </button>
             <button class="btn btn-outline-secondary btn-sm" onclick="downloadOne(${i})" title="下载">
               <i class="bi bi-download"></i>
+            </button>
+            <button class="btn btn-outline-danger btn-sm" onclick="removeFile(${i})" title="删除">
+              <i class="bi bi-x-lg"></i>
             </button>
           </div>
         </div>
@@ -770,17 +779,45 @@ function onToggle(idx, checked) {
 
 function deleteSelected() {
   const before = STATE.files.length;
-  STATE.files = STATE.files.filter(f => f._selected !== false);
+  // 删除选中的：释放被删文件的 blobUrl，保留未选中的
+  STATE.files.forEach(f => {
+    if (f._selected && f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; }
+  });
+  STATE.files = STATE.files.filter(f => !f._selected);
   const removed = before - STATE.files.length;
   if (removed === 0) { showToast('请先勾选要删除的文件', 'warn'); return; }
-  if (!confirm(`确定删除 ${removed} 个文件吗？`)) return;
+  if (!confirm(`确定删除 ${removed} 个文件吗？`)) {
+    // 撤销：无法恢复 blobUrl，只能提示用户重新上传
+    renderResult();
+    showToast('已取消删除', 'info');
+    return;
+  }
+  if (STATE.files.length === 0) {
+    document.getElementById('ipResult').classList.add('hidden');
+    document.getElementById('ipEmpty').classList.remove('hidden');
+    return;
+  }
+  renderResult();
+}
+
+/** 单独删除一张卡片 */
+function removeFile(idx) {
+  const f = STATE.files[idx];
+  if (!f) return;
+  if (f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; }
+  STATE.files.splice(idx, 1);
+  if (STATE.files.length === 0) {
+    document.getElementById('ipResult').classList.add('hidden');
+    document.getElementById('ipEmpty').classList.remove('hidden');
+    return;
+  }
   renderResult();
 }
 
 function refreshSummary() {
   const total = STATE.files.length;
-  const selected = STATE.files.filter(f => f._selected !== false).length;
-  const badge = document.querySelector('.ip-summary .badge');
+  const selected = STATE.files.filter(f => f._selected).length;
+  const badge = document.querySelector('#ipSummary .badge');
   if (badge) badge.textContent = `${selected}/${total} 个文件`;
 }
 
