@@ -772,7 +772,7 @@ function renderEditTable() {
       <td class="td-amount"><input type="number" step="0.01" value="${esc(inv.data.total_amount)}" onchange="updateField(${i},'total_amount',this.value)"></td>
       <td><select style="min-width:120px" onchange="onPlChange(${i},this)">${plOpts}</select></td>
       <td class="td-code"><input value="${esc(inv.product_line_code)}" readonly></td>
-      <td><input value="${esc(inv.office)}" style="width:70px"></td>
+      <td><input value="${esc(inv.office)}" style="width:70px" onchange="invUpdate(${i},'office',this.value)"></td>
       <td><select onchange="invUpdate(${i},'expense_type',this.value)">${expenseOpts(inv.expense_type)}</select></td>
       <td><select onchange="invUpdate(${i},'customer_level',this.value)">${levelOpts(inv.customer_level)}</select></td>
       <td><input value="${esc(inv.data.description)}" onchange="updateField(${i},'description',this.value)"></td>
@@ -830,7 +830,16 @@ function onPlChange(idx, sel) {
   STATE.invoices[idx].product_line = sel.value;
   STATE.invoices[idx].product_line_code = opt.dataset.code || '';
   STATE.invoices[idx].office = opt.dataset.office || STATE.header.office || '深圳办';
-  renderEditTable();
+  // 只更新当前行的代码和办事处，不重渲染整个表格（避免丢失编辑）
+  const tr = sel.closest('tr');
+  if (tr) {
+    const tds = tr.querySelectorAll('td');
+    const codeInput = tds[8]?.querySelector('input');
+    const officeInput = tds[9]?.querySelector('input');
+    if (codeInput) codeInput.value = STATE.invoices[idx].product_line_code;
+    if (officeInput) officeInput.value = STATE.invoices[idx].office;
+  }
+  saveState();
 }
 
 function autoCalcTax(idx) {
@@ -1040,7 +1049,7 @@ function updateSummary() {
 // ===== 步骤 3：生成封面 =====
 async function genCover() {
   syncHeader();
-  saveState();
+  saveStateNow();
 
   const payload = {
     header: STATE.header,
@@ -1053,6 +1062,9 @@ async function genCover() {
       customer_level: inv.customer_level,
       remarks: inv.remarks,
     })),
+    entertainment: STATE.entertainment,
+    vehicles: STATE.vehicles,
+    travels: STATE.travels,
   };
 
   const resp = await fetch('/tools/reimbursement/cover-data', {

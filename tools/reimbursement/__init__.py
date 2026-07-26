@@ -1108,56 +1108,105 @@ def cover_data():
             level_groups[level]["other"] += total
         level_groups[level]["total"] += total
 
-    # 应酬费明细
+    # 应酬费明细——优先取顶层数组（前端 genCover 发送），回退到发票内嵌数据
+    entertainment_raw = data.get("entertainment") or []
     entertainment_details = []
-    for inv in invoices:
-        ent = inv.get("entertainment", {})
-        if ent and ent.get("amount", ""):
-            entertainment_details.append({
-                "date": ent.get("date", ""),
-                "category": ent.get("category", ""),
-                "place": ent.get("place", ""),
-                "customer": ent.get("customer", ""),
-                "participants": ent.get("participants", ""),
-                "amount": float(ent.get("amount", 0) or 0),
-                "purpose": ent.get("purpose", ""),
-            })
+    if entertainment_raw:
+        for ent in entertainment_raw:
+            amt = float(ent.get("amount", 0) or 0)
+            if amt > 0:
+                entertainment_details.append({
+                    "date": ent.get("date", ""),
+                    "category": ent.get("category", ""),
+                    "place": ent.get("place", ""),
+                    "customer": ent.get("customer", ""),
+                    "participants": ent.get("participants", ""),
+                    "amount": amt,
+                    "purpose": ent.get("purpose", ""),
+                })
+    else:
+        for inv in invoices:
+            ent = inv.get("entertainment", {})
+            if ent and ent.get("amount", ""):
+                entertainment_details.append({
+                    "date": ent.get("date", ""),
+                    "category": ent.get("category", ""),
+                    "place": ent.get("place", ""),
+                    "customer": ent.get("customer", ""),
+                    "participants": ent.get("participants", ""),
+                    "amount": float(ent.get("amount", 0) or 0),
+                    "purpose": ent.get("purpose", ""),
+                })
 
-    # 派车单明细
+    # 派车单明细——优先取顶层数组
+    vehicles_raw = data.get("vehicles") or []
     vehicle_details = []
-    for inv in invoices:
-        veh = inv.get("vehicle", {})
-        km = float(veh.get("km_total", 0) or 0)
-        toll = float(veh.get("toll_fee", 0) or 0)
-        parking = float(veh.get("parking_fee", 0) or 0)
-        if km > 0 or toll > 0 or parking > 0:
-            vehicle_details.append({
-                "date": veh.get("date", ""),
-                "from_location": veh.get("from_location", ""),
-                "to_location": veh.get("to_location", ""),
-                "contact": veh.get("contact", ""),
-                "km_start": veh.get("km_start", ""),
-                "km_end": veh.get("km_end", ""),
-                "km_total": km,
-                "toll_fee": toll,
-                "parking_fee": parking,
-                "remarks": veh.get("remarks", ""),
-            })
+    if vehicles_raw:
+        for veh in vehicles_raw:
+            km = float(veh.get("km_total", 0) or 0)
+            toll = float(veh.get("toll_fee", 0) or 0)
+            parking = float(veh.get("parking_fee", 0) or 0)
+            if km > 0 or toll > 0 or parking > 0:
+                vehicle_details.append({
+                    "date": veh.get("date", ""),
+                    "from_location": veh.get("from_location", ""),
+                    "to_location": veh.get("to_location", ""),
+                    "contact": veh.get("contact", ""),
+                    "km_start": veh.get("km_start", ""),
+                    "km_end": veh.get("km_end", ""),
+                    "km_total": km,
+                    "toll_fee": toll,
+                    "parking_fee": parking,
+                    "remarks": veh.get("remarks", ""),
+                })
+    else:
+        for inv in invoices:
+            veh = inv.get("vehicle", {})
+            km = float(veh.get("km_total", 0) or 0)
+            toll = float(veh.get("toll_fee", 0) or 0)
+            parking = float(veh.get("parking_fee", 0) or 0)
+            if km > 0 or toll > 0 or parking > 0:
+                vehicle_details.append({
+                    "date": veh.get("date", ""),
+                    "from_location": veh.get("from_location", ""),
+                    "to_location": veh.get("to_location", ""),
+                    "contact": veh.get("contact", ""),
+                    "km_start": veh.get("km_start", ""),
+                    "km_end": veh.get("km_end", ""),
+                    "km_total": km,
+                    "toll_fee": toll,
+                    "parking_fee": parking,
+                    "remarks": veh.get("remarks", ""),
+                })
 
-    # 出差明细
+    # 出差明细——优先取顶层数组
+    travels_raw = data.get("travels") or []
     travel_details = []
-    for inv in invoices:
-        tr = inv.get("travel", {})
-        amt = float(tr.get("amount", 0) or 0)
-        if tr and amt > 0:
-            travel_details.append({
-                "date": tr.get("date", ""),
-                "location": tr.get("location", ""),
-                "customer": tr.get("customer", ""),
-                "expense_type": tr.get("expense_type", ""),
-                "amount": amt,
-                "purpose": tr.get("purpose", ""),
-            })
+    if travels_raw:
+        for tr in travels_raw:
+            amt = float(tr.get("amount", 0) or 0)
+            if amt > 0:
+                travel_details.append({
+                    "date": tr.get("date", ""),
+                    "location": tr.get("location", ""),
+                    "customer": tr.get("customer", ""),
+                    "expense_type": tr.get("expense_type", ""),
+                    "amount": amt,
+                    "purpose": tr.get("purpose", ""),
+                })
+    else:
+        for inv in invoices:
+            tr = inv.get("travel", {})
+            amt = float(tr.get("amount", 0) or 0)
+            if tr and amt > 0:
+                travel_details.append({
+                    "date": tr.get("date", ""),
+                    "location": tr.get("location", ""),
+                    "customer": tr.get("customer", ""),
+                    "expense_type": tr.get("expense_type", ""),
+                    "amount": amt,
+                    "purpose": tr.get("purpose", ""),
+                })
 
     return jsonify(
         success=True,
