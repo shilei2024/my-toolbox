@@ -223,14 +223,12 @@ def _number_to_chinese(amount: float) -> str:
     if jiao == 0 and fen == 0:
         result += "整"
     else:
-    if jiao > 0:
-        result += digit_cn[jiao] + fraction_cn[0]
-    elif fen > 0:
-        result += "零"
-    if fen > 0:
-        result += digit_cn[fen] + fraction_cn[1]
-    else:
-        result += "整"
+        if jiao > 0:
+            result += digit_cn[jiao] + fraction_cn[0]
+        elif fen > 0:
+            result += "零"
+        if fen > 0:
+            result += digit_cn[fen] + fraction_cn[1]
     return result
 
 
@@ -1072,9 +1070,8 @@ def cover_data():
     后端返回汇总 + 中文大写金额。
     """
     data = request.get_json(silent=True) or {}
-    try:
-        header = data.get("header", {})
-        invoices = data.get("invoices", [])
+    header = data.get("header", {})
+    invoices = data.get("invoices", [])
 
     # 按产品线+代码分组汇总
     groups: dict[str, dict] = {}
@@ -1267,9 +1264,6 @@ def cover_data():
         expense_categories=EXPENSE_CATEGORIES,
         customer_levels=CUSTOMER_LEVELS,
     )
-    except Exception as e:
-        current_app.logger.exception("cover-data failed")
-        return jsonify(error=f"数据处理失败：{str(e)[:200]}"), 500
 
 
 # ---------------------------------------------------------------------------
