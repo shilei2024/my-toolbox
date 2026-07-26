@@ -330,3 +330,14 @@ tools:
     category: business
     enabled: true
     order: 66
+
+  - id: invoice_printer
+    name: 批量发票打印
+    description: 上传发票文件（PDF/图片），本地预览、一键多份打印、打包导出ZIP，全程不上传服务器。
+    icon: bi-printer
+    color: "#198754"
+    route: /tools/invoice-printer
+    blueprint_module: tools.invoice_printer
+    category: business
+    enabled: true
+    order: 67
