@@ -342,6 +342,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ===== 持久化存储 =====
+function getAnonId() {
+  // Vercel serverless 会在冷启动时丢失 Flask session — 用 localStorage 兜底
+  let aid = localStorage.getItem('rb_anon_id');
+  if (!aid) {
+    // 首次访问时生成一个稳定 ID
+    aid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now());
+    localStorage.setItem('rb_anon_id', aid);
+  }
+  return aid;
+}
+
+function rbFetch(url, options = {}) {
+  options.headers = {
+    ...options.headers,
+    'X-RB-Anon-Id': getAnonId(),
+  };
+  return fetch(url, options);
+}
+
 function saveState() {
   // 防抖 1 秒后自动保存到后端
   clearTimeout(STATE._saveTimer);
@@ -367,7 +386,7 @@ async function _doSave() {
         travels: STATE.travels,
       },
     };
-    await fetch('/tools/reimbursement/save', {
+    await rbFetch('/tools/reimbursement/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -378,7 +397,7 @@ async function _doSave() {
 // ===== 期间管理 =====
 async function loadPeriods() {
   try {
-    const resp = await fetch('/tools/reimbursement/periods');
+    const resp = await rbFetch('/tools/reimbursement/periods');
     const data = await resp.json();
     if (data.success) {
       STATE.allPeriods = data.periods || [];
@@ -466,7 +485,7 @@ async function startEditPeriod() {
     return;
   }
   try {
-    const resp = await fetch('/tools/reimbursement/rename', {
+    const resp = await rbFetch('/tools/reimbursement/rename', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ old_period: STATE.currentPeriod, new_period: trimmed }),
@@ -490,7 +509,7 @@ async function deletePeriod() {
   if (!STATE.currentPeriod) return;
   if (!confirm(`确定删除期间 "${STATE.currentPeriod}" 的全部数据？此操作不可恢复！`)) return;
   try {
-    const resp = await fetch('/tools/reimbursement/delete/' + encodeURIComponent(STATE.currentPeriod), {
+    const resp = await rbFetch('/tools/reimbursement/delete/' + encodeURIComponent(STATE.currentPeriod), {
       method: 'DELETE',
     });
     const data = await resp.json();
@@ -527,7 +546,7 @@ async function switchToPeriod(period) {
 
   // 加载新期间
   try {
-    const resp = await fetch('/tools/reimbursement/load/' + encodeURIComponent(period));
+    const resp = await rbFetch('/tools/reimbursement/load/' + encodeURIComponent(period));
     const data = await resp.json();
     STATE.currentPeriod = period;
 

@@ -867,18 +867,27 @@ def reference_data():
 # 持久化存储：按费用期间保存/加载报销数据
 # ---------------------------------------------------------------------------
 def _rb_owner() -> tuple[str, str]:
-    """获取当前用户的 owner 标识（登录用 user id，匿名用 session anon_id）。"""
+    """获取当前用户的 owner 标识。
+    优先用 X-RB-Anon-Id 头（前端 localStorage），回退到 Flask session 的 anon_id。
+    """
     from auth.decorators import ensure_anon_id
     from flask_login import current_user
+
     if current_user.is_authenticated:
         return ("user", str(current_user.id))
+
+    # Vercel serverless 会在冷启动时丢失会话 cookie——强制从客户端读取
+    header_aid = (request.headers.get("X-RB-Anon-Id") or "").strip()
+    if header_aid:
+        return ("anon", header_aid)
+
     return ("anon", ensure_anon_id())
 
 
 @tool_bp.post("/save")
 @csrf.exempt
 def save_state():
-    """保存当前期间的完整报销状态。JSON: {period, data: {header, invoices, entertainment, vehicles, travels}}"""
+    """保存当前期间的完整报销状态。JSON: {period, data: {...}}"""
     payload = request.get_json(silent=True) or {}
     period = (payload.get("period") or "").strip()
     if not period:
@@ -903,6 +912,9 @@ def save_state():
 @tool_bp.get("/load/<period>")
 def load_state(period: str):
     """加载指定期间的报销数据。"""
+    period = (period or "").strip()
+    if not period:
+        return jsonify(success=False, note="期间名为空"), 400
     otype, oid = _rb_owner()
     record = ReimbursementRecord.query.filter_by(
         owner_type=otype, owner_id=oid, period=period
@@ -949,12 +961,26 @@ def list_periods():
 @csrf.exempt
 def delete_period(period: str):
     """删除指定期间的全部数据。"""
+    period = (period or "").strip()
+    if not period:
+        return jsonify(success=False, error="期间名为空"), 400
     otype, oid = _rb_owner()
     record = ReimbursementRecord.query.filter_by(
         owner_type=otype, owner_id=oid, period=period
     ).first()
     if not record:
-        return jsonify(success=False, error="该期间不存在"), 404
+        # 调试：查找 DB 中是否真的有此 period 名（任何用户）
+        any_match = ReimbursementRecord.query.filter_by(period=period).first()
+        current_app.logger.warning(
+            "delete_period 找不到记录: period=%r owner_type=%s owner_id=%s "
+            "（DB 同名存在: %s）",
+            period, otype, oid[:8] + '***', bool(any_match),
+        )
+        return jsonify(
+            success=False,
+            error="该期间不存在",
+            debug={"period": period, "owner_type": otype, "owner_id_prefix": oid[:8]},
+        ), 404
     db.session.delete(record)
     db.session.commit()
     return jsonify(success=True)
@@ -984,6 +1010,23 @@ def rename_period():
     record.period = new
     db.session.commit()
     return jsonify(success=True, old_period=old, new_period=new)
+
+
+@tool_bp.get("/debug")
+def debug_info():
+    """调试端点：返回当前 owner 和所有可见期间名。"""
+    otype, oid = _rb_owner()
+    periods = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid
+    ).all()
+    return jsonify(
+        success=True,
+        owner_type=otype,
+        owner_id_prefix=oid[:8] + "***",
+        my_periods=[p.period for p in periods],
+        my_count=len(periods),
+        total_periods=ReimbursementRecord.query.count(),
+    )
 
 
 @tool_bp.post("/cover-data")
