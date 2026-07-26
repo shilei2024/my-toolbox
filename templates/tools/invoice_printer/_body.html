@@ -410,31 +410,215 @@ function renderResult() {
 }
 
 // ============== 打印引擎 ==============
-// 打印排队控制器
-const PRINT_Q = { running: false, idxs: [], cursor: 0, total: 0, skipNext: false };
+// 批量打印采用 pdf-lib（CDN）将选中的 PDF + 图片合并为一份 PDF，
+// 然后一次性 window.print() — 用户只需点一次"打印"按钮。
 
-function showPrintPanel() {
-  // 把汇总栏变成打印进度栏
+/** 懒加载 pdf-lib CDN（~400KB，仅在首次批量打印时加载） */
+let _pdfLibReady = null;
+function ensurePdfLib() {
+  if (_pdfLibReady) return _pdfLibReady;
+  _pdfLibReady = new Promise((resolve, reject) => {
+    if (typeof PDFLib !== 'undefined') { resolve(PDFLib); return; }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+    s.onload = () => resolve(window.PDFLib);
+    s.onerror = () => reject(new Error('pdf-lib 加载失败，请检查网络'));
+    document.head.appendChild(s);
+  });
+  return _pdfLibReady;
+}
+
+/** 根据文件名后缀判断图片 MIME（用于 pdf-lib embedJpg / embedPng） */
+function guessImageFormat(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return ext === 'png' ? 'png' : 'jpg';  // pdf-lib 只支持 jpg/png
+}
+
+/**
+ * 将所有选中的 PDF + 图片合并为一份 PDF（客户端内存完成）。
+ * 进度回调：({step, current, total}) => {}
+ */
+async function mergeIntoOnePDF(selectedFiles, onProgress) {
+  const PDFLib = await ensurePdfLib();
+  const { PDFDocument, PageSizes } = PDFLib;
+  const merged = await PDFDocument.create();
+  const total = selectedFiles.length;
+
+  // 先去重 — 收集所有 blob 字节避免重复 fetch（同名同大小用缓存）
+  const blobCache = new Map();
+
+  for (let i = 0; i < selectedFiles.length; i++) {
+    const f = selectedFiles[i];
+    onProgress({ step: 'processing', current: i + 1, total, name: f.name });
+
+    try {
+      const cacheKey = f.name + '|' + f.size;
+      let arrayBuf;
+      if (blobCache.has(cacheKey)) {
+        arrayBuf = blobCache.get(cacheKey);
+      } else {
+        const resp = await fetch(f.blobUrl);
+        arrayBuf = await resp.arrayBuffer();
+        blobCache.set(cacheKey, arrayBuf);
+      }
+
+      if (f.type === 'pdf') {
+        onProgress({ step: 'merging_pdf', current: i + 1, total, name: f.name });
+        const srcDoc = await PDFDocument.load(arrayBuf);
+        const pageCount = srcDoc.getPageCount();
+        if (pageCount === 0) continue;
+        const pages = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
+        pages.forEach(p => merged.addPage(p));
+      } else {
+        onProgress({ step: 'embedding_image', current: i + 1, total, name: f.name });
+        let image;
+        const fmt = guessImageFormat(f.name);
+        try {
+          if (fmt === 'png') {
+            image = await merged.embedPng(arrayBuf);
+          } else {
+            image = await merged.embedJpg(arrayBuf);
+          }
+        } catch (embedErr) {
+          // 有时 MIME 和实际格式不匹配，换一种试试
+          try {
+            image = fmt === 'png'
+              ? await merged.embedJpg(arrayBuf)
+              : await merged.embedPng(arrayBuf);
+          } catch (e2) {
+            console.warn('无法嵌入图片:', f.name, embedErr, e2);
+            continue;
+          }
+        }
+
+        // 用图片原始尺寸建页，不超过 A4（595×842 point）
+        const A4_W = PageSizes.A4[0];
+        const A4_H = PageSizes.A4[1];
+        let pw = image.width;
+        let ph = image.height;
+
+        // 超 A4 则等比缩放
+        const scale = Math.min(1, A4_W / pw, A4_H / ph);
+        pw = Math.round(pw * scale);
+        ph = Math.round(ph * scale);
+
+        const page = merged.addPage([pw, ph]);
+        page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+      }
+    } catch (e) {
+      console.warn('合并失败:', f.name, e);
+      onProgress({ step: 'skip', current: i + 1, total, name: f.name, error: e.message });
+    }
+  }
+
+  onProgress({ step: 'saving', current: total, total });
+  const bytes = await merged.save();
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
+/** 单份打印（直接打开 PDF 或图片） */
+function printOne(idx) {
+  const f = STATE.files[idx];
+  if (!f || !f.blobUrl) return;
+  openPrintWindow(f);
+}
+
+/**
+ * 批量一键打印：合并 → 一次 print 对话框
+ * PDF + 图片 全部塞进一份 PDF，用户只点一次"打印"。
+ */
+async function printAll() {
+  const selected = STATE.files.filter(f => f._selected !== false);
+  if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
+
+  // 单个文件直接打
+  if (selected.length === 1) {
+    printOne(STATE.files.indexOf(selected[0]));
+    return;
+  }
+
+  if (PRINTING) { showToast('正在处理中，请稍候…', 'warn'); return; }
+  PRINTING = true;
+
+  const summaryEl = document.getElementById('ipSummary');
+  const origHTML = summaryEl ? summaryEl.innerHTML : '';
+
+  try {
+    // 先加载 pdf-lib（首次会并行 CDN 下载）
+    setSummaryBusy('正在加载合并引擎…');
+    await ensurePdfLib();
+
+    // 合并
+    const mergedBlob = await mergeIntoOnePDF(selected, (info) => {
+      if (info.step === 'saving') {
+        setSummaryBusy('正在保存合并文档…');
+        showProgress(100, `正在保存合并文档…`);
+      } else if (info.step === 'skip') {
+        setSummaryBusy(`跳过 ${info.name}（${info.error}）`, 'warn');
+      } else {
+        const pct = Math.round(info.current / info.total * 90); // 留 10% 给 saving
+        showProgress(pct, `合并中 ${info.current}/${info.total}: ${info.name}`);
+        setSummaryBusy(`合并中 ${info.current}/${info.total}`);
+      }
+    });
+
+    // 生成合并 PDF 的 Blob URL
+    setSummaryBusy('正在准备打印…');
+    showProgress(100, '正在打开打印对话框…');
+    const url = URL.createObjectURL(mergedBlob);
+
+    // 打开合并后的 PDF 打印页
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) {
+      showToast('浏览器拦截了弹出窗口，请允许弹出后重试', 'warn');
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const safeUrl = url.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    win.document.write(`
+      <!DOCTYPE html><html><head><title>发票批量打印 — 共 ${selected.length} 份</title><meta charset="utf-8"><style>
+        *{margin:0;padding:0;}
+        html,body{width:100%;height:100%;overflow:hidden;background:#525659;}
+        embed{width:100%;height:100%;border:none;}
+        @media print{html,body{background:#fff;} embed{width:100%;height:100%;}}
+      </style></head><body>
+      <embed src="${safeUrl}" type="application/pdf" width="100%" height="100%">
+      <script>
+        var printed=false;
+        function doPrint(){if(!printed){printed=true;window.print();}}
+        var e=document.querySelector('embed');
+        if(e)e.addEventListener('load',function(){setTimeout(doPrint,800);});
+        setTimeout(function(){if(!printed)doPrint();},4000);
+      <\/script>
+      </html>`);
+    win.document.close();
+
+    win.onafterprint = function () {
+      win.close();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    };
+
+    setSummaryBusy('已打开打印对话框 — 请点击打印', 'ok');
+    setTimeout(restoreSummaryPanel, 3000);
+
+  } catch (e) {
+    showToast('合并失败: ' + (e.message || '未知错误'), 'warn');
+    restoreSummaryPanel();
+  } finally {
+    PRINTING = false;
+    hideProgress();
+  }
+}
+
+let PRINTING = false;  // 防重复点击
+
+function setSummaryBusy(msg, tone) {
   const el = document.getElementById('ipSummary');
   if (!el) return;
-  const cur = PRINT_Q.cursor;
-  const total = PRINT_Q.total;
-
-  if (PRINT_Q.running && total > 0) {
-    el.className = 'ip-summary';
-    el.style.background = '#eaf6ef';
-    el.innerHTML = `
-      <span class="badge bg-primary" id="ipPrintBadge">打印中 ${cur + 1}/${total}</span>
-      <span class="text-muted small" id="ipPrintName"></span>
-      <div class="ms-auto">
-        <button class="btn btn-outline-warning btn-sm me-1" onclick="PRINT_Q.skipNext=true;showToast('即将跳过当前文件','warn')">
-          <i class="bi bi-skip-forward"></i> 跳过
-        </button>
-        <button class="btn btn-outline-danger btn-sm" onclick="stopPrintQueue()">
-          <i class="bi bi-stop-circle"></i> 停止
-        </button>
-      </div>`;
-  }
+  const bg = tone === 'warn' ? '#fff3cd' : tone === 'ok' ? '#d1e7dd' : '#eaf6ef';
+  el.innerHTML = `<span class="text-muted small"><i class="bi bi-hourglass-split"></i> ${msg}</span>`;
+  el.style.background = bg;
 }
 
 function restoreSummaryPanel() {
@@ -457,8 +641,8 @@ function restoreSummaryPanel() {
       <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除选中">
         <i class="bi bi-trash"></i>
       </button>
-      <button class="btn btn-outline-primary" onclick="printAll()" title="全部打印">
-        <i class="bi bi-printer"></i> 全部打印
+      <button class="btn btn-outline-primary" onclick="printAll()" title="一键批量合并打印">
+        <i class="bi bi-printer"></i> 批量打印
       </button>
       <button class="btn btn-outline-success" onclick="exportZip()" title="导出 ZIP">
         <i class="bi bi-download"></i> 导出 ZIP
@@ -466,15 +650,10 @@ function restoreSummaryPanel() {
     </div>`;
 }
 
-/**
- * 核心：为单个文件打开打印窗口，自动触发打印。
- * PDF 用 <embed> 嵌入 PDF 查看器 + window.print() 一键打印；
- * 图片用 <img> + window.print()。
- * 返回打开的 window 引用，供 onafterprint 链式推进。
- */
+/** 为单个文件打开打印窗口（PDF embed / 图片 img + window.print） */
 function openPrintWindow(f) {
   const win = window.open('', '_blank', 'width=900,height=650');
-  if (!win) return null;
+  if (!win) { showToast('请允许弹出窗口以打印文件', 'warn'); return null; }
 
   const escapedUrl = f.blobUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
@@ -484,165 +663,27 @@ function openPrintWindow(f) {
         *{margin:0;padding:0;}
         html,body{width:100%;height:100%;overflow:hidden;background:#525659;}
         embed{width:100%;height:100%;border:none;}
-        @media print{
-          html,body{background:#fff;}
-          embed{width:100%;height:100%;}
-        }
+        @media print{html,body{background:#fff;} embed{width:100%;height:100%;}}
       </style></head><body>
       <embed src="${escapedUrl}" type="application/pdf" width="100%" height="100%">
-      <script>
-        var printed=false;
-        var embedEl=document.querySelector('embed');
-        function doPrint(){
-          if(printed)return;printed=true;
-          window.print();
-        }
-        // PDF 嵌入加载完成后打印
-        if(embedEl){
-          embedEl.addEventListener('load',function(){setTimeout(doPrint,600);});
-        }
-        // 兜底：2秒后还没打印就强制触发
-        setTimeout(function(){if(!printed)doPrint();},3000);
-      <\/script>
+      <script>var p=false;function d(){if(!p){p=true;window.print();}}
+      var e=document.querySelector('embed');if(e)e.addEventListener('load',function(){setTimeout(d,600);});
+      setTimeout(function(){if(!p)d();},3000);<\/script>
       </html>`);
   } else {
-    // 图片打印页
     win.document.write(`
       <!DOCTYPE html><html><head><title>${f.name}</title><meta charset="utf-8"><style>
         *{margin:0;padding:0;}
         body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f5f5f5;}
         img{max-width:98vw;max-height:98vh;object-fit:contain;box-shadow:0 2px 12px rgba(0,0,0,.15);}
-        @media print{
-          body{background:#fff;}
-          img{max-width:100%;max-height:100%;box-shadow:none;}
-        }
+        @media print{body{background:#fff;} img{max-width:100%;max-height:100%;box-shadow:none;}}
       </style></head><body><img src="${escapedUrl}"></body>
-      <script>
-        window.onload=function(){setTimeout(function(){window.print();},400);};
-      <\/script>
+      <script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
       </html>`);
   }
   win.document.close();
-  return win;
-}
-
-/** 单份打印（手动触发） */
-function printOne(idx) {
-  const f = STATE.files[idx];
-  if (!f || !f.blobUrl) return;
-
-  const win = openPrintWindow(f);
-  if (!win) { showToast('请允许弹出窗口以打印文件', 'warn'); return; }
-
-  // 打印完成后自动关窗
   win.onafterprint = function () { win.close(); };
-}
-
-/** 停止打印队列 */
-function stopPrintQueue() {
-  PRINT_Q.running = false;
-  PRINT_Q.idxs = [];
-  PRINT_Q.cursor = 0;
-  PRINT_Q.total = 0;
-  restoreSummaryPanel();
-  hideProgress();
-  showToast('打印已停止', 'info');
-}
-
-/** 打印队列：播放下一个文件 */
-function playNextInQueue() {
-  // 上一轮想跳过？
-  if (PRINT_Q.skipNext) { PRINT_Q.skipNext = false; }
-
-  if (!PRINT_Q.running || PRINT_Q.cursor >= PRINT_Q.idxs.length) {
-    // 全部打印完毕
-    PRINT_Q.running = false;
-    restoreSummaryPanel();
-    hideProgress();
-    showToast(`全部打印完成（${PRINT_Q.idxs.length} 个文件）`, 'info');
-    return;
-  }
-
-  const idx = PRINT_Q.idxs[PRINT_Q.cursor];
-  const f = STATE.files[idx];
-  if (!f || !f.blobUrl) {
-    PRINT_Q.cursor++;
-    setTimeout(playNextInQueue, 200);
-    return;
-  }
-
-  showPrintPanel();
-  const nameEl = document.getElementById('ipPrintName');
-  if (nameEl) nameEl.textContent = f.name;
-  showProgress(
-    Math.round(PRINT_Q.cursor / PRINT_Q.total * 100),
-    `正在打印 ${PRINT_Q.cursor + 1}/${PRINT_Q.total}: ${f.name}`
-  );
-
-  const win = openPrintWindow(f);
-  if (!win) {
-    showToast(`跳过 ${f.name}：浏览器拦截了弹出窗口`, 'warn');
-    PRINT_Q.cursor++;
-    setTimeout(playNextInQueue, 500);
-    return;
-  }
-
-  // 核心：打印对话框关闭后自动播下一个
-  win.onafterprint = function () {
-    win.close();
-    PRINT_Q.cursor++;
-    setTimeout(playNextInQueue, 400);
-  };
-
-  // 兜底：如果用户不关窗，30 秒后自动继续（避免卡死队列）
-  const watch = setInterval(function () {
-    if (win.closed) {
-      clearInterval(watch);
-    } else if (!PRINT_Q.running) {
-      clearInterval(watch);
-    }
-  }, 2000);
-  setTimeout(function () {
-    clearInterval(watch);
-    if (!win.closed && PRINT_Q.running) {
-      // 超时未关闭，自动推进（不关窗，留给用户手动处理）
-      PRINT_Q.cursor++;
-      playNextInQueue();
-    }
-  }, 45000);
-}
-
-/** 批量打印：顺序排队，每个打印完自动播下一个 */
-function printAll() {
-  const selected = STATE.files.filter(f => f._selected !== false);
-  if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
-
-  if (selected.length === 1) {
-    printOne(STATE.files.indexOf(selected[0]));
-    return;
-  }
-
-  // 如果已经在打印中，询问是否重新开始
-  if (PRINT_Q.running) {
-    if (!confirm('打印队列正在运行，是否停止当前队列并重新开始？')) return;
-    PRINT_Q.running = false;
-  }
-
-  if (!confirm(
-    `即将自动依次打印 ${selected.length} 个文件。\n\n` +
-    `每个文件会自动弹出打印对话框，打印/取消后自动继续下一个。\n` +
-    `请允许浏览器弹出窗口。\n\n` +
-    `可以随时点击「跳过」或「停止」。\n\n确认开始？`
-  )) return;
-
-  PRINT_Q.running = true;
-  PRINT_Q.idxs = selected.map(f => STATE.files.indexOf(f));
-  PRINT_Q.cursor = 0;
-  PRINT_Q.total = selected.length;
-  PRINT_Q.skipNext = false;
-
-  showPrintPanel();
-  playNextInQueue();
+  return win;
 }
 
 // ============== 导出 ==============
