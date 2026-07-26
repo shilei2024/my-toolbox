@@ -945,6 +945,47 @@ def list_periods():
     return jsonify(success=True, periods=periods)
 
 
+@tool_bp.delete("/delete/<period>")
+@csrf.exempt
+def delete_period(period: str):
+    """删除指定期间的全部数据。"""
+    otype, oid = _rb_owner()
+    record = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid, period=period
+    ).first()
+    if not record:
+        return jsonify(success=False, error="该期间不存在"), 404
+    db.session.delete(record)
+    db.session.commit()
+    return jsonify(success=True)
+
+
+@tool_bp.put("/rename")
+@csrf.exempt
+def rename_period():
+    """重命名期间。JSON: {old_period, new_period}"""
+    payload = request.get_json(silent=True) or {}
+    old = (payload.get("old_period") or "").strip()
+    new = (payload.get("new_period") or "").strip()
+    if not old or not new:
+        return jsonify(success=False, error="参数不完整"), 400
+    otype, oid = _rb_owner()
+    record = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid, period=old
+    ).first()
+    if not record:
+        return jsonify(success=False, error="原期间不存在"), 404
+    # 检查新名称是否已存在
+    conflict = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid, period=new
+    ).first()
+    if conflict:
+        return jsonify(success=False, error="新期间名称已存在"), 409
+    record.period = new
+    db.session.commit()
+    return jsonify(success=True, old_period=old, new_period=new)
+
+
 @tool_bp.post("/cover-data")
 @csrf.exempt
 def cover_data():

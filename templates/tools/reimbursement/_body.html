@@ -117,11 +117,13 @@
   <div class="card mb-3 border-primary">
     <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
       <strong class="me-2 small text-nowrap">费用期间：</strong>
-      <select class="form-select form-select-sm" id="rbPeriodSel" style="width:auto;min-width:130px;" onchange="onPeriodSwitch()">
+      <select class="form-select form-select-sm" id="rbPeriodSel" style="width:auto;min-width:150px;" onchange="onPeriodSwitch()">
         <option value="__new__">+ 新建期间</option>
       </select>
       <input class="form-control form-control-sm hidden" id="rbPeriodNew" placeholder="如：7-8月" style="width:120px;" onkeydown="if(event.key==='Enter')createPeriod()">
-      <button class="btn btn-outline-primary btn-sm" id="rbPeriodCreateBtn" onclick="createPeriod()"><i class="bi bi-plus"></i> 创建</button>
+      <button class="btn btn-outline-primary btn-sm" id="rbPeriodCreateBtn" onclick="createPeriod()" title="创建"><i class="bi bi-check"></i></button>
+      <button class="btn btn-outline-warning btn-sm hidden" id="rbPeriodEditBtn" onclick="startEditPeriod()" title="编辑"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-outline-danger btn-sm hidden" id="rbPeriodDelBtn" onclick="deletePeriod()" title="删除"><i class="bi bi-trash"></i></button>
       <span class="text-muted small ms-2" id="rbPeriodInfo"></span>
     </div>
   </div>
@@ -407,13 +409,20 @@ function renderPeriodSelector() {
   document.getElementById('rbPeriod').value = STATE.currentPeriod || '';
   document.getElementById('rbPeriodNew').value = '';
 
+  // 按钮显示/隐藏：选中内容期间时显示编辑和删除
+  const hasPeriod = STATE.currentPeriod && STATE.allPeriods.find(p => p.period === STATE.currentPeriod);
+  document.getElementById('rbPeriodEditBtn').classList.toggle('hidden', !hasPeriod);
+  document.getElementById('rbPeriodDelBtn').classList.toggle('hidden', !hasPeriod);
+
   // 信息栏
   const info = document.getElementById('rbPeriodInfo');
   const current = STATE.allPeriods.find(p => p.period === STATE.currentPeriod);
   if (current) {
     info.textContent = `${current.invoice_count} 张发票 · ¥${current.total_amount.toFixed(2)} · 最后更新 ${current.updated_at ? new Date(current.updated_at).toLocaleString('zh-CN') : '-'}`;
-  } else {
+  } else if (STATE.currentPeriod) {
     info.textContent = '新期间，暂无数据';
+  } else {
+    info.textContent = '请选择或创建费用期间';
   }
 }
 
@@ -438,7 +447,76 @@ async function createPeriod() {
   const input = document.getElementById('rbPeriodNew');
   const period = input.value.trim();
   if (!period) { alert('请输入期间名称，如：7-8月'); return; }
+  // 检查是否与已有期间重名
+  if (STATE.allPeriods.find(p => p.period === period)) {
+    alert(`期间 "${period}" 已存在`);
+    return;
+  }
   await switchToPeriod(period);
+}
+
+async function startEditPeriod() {
+  if (!STATE.currentPeriod) return;
+  const newName = prompt('修改期间名称：', STATE.currentPeriod);
+  if (!newName || newName.trim() === STATE.currentPeriod) return;
+  const trimmed = newName.trim();
+  if (!trimmed) { alert('期间名称不能为空'); return; }
+  if (STATE.allPeriods.find(p => p.period === trimmed)) {
+    alert(`期间 "${trimmed}" 已存在`);
+    return;
+  }
+  try {
+    const resp = await fetch('/tools/reimbursement/rename', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_period: STATE.currentPeriod, new_period: trimmed }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      // 更新本地状态
+      const p = STATE.allPeriods.find(p => p.period === data.old_period);
+      if (p) p.period = data.new_period;
+      STATE.currentPeriod = data.new_period;
+      document.getElementById('rbPeriod').value = data.new_period;
+      renderPeriodSelector();
+      await saveStateNow();
+    } else {
+      alert('重命名失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('网络错误: ' + e.message); }
+}
+
+async function deletePeriod() {
+  if (!STATE.currentPeriod) return;
+  if (!confirm(`确定删除期间 "${STATE.currentPeriod}" 的全部数据？此操作不可恢复！`)) return;
+  try {
+    const resp = await fetch('/tools/reimbursement/delete/' + encodeURIComponent(STATE.currentPeriod), {
+      method: 'DELETE',
+    });
+    const data = await resp.json();
+    if (data.success) {
+      // 移除本地记录
+      STATE.allPeriods = STATE.allPeriods.filter(p => p.period !== STATE.currentPeriod);
+      STATE.currentPeriod = '';
+      STATE.invoices = [];
+      STATE.entertainment = [];
+      STATE.vehicles = [];
+      STATE.travels = [];
+      STATE.header = { employee_name:'张三', department:'', date:'', period:'', office:'深圳办' };
+      document.getElementById('rbPeriod').value = '';
+      document.getElementById('rbEmpName').value = STATE.header.employee_name;
+      document.getElementById('rbDept').value = '';
+      document.getElementById('rbDate').value = '';
+      renderPeriodSelector();
+      renderThumbnails();
+      // 如果只剩"+新建"，自动选中第一个期间
+      if (STATE.allPeriods.length > 0) {
+        await switchToPeriod(STATE.allPeriods[0].period);
+      }
+    } else {
+      alert('删除失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { alert('网络错误: ' + e.message); }
 }
 
 async function switchToPeriod(period) {
