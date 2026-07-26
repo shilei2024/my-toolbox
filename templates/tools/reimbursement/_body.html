@@ -113,6 +113,18 @@
 
 <!-- ===== 步骤 1：上传发票 ===== -->
 <div id="rbStep1">
+  <!-- 费用期间选择 -->
+  <div class="card mb-3 border-primary">
+    <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+      <strong class="me-2 small text-nowrap">费用期间：</strong>
+      <select class="form-select form-select-sm" id="rbPeriodSel" style="width:auto;min-width:130px;" onchange="onPeriodSwitch()">
+        <option value="__new__">+ 新建期间</option>
+      </select>
+      <input class="form-control form-control-sm hidden" id="rbPeriodNew" placeholder="如：7-8月" style="width:120px;" onkeydown="if(event.key==='Enter')createPeriod()">
+      <button class="btn btn-outline-primary btn-sm" id="rbPeriodCreateBtn" onclick="createPeriod()"><i class="bi bi-plus"></i> 创建</button>
+      <span class="text-muted small ms-2" id="rbPeriodInfo"></span>
+    </div>
+  </div>
   <!-- 报销基本信息 -->
   <div class="card mb-3">
     <div class="card-header bg-white">
@@ -309,6 +321,9 @@ const STATE = {
   entertainment: [],
   vehicles: [],
   travels: [],
+  currentPeriod: '',   // 当前期间
+  allPeriods: [],      // 已有期间列表
+  _saveTimer: null,    // 防抖
 };
 
 // ===== 初始化 =====
@@ -316,41 +331,177 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 加载参考数据
   const resp = await fetch('/tools/reimbursement/reference');
   STATE.reference = await resp.json();
-
-  // 填充下拉框
   fillSelect('rbDept', STATE.reference.departments);
   fillSelect('rbOffice', STATE.reference.offices);
 
-  // 恢复 sessionStorage
-  const saved = sessionStorage.getItem('rb_state');
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      STATE.invoices = parsed.invoices || [];
-      // 兼容旧数据：没有 full_url 时用 preview_url 代替
-      STATE.invoices.forEach(inv => {
-        if (!inv.full_url) inv.full_url = inv.preview_url || '';
-        if (!inv.ocr_provider) inv.ocr_provider = '';
-      });
-      STATE.header = parsed.header || STATE.header;
-      STATE.entertainment = parsed.entertainment || [];
-      STATE.vehicles = parsed.vehicles || [];
-      STATE.travels = parsed.travels || [];
-      renderThumbnails();
-    } catch(e) { console.warn('恢复数据失败:', e); }
-  }
-
+  // 加载期间列表（替代 sessionStorage）
+  await loadPeriods();
   bindEvents();
 });
 
+// ===== 持久化存储 =====
 function saveState() {
-  sessionStorage.setItem('rb_state', JSON.stringify({
-    invoices: STATE.invoices,
-    header: STATE.header,
-    entertainment: STATE.entertainment,
-    vehicles: STATE.vehicles,
-    travels: STATE.travels,
-  }));
+  // 防抖 1 秒后自动保存到后端
+  clearTimeout(STATE._saveTimer);
+  STATE._saveTimer = setTimeout(() => _doSave(), 1000);
+}
+
+function saveStateNow() {
+  // 立即保存（切换期间前用）
+  clearTimeout(STATE._saveTimer);
+  return _doSave();
+}
+
+async function _doSave() {
+  if (!STATE.currentPeriod) return;
+  try {
+    const payload = {
+      period: STATE.currentPeriod,
+      data: {
+        invoices: STATE.invoices,
+        header: STATE.header,
+        entertainment: STATE.entertainment,
+        vehicles: STATE.vehicles,
+        travels: STATE.travels,
+      },
+    };
+    await fetch('/tools/reimbursement/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch(e) { console.warn('自动保存失败:', e); }
+}
+
+// ===== 期间管理 =====
+async function loadPeriods() {
+  try {
+    const resp = await fetch('/tools/reimbursement/periods');
+    const data = await resp.json();
+    if (data.success) {
+      STATE.allPeriods = data.periods || [];
+      renderPeriodSelector();
+      // 自动选择最近的期间
+      if (STATE.allPeriods.length > 0) {
+        await switchToPeriod(STATE.allPeriods[0].period);
+      } else {
+        // 无历史数据，默认当前月
+        const now = new Date();
+        const defaultPeriod = (now.getMonth() + 1) + '月';
+        await switchToPeriod(defaultPeriod);
+      }
+    }
+  } catch(e) { console.warn('加载期间失败:', e); }
+}
+
+function renderPeriodSelector() {
+  const sel = document.getElementById('rbPeriodSel');
+  let html = '<option value="__new__">+ 新建期间</option>';
+  STATE.allPeriods.forEach(p => {
+    const selected = p.period === STATE.currentPeriod ? 'selected' : '';
+    html += `<option value="${p.period}" ${selected}>${p.period}${p.employee ? ' - '+p.employee : ''} (${p.invoice_count}张 ¥${p.total_amount.toFixed(0)})</option>`;
+  });
+  sel.innerHTML = html;
+
+  // 更新基本信息区的期间字段
+  document.getElementById('rbPeriod').value = STATE.currentPeriod || '';
+  document.getElementById('rbPeriodNew').value = '';
+
+  // 信息栏
+  const info = document.getElementById('rbPeriodInfo');
+  const current = STATE.allPeriods.find(p => p.period === STATE.currentPeriod);
+  if (current) {
+    info.textContent = `${current.invoice_count} 张发票 · ¥${current.total_amount.toFixed(2)} · 最后更新 ${current.updated_at ? new Date(current.updated_at).toLocaleString('zh-CN') : '-'}`;
+  } else {
+    info.textContent = '新期间，暂无数据';
+  }
+}
+
+function onPeriodSwitch() {
+  const sel = document.getElementById('rbPeriodSel');
+  const val = sel.value;
+  const newInput = document.getElementById('rbPeriodNew');
+  const createBtn = document.getElementById('rbPeriodCreateBtn');
+
+  if (val === '__new__') {
+    newInput.classList.remove('hidden');
+    createBtn.classList.remove('hidden');
+    newInput.focus();
+  } else {
+    newInput.classList.add('hidden');
+    createBtn.classList.add('hidden');
+    switchToPeriod(val);
+  }
+}
+
+async function createPeriod() {
+  const input = document.getElementById('rbPeriodNew');
+  const period = input.value.trim();
+  if (!period) { alert('请输入期间名称，如：7-8月'); return; }
+  await switchToPeriod(period);
+}
+
+async function switchToPeriod(period) {
+  if (!period || period === STATE.currentPeriod) return;
+  syncHeader();
+  // 保存当前期间数据
+  await saveStateNow();
+
+  // 加载新期间
+  try {
+    const resp = await fetch('/tools/reimbursement/load/' + encodeURIComponent(period));
+    const data = await resp.json();
+    STATE.currentPeriod = period;
+
+    if (data.success && data.data) {
+      const d = data.data;
+      STATE.invoices = (d.invoices || []).map(inv => {
+        if (!inv.full_url) inv.full_url = inv.preview_url || '';
+        if (!inv.ocr_provider) inv.ocr_provider = '';
+        return inv;
+      });
+      STATE.header = d.header || { employee_name:'张三', department:'', date:'', period:period, office:'深圳办' };
+      STATE.entertainment = d.entertainment || [];
+      STATE.vehicles = d.vehicles || [];
+      STATE.travels = d.travels || [];
+    } else {
+      // 新期间，初始化空数据
+      STATE.invoices = [];
+      STATE.entertainment = [];
+      STATE.vehicles = [];
+      STATE.travels = [];
+      STATE.header = { employee_name:'张三', department:'', date:'', period:period, office:'深圳办' };
+    }
+  } catch(e) {
+    console.warn('加载期间失败:', e);
+  }
+
+  // 更新 UI
+  document.getElementById('rbPeriod').value = period;
+  document.getElementById('rbEmpName').value = STATE.header.employee_name || '';
+  document.getElementById('rbDept').value = STATE.header.department || '';
+  document.getElementById('rbOffice').value = STATE.header.office || '深圳办';
+  document.getElementById('rbDate').value = STATE.header.date || '';
+  document.getElementById('rbPeriodNew').classList.add('hidden');
+  document.getElementById('rbPeriodCreateBtn').classList.add('hidden');
+
+  renderThumbnails();
+  // 如已进入 step2/3，一并刷新
+  if (!document.getElementById('rbStep2').classList.contains('hidden')) {
+    renderEditTable();
+    renderAuxTables();
+    updateSummary();
+  }
+  if (!document.getElementById('rbStep3').classList.contains('hidden')) {
+    genCover();
+  }
+
+  // 重新加载期间列表以刷新元数据
+  if (!STATE.allPeriods.find(p => p.period === period)) {
+    await loadPeriods();
+  } else {
+    renderPeriodSelector();
+  }
 }
 
 function fillSelect(id, items) {
@@ -549,7 +700,7 @@ function clearAll() {
     STATE.vehicles = [];
     STATE.travels = [];
     renderThumbnails();
-    sessionStorage.removeItem('rb_state');
+    saveStateNow();
   }
 }
 

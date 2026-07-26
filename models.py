@@ -221,3 +221,29 @@ class PnMapping(db.Model):
             "mfr_part": self.mfr_part,
             "brand": self.brand,
         }
+
+
+# -----------------------------------------------------------------------------
+# Reimbursement 报销数据持久化
+# -----------------------------------------------------------------------------
+class ReimbursementRecord(db.Model):
+    """报销数据 — 按 owner + period 隔离存储。
+
+    前端完整状态（发票/应酬费/派车/出差）序列化为 JSON 存入 data_json，
+    通过期间切换查看历史记录。
+    """
+    __tablename__ = "reimbursement_records"
+    __table_args__ = (
+        Index("ix_rb_owner", "owner_type", "owner_id"),
+        Index("ix_rb_period", "period"),
+        UniqueConstraint("owner_type", "owner_id", "period", name="uq_rb_owner_period"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 'user' → owner_id = str(user.id); 'anon' → owner_id = anon_id
+    owner_type: Mapped[str] = mapped_column(String(8), default="anon", nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    period: Mapped[str] = mapped_column(String(64), nullable=False)
+    data_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

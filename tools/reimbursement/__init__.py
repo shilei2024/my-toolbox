@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import datetime
@@ -13,7 +14,8 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from auth.decorators import commit_usage, remaining_for, require_usage
-from extensions import csrf, limiter
+from extensions import csrf, db, limiter
+from models import ReimbursementRecord
 
 tool_bp = Blueprint("reimbursement", __name__)
 
@@ -934,6 +936,88 @@ def reference_data():
         customer_levels=CUSTOMER_LEVELS,
         entertainment_categories=ENTERTAINMENT_CATEGORIES,
     )
+
+
+# ---------------------------------------------------------------------------
+# 持久化存储：按费用期间保存/加载报销数据
+# ---------------------------------------------------------------------------
+def _rb_owner() -> tuple[str, str]:
+    """获取当前用户的 owner 标识（登录用 user id，匿名用 session anon_id）。"""
+    from auth.decorators import ensure_anon_id
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        return ("user", str(current_user.id))
+    return ("anon", ensure_anon_id())
+
+
+@tool_bp.post("/save")
+@csrf.exempt
+def save_state():
+    """保存当前期间的完整报销状态。JSON: {period, data: {header, invoices, entertainment, vehicles, travels}}"""
+    payload = request.get_json(silent=True) or {}
+    period = (payload.get("period") or "").strip()
+    if not period:
+        return jsonify(error="缺少费用期间"), 400
+
+    otype, oid = _rb_owner()
+    record = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid, period=period
+    ).first()
+    if not record:
+        record = ReimbursementRecord(
+            owner_type=otype, owner_id=oid, period=period,
+            data_json="{}",
+        )
+        db.session.add(record)
+
+    record.data_json = json.dumps(payload.get("data", {}), ensure_ascii=False)
+    db.session.commit()
+    return jsonify(success=True, period=period)
+
+
+@tool_bp.get("/load/<period>")
+def load_state(period: str):
+    """加载指定期间的报销数据。"""
+    otype, oid = _rb_owner()
+    record = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid, period=period
+    ).first()
+    if not record:
+        return jsonify(success=False, note="该期间暂无数据")
+
+    try:
+        data = json.loads(record.data_json)
+    except Exception:
+        data = {}
+    return jsonify(success=True, data=data, updated_at=record.updated_at.isoformat() if record.updated_at else None)
+
+
+@tool_bp.get("/periods")
+def list_periods():
+    """列出当前用户所有期间及基本信息。"""
+    otype, oid = _rb_owner()
+    records = ReimbursementRecord.query.filter_by(
+        owner_type=otype, owner_id=oid
+    ).order_by(ReimbursementRecord.period.desc()).all()
+
+    periods = []
+    for r in records:
+        try:
+            d = json.loads(r.data_json)
+            header = d.get("header", {})
+            invoices = d.get("invoices", [])
+            total = sum(float(inv.get("data", {}).get("total_amount", 0) or 0) for inv in invoices)
+            periods.append({
+                "period": r.period,
+                "employee": header.get("employee_name", ""),
+                "department": header.get("department", ""),
+                "invoice_count": len(invoices),
+                "total_amount": round(total, 2),
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            })
+        except Exception:
+            periods.append({"period": r.period, "invoice_count": 0, "total_amount": 0})
+    return jsonify(success=True, periods=periods)
 
 
 @tool_bp.post("/cover-data")
