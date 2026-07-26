@@ -431,7 +431,7 @@ function renderPeriodSelector() {
   let html = '<option value="__new__">+ 新建期间</option>';
   STATE.allPeriods.forEach(p => {
     const selected = p.period === STATE.currentPeriod ? 'selected' : '';
-    html += `<option value="${p.period}" ${selected}>${p.period}${p.employee ? ' - '+p.employee : ''} (${p.invoice_count}张 ¥${p.total_amount.toFixed(0)})</option>`;
+    html += `<option value="${p.period}" ${selected}>${p.period}${p.employee ? ' - '+p.employee : ''} (${p.invoice_count}张 ¥${(p.total_amount ?? 0).toFixed(0)})</option>`;
   });
   sel.innerHTML = html;
 
@@ -812,6 +812,7 @@ function clearAll() {
   if (confirm('确定清空所有发票数据？此操作不可恢复。')) {
     STATE.invoices = [];
     STATE._rawFiles = {};
+    STATE.entertainment = [];
     STATE.vehicles = [];
     STATE.travels = [];
     renderThumbnails();

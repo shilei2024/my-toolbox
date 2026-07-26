@@ -223,12 +223,14 @@ def _number_to_chinese(amount: float) -> str:
     if jiao == 0 and fen == 0:
         result += "整"
     else:
-        if jiao > 0:
-            result += digit_cn[jiao] + fraction_cn[0]
-        if fen > 0:
-            result += digit_cn[fen] + fraction_cn[1]
-        else:
-            result += "整"
+    if jiao > 0:
+        result += digit_cn[jiao] + fraction_cn[0]
+    elif fen > 0:
+        result += "零"
+    if fen > 0:
+        result += digit_cn[fen] + fraction_cn[1]
+    else:
+        result += "整"
     return result
 
 
@@ -284,24 +286,25 @@ def upload():
             import base64 as b64
             import fitz
             doc = fitz.open(str(filepath))
-            page = doc[0]
+            try:
+                page = doc[0]
 
-            zoom = 200 / page.rect.height
-            mat = fitz.Matrix(zoom, zoom)
-            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-            thumb_name = f"{file_id}_thumb.png"
-            pix.save(str(upload_dir / thumb_name))
-            preview_filename = thumb_name
-            thumb_b64 = b64.b64encode(pix.tobytes("png")).decode("ascii")
+                zoom = 200 / page.rect.height
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                thumb_name = f"{file_id}_thumb.png"
+                pix.save(str(upload_dir / thumb_name))
+                preview_filename = thumb_name
+                thumb_b64 = b64.b64encode(pix.tobytes("png")).decode("ascii")
 
-            full_zoom = 1600 / page.rect.height
-            full_mat = fitz.Matrix(full_zoom, full_zoom)
-            full_pix = page.get_pixmap(matrix=full_mat, colorspace=fitz.csRGB)
-            full_name = f"{file_id}_full.png"
-            full_pix.save(str(upload_dir / full_name))
-            full_preview_filename = full_name
-
-            doc.close()
+                full_zoom = 1600 / page.rect.height
+                full_mat = fitz.Matrix(full_zoom, full_zoom)
+                full_pix = page.get_pixmap(matrix=full_mat, colorspace=fitz.csRGB)
+                full_name = f"{file_id}_full.png"
+                full_pix.save(str(upload_dir / full_name))
+                full_preview_filename = full_name
+            finally:
+                doc.close()
         except Exception:
             full_preview_filename = preview_filename
     else:
@@ -431,6 +434,7 @@ def ocr():
             if result:
                 has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
                 if has_data:
+                    commit_usage("reimbursement")
                     return jsonify(success=True, data=result, provider="baidu")
                 else:
                     current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
@@ -451,11 +455,13 @@ def ocr():
             if img_bytes[:5] == b"%PDF-":
                 import fitz
                 doc = fitz.open(stream=img_bytes, filetype="pdf")
-                page = doc[0]
-                mat = fitz.Matrix(300 / 72, 300 / 72)  # 300 DPI for OCR
-                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                pix.save(str(tmp_path))
-                doc.close()
+                try:
+                    page = doc[0]
+                    mat = fitz.Matrix(300 / 72, 300 / 72)
+                    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                    pix.save(str(tmp_path))
+                finally:
+                    doc.close()
             else:
                 img = Image.open(_io.BytesIO(img_bytes))
                 if img.mode in ("RGBA", "LA", "P"):
@@ -468,6 +474,7 @@ def ocr():
 
             result = _paddle_ocr_invoice(tmp_path)
             if result and (result.get("invoice_number") or result.get("total_amount")):
+                commit_usage("reimbursement")
                 return jsonify(success=True, data=result, provider="paddleocr")
         finally:
             if tmp_path.exists():
@@ -507,18 +514,19 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
         try:
             import fitz
             doc = fitz.open(stream=img_bytes, filetype="pdf")
-            for page_num in range(min(len(doc), 3)):
-                page = doc[page_num]
-                # 提高渲染 DPI 以获得更好的 OCR 效果
-                mat = fitz.Matrix(300 / 72, 300 / 72)
-                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                jpg = pix.tobytes("jpeg")
-                if len(jpg) > 2_500_000:
-                    mat2 = fitz.Matrix(200 / 72, 200 / 72)
-                    pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
-                    jpg = pix2.tobytes("jpeg")
-                img_list.append(jpg)
-            doc.close()
+            try:
+                for page_num in range(min(len(doc), 3)):
+                    page = doc[page_num]
+                    mat = fitz.Matrix(300 / 72, 300 / 72)
+                    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+                    jpg = pix.tobytes("jpeg")
+                    if len(jpg) > 2_500_000:
+                        mat2 = fitz.Matrix(200 / 72, 200 / 72)
+                        pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
+                        jpg = pix2.tobytes("jpeg")
+                    img_list.append(jpg)
+            finally:
+                doc.close()
         except Exception as e:
             current_app.logger.warning("PyMuPDF stream: %s", e)
             img_list = [img_bytes]
@@ -998,7 +1006,6 @@ def delete_period():
         return jsonify(
             success=False,
             error="该期间不存在",
-            debug={"period": period, "owner_type": otype, "owner_id_prefix": oid[:8]},
         ), 404
     db.session.delete(record)
     db.session.commit()
@@ -1033,7 +1040,9 @@ def rename_period():
 
 @tool_bp.get("/debug")
 def debug_info():
-    """调试端点：返回当前 owner 和所有可见期间名。"""
+    """调试端点（仅 DEBUG 模式可用）：返回当前 owner 和可见期间。"""
+    if not current_app.config.get("DEBUG"):
+        return jsonify(success=False, error="Not available in production"), 403
     otype, oid = _rb_owner()
     periods = ReimbursementRecord.query.filter_by(
         owner_type=otype, owner_id=oid
@@ -1063,8 +1072,9 @@ def cover_data():
     后端返回汇总 + 中文大写金额。
     """
     data = request.get_json(silent=True) or {}
-    header = data.get("header", {})
-    invoices = data.get("invoices", [])
+    try:
+        header = data.get("header", {})
+        invoices = data.get("invoices", [])
 
     # 按产品线+代码分组汇总
     groups: dict[str, dict] = {}
@@ -1140,7 +1150,7 @@ def cover_data():
         level_groups[level]["total"] += total
 
     # 排序 level_groups 使结果顺序稳定
-    level_groups = sorted(level_groups.values(), key=lambda g: g["level"])
+    sorted_level_groups = sorted(level_groups.values(), key=lambda g: g["level"])
 
     # 应酬费明细——优先取顶层数组（前端 genCover 发送），回退到发票内嵌数据
     entertainment_raw = data.get("entertainment") or []
@@ -1250,13 +1260,16 @@ def cover_data():
         total_all=round(total_all, 2),
         total_cn=_number_to_chinese(round(total_all, 2)),
         invoice_count=len(invoices),
-        level_groups=list(level_groups.values()),
+        level_groups=sorted_level_groups,
         entertainment_details=entertainment_details,
         vehicle_details=vehicle_details,
         travel_details=travel_details,
         expense_categories=EXPENSE_CATEGORIES,
         customer_levels=CUSTOMER_LEVELS,
     )
+    except Exception as e:
+        current_app.logger.exception("cover-data failed")
+        return jsonify(error=f"数据处理失败：{str(e)[:200]}"), 500
 
 
 # ---------------------------------------------------------------------------
@@ -1665,7 +1678,7 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
     tr_total = 0
     for t in travels:
         row += 1
-        amt = float(t.get("amount", 0) or 0)
+        amt = _safe_float(t.get("amount"))
         vals = [t.get("date", ""), t.get("location", ""), t.get("customer", ""),
                 t.get("expense_type", ""), amt or "", t.get("purpose", "")]
         for ci, v in enumerate(vals, 1):
