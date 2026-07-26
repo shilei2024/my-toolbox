@@ -227,16 +227,22 @@ function removeFromQueue(idx) {
 function clearAll() {
   const hasFiles = STATE.files.length > 0;
   const hasQueue = STATE.queue.length > 0;
-  if ((hasFiles || hasQueue) && !confirm(`确定清空${hasFiles ? '所有已确认文件' : ''}${hasFiles && hasQueue ? '和' : ''}${hasQueue ? '待确认列表' : ''}吗？`)) return;
+  if (!hasFiles && !hasQueue) return;
+  if (!confirm(`确定清空${hasFiles ? '所有已确认文件' : ''}${hasFiles && hasQueue ? '和' : ''}${hasQueue ? '待确认列表' : ''}吗？`)) return;
 
-  STATE.queue = [];
+  // 先释放所有 Blob
   revokeAllBlobs();
   STATE.files = [];
+  STATE.queue = [];
+  hideResultPanel();
   renderQueue();
-  document.getElementById('ipResult').classList.add('hidden');
-  document.getElementById('ipEmpty').classList.remove('hidden');
-  restoreSummaryPanel();
   hideProgress();
+}
+
+function hideResultPanel() {
+  document.getElementById('ipResult').classList.add('hidden');
+  document.getElementById('ipResult').innerHTML = '';
+  document.getElementById('ipEmpty').classList.remove('hidden');
 }
 
 function revokeAllBlobs() {
@@ -247,11 +253,13 @@ function renderQueue() {
   const el = document.getElementById('ipQueue');
   const actions = document.getElementById('ipActions');
   const countEl = document.getElementById('ipQueueCount');
+  const resultVisible = !document.getElementById('ipResult').classList.contains('hidden');
 
   if (STATE.queue.length === 0) {
     el.classList.add('hidden');
     actions.classList.add('hidden');
-    document.getElementById('ipEmpty').classList.remove('hidden');
+    // 只在结果面板也没内容时才展示空状态，避免两层重叠
+    if (!resultVisible) document.getElementById('ipEmpty').classList.remove('hidden');
     return;
   }
   el.classList.remove('hidden');
@@ -323,7 +331,9 @@ async function processFiles(btn) {
 
     renderResult();
     STATE.queue = [];
-    renderQueue();
+    // 隐藏队列面板（不要调 renderQueue，否则 ipEmpty 会与 ipResult 重叠）
+    document.getElementById('ipQueue').classList.add('hidden');
+    document.getElementById('ipActions').classList.add('hidden');
   } catch (e) {
     showToast('处理失败：' + e.message, 'warn');
   } finally {
@@ -357,7 +367,7 @@ function generateThumbnail(file, maxW, maxH) {
 function renderResult() {
   const el = document.getElementById('ipResult');
   const total = STATE.files.length;
-  const selectedCount = STATE.files.filter(f => f._selected !== false).length;
+  const selectedCount = STATE.files.filter(f => !!f._selected).length;
   const totalSize = STATE.files.reduce((s, f) => s + f.size, 0);
 
   let html = `
@@ -369,8 +379,11 @@ function renderResult() {
                style="accent-color:var(--ip-primary);"> 全选
       </label>
       <div class="btn-group btn-group-sm">
-        <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除选中">
-          <i class="bi bi-trash"></i>
+        <button class="btn btn-outline-secondary" onclick="clearAll()" title="清空全部文件">
+          <i class="bi bi-eraser"></i>
+        </button>
+        <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除勾选">
+          <i class="bi bi-trash"></i> 删除选中
         </button>
         <button class="btn btn-outline-primary" onclick="printAll()" title="批量自动打印">
           <i class="bi bi-printer"></i> 批量打印
@@ -384,7 +397,7 @@ function renderResult() {
   `;
 
   STATE.files.forEach((f, i) => {
-    const checked = f._selected !== false ? 'checked' : '';
+    const checked = f._selected ? 'checked' : '';
     const deselected = checked ? '' : ' deselected';
     const thumbHTML = f.dataUrl
       ? `<img src="${f.dataUrl}" alt="">`
@@ -537,7 +550,7 @@ function printOne(idx) {
  * PDF + 图片 全部塞进一份 PDF，用户只点一次"打印"。
  */
 async function printAll() {
-  const selected = STATE.files.filter(f => f._selected !== false);
+  const selected = STATE.files.filter(f => !!f._selected);
   if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
 
   // 单个文件直接打
@@ -634,7 +647,7 @@ function restoreSummaryPanel() {
   const el = document.getElementById('ipSummary');
   if (!el) return;
   const total = STATE.files.length;
-  const selectedCount = STATE.files.filter(f => f._selected !== false).length;
+  const selectedCount = STATE.files.filter(f => !!f._selected).length;
   const totalSize = STATE.files.reduce((s, f) => s + f.size, 0);
 
   el.className = 'ip-summary';
@@ -647,8 +660,11 @@ function restoreSummaryPanel() {
              style="accent-color:var(--ip-primary);"> 全选
     </label>
     <div class="btn-group btn-group-sm">
-      <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除选中">
-        <i class="bi bi-trash"></i>
+      <button class="btn btn-outline-secondary" onclick="clearAll()" title="清空全部文件">
+        <i class="bi bi-eraser"></i>
+      </button>
+      <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除勾选">
+        <i class="bi bi-trash"></i> 删除选中
       </button>
       <button class="btn btn-outline-primary" onclick="printAll()" title="一键批量合并打印">
         <i class="bi bi-printer"></i> 批量打印
@@ -706,7 +722,7 @@ function downloadOne(idx) {
 }
 
 async function exportZip() {
-  const selected = STATE.files.filter(f => f._selected !== false);
+  const selected = STATE.files.filter(f => !!f._selected);
   if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
 
   // 懒加载 JSZip
@@ -778,23 +794,16 @@ function onToggle(idx, checked) {
 }
 
 function deleteSelected() {
-  const before = STATE.files.length;
-  // 删除选中的：释放被删文件的 blobUrl，保留未选中的
-  STATE.files.forEach(f => {
-    if (f._selected && f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; }
-  });
+  const toDelete = STATE.files.filter(f => f._selected);
+  if (toDelete.length === 0) { showToast('请先勾选要删除的文件', 'warn'); return; }
+  if (!confirm(`确定删除 ${toDelete.length} 个文件吗？`)) return;
+
+  // 确认后才执行：先释放 Blob，再移除数组元素
+  toDelete.forEach(f => { if (f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; } });
   STATE.files = STATE.files.filter(f => !f._selected);
-  const removed = before - STATE.files.length;
-  if (removed === 0) { showToast('请先勾选要删除的文件', 'warn'); return; }
-  if (!confirm(`确定删除 ${removed} 个文件吗？`)) {
-    // 撤销：无法恢复 blobUrl，只能提示用户重新上传
-    renderResult();
-    showToast('已取消删除', 'info');
-    return;
-  }
+
   if (STATE.files.length === 0) {
-    document.getElementById('ipResult').classList.add('hidden');
-    document.getElementById('ipEmpty').classList.remove('hidden');
+    hideResultPanel();
     return;
   }
   renderResult();
@@ -807,8 +816,7 @@ function removeFile(idx) {
   if (f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; }
   STATE.files.splice(idx, 1);
   if (STATE.files.length === 0) {
-    document.getElementById('ipResult').classList.add('hidden');
-    document.getElementById('ipEmpty').classList.remove('hidden');
+    hideResultPanel();
     return;
   }
   renderResult();
