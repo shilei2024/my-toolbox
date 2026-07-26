@@ -355,7 +355,7 @@ function renderResult() {
   const totalSize = STATE.files.reduce((s, f) => s + f.size, 0);
 
   let html = `
-    <div class="ip-summary">
+    <div class="ip-summary" id="ipSummary">
       <span class="badge bg-success">${selectedCount}/${total} 个文件</span>
       <span class="text-muted">${formatSize(totalSize)}</span>
       <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
@@ -366,8 +366,8 @@ function renderResult() {
         <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除选中">
           <i class="bi bi-trash"></i>
         </button>
-        <button class="btn btn-outline-primary" onclick="printAll()" title="全部打印">
-          <i class="bi bi-printer"></i> 全部打印
+        <button class="btn btn-outline-primary" onclick="printAll()" title="批量自动打印">
+          <i class="bi bi-printer"></i> 批量打印
         </button>
         <button class="btn btn-outline-success" onclick="exportZip()" title="导出 ZIP">
           <i class="bi bi-download"></i> 导出 ZIP
@@ -409,49 +409,240 @@ function renderResult() {
   document.getElementById('ipEmpty').classList.add('hidden');
 }
 
-// ============== 打印 ==============
+// ============== 打印引擎 ==============
+// 打印排队控制器
+const PRINT_Q = { running: false, idxs: [], cursor: 0, total: 0, skipNext: false };
+
+function showPrintPanel() {
+  // 把汇总栏变成打印进度栏
+  const el = document.getElementById('ipSummary');
+  if (!el) return;
+  const cur = PRINT_Q.cursor;
+  const total = PRINT_Q.total;
+
+  if (PRINT_Q.running && total > 0) {
+    el.className = 'ip-summary';
+    el.style.background = '#eaf6ef';
+    el.innerHTML = `
+      <span class="badge bg-primary" id="ipPrintBadge">打印中 ${cur + 1}/${total}</span>
+      <span class="text-muted small" id="ipPrintName"></span>
+      <div class="ms-auto">
+        <button class="btn btn-outline-warning btn-sm me-1" onclick="PRINT_Q.skipNext=true;showToast('即将跳过当前文件','warn')">
+          <i class="bi bi-skip-forward"></i> 跳过
+        </button>
+        <button class="btn btn-outline-danger btn-sm" onclick="stopPrintQueue()">
+          <i class="bi bi-stop-circle"></i> 停止
+        </button>
+      </div>`;
+  }
+}
+
+function restoreSummaryPanel() {
+  const el = document.getElementById('ipSummary');
+  if (!el) return;
+  const total = STATE.files.length;
+  const selectedCount = STATE.files.filter(f => f._selected !== false).length;
+  const totalSize = STATE.files.reduce((s, f) => s + f.size, 0);
+
+  el.className = 'ip-summary';
+  el.style.background = '';
+  el.innerHTML = `
+    <span class="badge bg-success">${selectedCount}/${total} 个文件</span>
+    <span class="text-muted">${formatSize(totalSize)}</span>
+    <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
+      <input type="checkbox" id="ipSelectAll" onchange="toggleAll(this)" checked
+             style="accent-color:var(--ip-primary);"> 全选
+    </label>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除选中">
+        <i class="bi bi-trash"></i>
+      </button>
+      <button class="btn btn-outline-primary" onclick="printAll()" title="全部打印">
+        <i class="bi bi-printer"></i> 全部打印
+      </button>
+      <button class="btn btn-outline-success" onclick="exportZip()" title="导出 ZIP">
+        <i class="bi bi-download"></i> 导出 ZIP
+      </button>
+    </div>`;
+}
+
+/**
+ * 核心：为单个文件打开打印窗口，自动触发打印。
+ * PDF 用 <embed> 嵌入 PDF 查看器 + window.print() 一键打印；
+ * 图片用 <img> + window.print()。
+ * 返回打开的 window 引用，供 onafterprint 链式推进。
+ */
+function openPrintWindow(f) {
+  const win = window.open('', '_blank', 'width=900,height=650');
+  if (!win) return null;
+
+  const escapedUrl = f.blobUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  if (f.type === 'pdf') {
+    win.document.write(`
+      <!DOCTYPE html><html><head><title>${f.name}</title><meta charset="utf-8"><style>
+        *{margin:0;padding:0;}
+        html,body{width:100%;height:100%;overflow:hidden;background:#525659;}
+        embed{width:100%;height:100%;border:none;}
+        @media print{
+          html,body{background:#fff;}
+          embed{width:100%;height:100%;}
+        }
+      </style></head><body>
+      <embed src="${escapedUrl}" type="application/pdf" width="100%" height="100%">
+      <script>
+        var printed=false;
+        var embedEl=document.querySelector('embed');
+        function doPrint(){
+          if(printed)return;printed=true;
+          window.print();
+        }
+        // PDF 嵌入加载完成后打印
+        if(embedEl){
+          embedEl.addEventListener('load',function(){setTimeout(doPrint,600);});
+        }
+        // 兜底：2秒后还没打印就强制触发
+        setTimeout(function(){if(!printed)doPrint();},3000);
+      <\/script>
+      </html>`);
+  } else {
+    // 图片打印页
+    win.document.write(`
+      <!DOCTYPE html><html><head><title>${f.name}</title><meta charset="utf-8"><style>
+        *{margin:0;padding:0;}
+        body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f5f5f5;}
+        img{max-width:98vw;max-height:98vh;object-fit:contain;box-shadow:0 2px 12px rgba(0,0,0,.15);}
+        @media print{
+          body{background:#fff;}
+          img{max-width:100%;max-height:100%;box-shadow:none;}
+        }
+      </style></head><body><img src="${escapedUrl}"></body>
+      <script>
+        window.onload=function(){setTimeout(function(){window.print();},400);};
+      <\/script>
+      </html>`);
+  }
+  win.document.close();
+  return win;
+}
+
+/** 单份打印（手动触发） */
 function printOne(idx) {
   const f = STATE.files[idx];
   if (!f || !f.blobUrl) return;
 
-  if (f.type === 'pdf') {
-    // PDF：在新窗口打开，用户用浏览器 PDF 查看器的打印按钮
-    const w = window.open(f.blobUrl, '_blank');
-    if (!w) { showToast('请允许弹出窗口以打印文件', 'warn'); return; }
-    showToast(`已打开 ${f.name}，请在打开的页面中使用 Ctrl+P 打印`, 'info');
-  } else {
-    // 图片：构造一个打印页，自动弹出打印对话框
-    const printWin = window.open('', '_blank', 'width=800,height=600');
-    if (!printWin) { showToast('请允许弹出窗口以打印文件', 'warn'); return; }
-    printWin.document.write(`
-      <!DOCTYPE html><html><head><title>${f.name}</title><style>
-        *{margin:0;padding:0;} body{display:flex;justify-content:center;align-items:center;min-height:100vh;}
-        img{max-width:98vw;max-height:98vh;object-fit:contain;}
-        @media print{img{max-width:100%;max-height:100%;}}
-      </style></head><body><img src="${f.blobUrl}"></body>
-      <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
-      </html>`);
-    printWin.document.close();
-  }
+  const win = openPrintWindow(f);
+  if (!win) { showToast('请允许弹出窗口以打印文件', 'warn'); return; }
+
+  // 打印完成后自动关窗
+  win.onafterprint = function () { win.close(); };
 }
 
-async function printAll() {
+/** 停止打印队列 */
+function stopPrintQueue() {
+  PRINT_Q.running = false;
+  PRINT_Q.idxs = [];
+  PRINT_Q.cursor = 0;
+  PRINT_Q.total = 0;
+  restoreSummaryPanel();
+  hideProgress();
+  showToast('打印已停止', 'info');
+}
+
+/** 打印队列：播放下一个文件 */
+function playNextInQueue() {
+  // 上一轮想跳过？
+  if (PRINT_Q.skipNext) { PRINT_Q.skipNext = false; }
+
+  if (!PRINT_Q.running || PRINT_Q.cursor >= PRINT_Q.idxs.length) {
+    // 全部打印完毕
+    PRINT_Q.running = false;
+    restoreSummaryPanel();
+    hideProgress();
+    showToast(`全部打印完成（${PRINT_Q.idxs.length} 个文件）`, 'info');
+    return;
+  }
+
+  const idx = PRINT_Q.idxs[PRINT_Q.cursor];
+  const f = STATE.files[idx];
+  if (!f || !f.blobUrl) {
+    PRINT_Q.cursor++;
+    setTimeout(playNextInQueue, 200);
+    return;
+  }
+
+  showPrintPanel();
+  const nameEl = document.getElementById('ipPrintName');
+  if (nameEl) nameEl.textContent = f.name;
+  showProgress(
+    Math.round(PRINT_Q.cursor / PRINT_Q.total * 100),
+    `正在打印 ${PRINT_Q.cursor + 1}/${PRINT_Q.total}: ${f.name}`
+  );
+
+  const win = openPrintWindow(f);
+  if (!win) {
+    showToast(`跳过 ${f.name}：浏览器拦截了弹出窗口`, 'warn');
+    PRINT_Q.cursor++;
+    setTimeout(playNextInQueue, 500);
+    return;
+  }
+
+  // 核心：打印对话框关闭后自动播下一个
+  win.onafterprint = function () {
+    win.close();
+    PRINT_Q.cursor++;
+    setTimeout(playNextInQueue, 400);
+  };
+
+  // 兜底：如果用户不关窗，30 秒后自动继续（避免卡死队列）
+  const watch = setInterval(function () {
+    if (win.closed) {
+      clearInterval(watch);
+    } else if (!PRINT_Q.running) {
+      clearInterval(watch);
+    }
+  }, 2000);
+  setTimeout(function () {
+    clearInterval(watch);
+    if (!win.closed && PRINT_Q.running) {
+      // 超时未关闭，自动推进（不关窗，留给用户手动处理）
+      PRINT_Q.cursor++;
+      playNextInQueue();
+    }
+  }, 45000);
+}
+
+/** 批量打印：顺序排队，每个打印完自动播下一个 */
+function printAll() {
   const selected = STATE.files.filter(f => f._selected !== false);
   if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
-  if (selected.length === 1) { printOne(STATE.files.indexOf(selected[0])); return; }
-  if (!confirm(`即将依次打印 ${selected.length} 个文件，每个文件将打开新窗口。\n\n请允许浏览器弹出窗口。继续？`)) return;
 
-  const batchSize = 3; // 每批开 3 个窗口（避免浏览器拦截太多）
-  const idxs = selected.map(f => STATE.files.indexOf(f));
-
-  for (let i = 0; i < idxs.length; i += batchSize) {
-    const batch = idxs.slice(i, i + batchSize);
-    batch.forEach((idx, j) => {
-      setTimeout(() => printOne(idx), j * 600);
-    });
-    // 等待上一批打印完
-    await new Promise(r => setTimeout(r, 3000));
+  if (selected.length === 1) {
+    printOne(STATE.files.indexOf(selected[0]));
+    return;
   }
+
+  // 如果已经在打印中，询问是否重新开始
+  if (PRINT_Q.running) {
+    if (!confirm('打印队列正在运行，是否停止当前队列并重新开始？')) return;
+    PRINT_Q.running = false;
+  }
+
+  if (!confirm(
+    `即将自动依次打印 ${selected.length} 个文件。\n\n` +
+    `每个文件会自动弹出打印对话框，打印/取消后自动继续下一个。\n` +
+    `请允许浏览器弹出窗口。\n\n` +
+    `可以随时点击「跳过」或「停止」。\n\n确认开始？`
+  )) return;
+
+  PRINT_Q.running = true;
+  PRINT_Q.idxs = selected.map(f => STATE.files.indexOf(f));
+  PRINT_Q.cursor = 0;
+  PRINT_Q.total = selected.length;
+  PRINT_Q.skipNext = false;
+
+  showPrintPanel();
+  playNextInQueue();
 }
 
 // ============== 导出 ==============
