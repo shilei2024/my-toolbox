@@ -298,6 +298,24 @@ class ReimbursementCategory(db.Model):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class ReimbursementOffice(db.Model):
+    """User-managed office directory independent from product lines."""
+
+    __tablename__ = "reimbursement_offices"
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "name", name="uq_rb_office_owner_name"),
+        Index("ix_rb_office_owner_order", "owner_type", "owner_id", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class ReimbursementProductLine(db.Model):
     """User-managed product-line directory seeded from the original workbook."""
 

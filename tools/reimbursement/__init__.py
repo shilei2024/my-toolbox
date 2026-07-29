@@ -255,7 +255,7 @@ def index():
 @limiter.limit(lambda: "20/minute")
 @require_usage("reimbursement")
 def upload():
-    """上传发票图片/PDF，返回缩略图 URL。"""
+    """Persist an invoice attachment and return original plus preview URLs."""
     f = request.files.get("file")
     if not f or f.filename == "":
         return jsonify(error="请选择文件"), 400
@@ -335,6 +335,7 @@ def upload():
         file_id=file_id,
         filename=safe_name,
         original_name=f.filename,
+        original_url=f"/tools/reimbursement/preview/{safe_name}",
         preview_url=f"/tools/reimbursement/preview/{preview_filename}",
         full_url=f"/tools/reimbursement/preview/{full_preview_filename}",
         thumb_b64=thumb_b64,
@@ -885,7 +886,7 @@ def _paddle_ocr_invoice(filepath: Path) -> dict | None:
 def reference_data():
     """返回参考数据：产品线、办事处、部门、费用类别等。"""
     return jsonify(
-        product_lines=PRODUCT_LINES,
+        product_lines=[{"name": item["name"], "code": item["code"]} for item in PRODUCT_LINES],
         offices=OFFICES,
         departments=DEPARTMENTS,
         expense_categories=EXPENSE_CATEGORIES,

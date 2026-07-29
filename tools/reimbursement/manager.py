@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 import json
 import re
+import base64
+import html
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -18,6 +20,7 @@ from models import (
     ReimbursementAuxDetail,
     ReimbursementCategory,
     ReimbursementInvoice,
+    ReimbursementOffice,
     ReimbursementPeriod,
     ReimbursementProductLine,
     ReimbursementRecord,
@@ -35,6 +38,7 @@ DEFAULT_CATEGORIES = [
     ("快递费", "delivery", "#a16207"),
     ("福利", "welfare", "#db2777"),
 ]
+DEFAULT_OFFICES = ["深圳办", "厦门办", "杭州办", "上海办", "北京办", "合肥办", "西安办"]
 STATUS_LABELS = {"pending": "待报销", "approved": "已通过", "rejected": "已驳回"}
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COVER_TEMPLATE = TEMPLATE_DIR / "报销封面及费用分类表_母版.xls"
@@ -114,7 +118,14 @@ def _product_line_dict(item: ReimbursementProductLine) -> dict[str, Any]:
         "id": item.id,
         "name": item.name,
         "code": item.code,
-        "office": item.office,
+        "sort_order": item.sort_order,
+    }
+
+
+def _office_dict(item: ReimbursementOffice) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
         "sort_order": item.sort_order,
     }
 
@@ -154,6 +165,11 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
             ReimbursementProductLine.code == invoice.product_line_code,
         ),
     ).first()
+    office = ReimbursementOffice.query.filter_by(
+        owner_type=invoice.owner_type,
+        owner_id=invoice.owner_id,
+        name=invoice.office,
+    ).first()
     return {
         "id": invoice.id,
         "period_id": invoice.period_id,
@@ -175,6 +191,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "product_line_code": invoice.product_line_code,
         "product_line_id": product_line.id if product_line else None,
         "office": invoice.office,
+        "office_id": office.id if office else None,
         "customer_level": invoice.customer_level,
         "remarks": invoice.remarks,
         "upload_date": invoice.upload_date.isoformat() if invoice.upload_date else "",
@@ -209,6 +226,31 @@ def _seed_categories(owner_type: str, owner_id: str) -> list[ReimbursementCatego
     )
 
 
+def _seed_offices(owner_type: str, owner_id: str) -> list[ReimbursementOffice]:
+    rows = (
+        ReimbursementOffice.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+        .order_by(ReimbursementOffice.sort_order, ReimbursementOffice.id)
+        .all()
+    )
+    if rows:
+        return rows
+    for index, name in enumerate(DEFAULT_OFFICES):
+        db.session.add(
+            ReimbursementOffice(
+                owner_type=owner_type,
+                owner_id=owner_id,
+                name=name,
+                sort_order=(index + 1) * 10,
+            )
+        )
+    db.session.commit()
+    return (
+        ReimbursementOffice.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+        .order_by(ReimbursementOffice.sort_order, ReimbursementOffice.id)
+        .all()
+    )
+
+
 def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementProductLine]:
     rows = (
         ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
@@ -226,7 +268,7 @@ def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementPro
                 owner_id=owner_id,
                 name=item["name"],
                 code=item["code"],
-                office=item.get("office", ""),
+                office="",
                 sort_order=(index + 1) * 10,
             )
         )
@@ -330,6 +372,16 @@ def _owned_product_line(
         return None
     return ReimbursementProductLine.query.filter_by(
         id=product_line_id, owner_type=owner_type, owner_id=owner_id
+    ).first()
+
+
+def _owned_office(
+    office_id: int | None, owner_type: str, owner_id: str
+) -> ReimbursementOffice | None:
+    if not office_id:
+        return None
+    return ReimbursementOffice.query.filter_by(
+        id=office_id, owner_type=owner_type, owner_id=owner_id
     ).first()
 
 
@@ -550,6 +602,93 @@ def _assign_invoice_product_line(invoice: ReimbursementInvoice, data: dict[str, 
     invoice.product_line = product_line.name if product_line else ""
     invoice.product_line_code = product_line.code if product_line else ""
     return None
+
+
+def _assign_invoice_office(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | None:
+    office_id = data.get("office_id")
+    office = _owned_office(office_id, invoice.owner_type, invoice.owner_id)
+    if office_id and not office:
+        return "请选择有效的办事处"
+    office_name = str(data.get("office") or "").strip()
+    if not office and office_name:
+        office = ReimbursementOffice.query.filter_by(
+            owner_type=invoice.owner_type,
+            owner_id=invoice.owner_id,
+            name=office_name,
+        ).first()
+        if not office:
+            return "请选择办事处清单中的有效选项"
+    if not office:
+        return "请选择办事处"
+    invoice.office = office.name
+    return None
+
+
+def _invoice_attachment_path(invoice: ReimbursementInvoice) -> Path | None:
+    """Resolve the retained original upload, including legacy preview-only records."""
+    if not invoice.file_url.startswith("/tools/reimbursement/preview/"):
+        return None
+    filename = invoice.file_url.rsplit("/", 1)[-1]
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return None
+    upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
+    direct = upload_dir / filename
+    stem = direct.stem
+    file_id = re.sub(r"_(?:thumb|full)$", "", stem)
+    original_ext = Path(invoice.file_name or "").suffix.lower()
+    candidates = []
+    if original_ext:
+        candidates.append(upload_dir / f"{file_id}{original_ext}")
+    candidates.extend(upload_dir / f"{file_id}{ext}" for ext in (".pdf", ".png", ".jpg", ".jpeg"))
+    candidates.append(direct)
+    return next((item for item in candidates if item.exists() and item.is_file()), None)
+
+
+def _invoice_family_paths(invoice: ReimbursementInvoice) -> list[Path]:
+    path = _invoice_attachment_path(invoice)
+    if not path:
+        return []
+    file_id = re.sub(r"_(?:thumb|full)$", "", path.stem)
+    upload_dir = path.parent
+    return [
+        item
+        for item in upload_dir.glob(f"{file_id}.*")
+        if item.is_file() and item.parent.resolve() == upload_dir.resolve()
+    ] + [
+        item
+        for item in upload_dir.glob(f"{file_id}_*.png")
+        if item.is_file() and item.parent.resolve() == upload_dir.resolve()
+    ]
+
+
+def _printable_invoice_pages(invoice: ReimbursementInvoice) -> list[str]:
+    """Return each invoice page as an embeddable image data URL."""
+    path = _invoice_attachment_path(invoice)
+    if not path:
+        return []
+    if path.suffix.lower() == ".pdf":
+        try:
+            import fitz
+
+            pages = []
+            document = fitz.open(str(path))
+            try:
+                for page in document:
+                    pixmap = page.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), colorspace=fitz.csRGB)
+                    encoded = base64.b64encode(pixmap.tobytes("png")).decode("ascii")
+                    pages.append(f"data:image/png;base64,{encoded}")
+            finally:
+                document.close()
+            return pages
+        except Exception:
+            return []
+    mime = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "image/png")
+    return [f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"]
 
 
 def _number_to_chinese(amount: float) -> str:
@@ -784,6 +923,7 @@ def register_routes(bp: Blueprint) -> None:
     def bootstrap():
         owner_type, owner_id = _owner()
         _seed_categories(owner_type, owner_id)
+        _seed_offices(owner_type, owner_id)
         _seed_product_lines(owner_type, owner_id)
         _migrate_legacy(owner_type, owner_id)
         periods = (
@@ -799,6 +939,11 @@ def register_routes(bp: Blueprint) -> None:
         product_lines = (
             ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
             .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
+            .all()
+        )
+        offices = (
+            ReimbursementOffice.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+            .order_by(ReimbursementOffice.sort_order, ReimbursementOffice.id)
             .all()
         )
         invoices = (
@@ -821,6 +966,7 @@ def register_routes(bp: Blueprint) -> None:
             periods=[_period_dict(item) for item in periods],
             categories=[_category_dict(item) for item in categories],
             product_lines=[_product_line_dict(item) for item in product_lines],
+            offices=[_office_dict(item) for item in offices],
             recent=[_invoice_dict(item) for item in invoices],
             stats={
                 "invoice_count": int(total_count),
@@ -932,6 +1078,10 @@ def register_routes(bp: Blueprint) -> None:
         invoice_count = ReimbursementInvoice.query.filter_by(period_id=period.id).count()
         if invoice_count and request.args.get("force") != "1":
             return jsonify(error="该周期已有发票，请二次确认", invoice_count=invoice_count, needs_confirmation=True), 409
+        period_invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+        for invoice in period_invoices:
+            for path in set(_invoice_family_paths(invoice)):
+                path.unlink(missing_ok=True)
         ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
         ReimbursementInvoice.query.filter_by(period_id=period.id).delete()
         db.session.delete(period)
@@ -1037,7 +1187,7 @@ def register_routes(bp: Blueprint) -> None:
             owner_id=owner_id,
             name=name,
             code=code,
-            office=str(data.get("office") or "").strip(),
+            office="",
             sort_order=int(data.get("sort_order") or ((max_order or 0) + 10)),
         )
         db.session.add(item)
@@ -1075,7 +1225,6 @@ def register_routes(bp: Blueprint) -> None:
         old_name, old_code = item.name, item.code
         item.name = name
         item.code = code
-        item.office = str(data.get("office") or "").strip()
         if "sort_order" in data:
             item.sort_order = int(data.get("sort_order") or 0)
         ReimbursementInvoice.query.filter(
@@ -1130,6 +1279,105 @@ def register_routes(bp: Blueprint) -> None:
         db.session.commit()
         return jsonify(success=True)
 
+    @bp.get("/api/offices")
+    def list_offices():
+        owner_type, owner_id = _owner()
+        rows = _seed_offices(owner_type, owner_id)
+        return jsonify(offices=[_office_dict(item) for item in rows])
+
+    @bp.post("/api/offices")
+    @csrf.exempt
+    def create_office():
+        owner_type, owner_id = _owner()
+        _seed_offices(owner_type, owner_id)
+        data = _payload()
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return jsonify(error="办事处名称不能为空"), 400
+        if ReimbursementOffice.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, name=name
+        ).first():
+            return jsonify(error="办事处名称已存在"), 409
+        max_order = (
+            db.session.query(func.max(ReimbursementOffice.sort_order))
+            .filter_by(owner_type=owner_type, owner_id=owner_id)
+            .scalar()
+        )
+        office = ReimbursementOffice(
+            owner_type=owner_type,
+            owner_id=owner_id,
+            name=name,
+            sort_order=int(data.get("sort_order") or ((max_order or 0) + 10)),
+        )
+        db.session.add(office)
+        db.session.commit()
+        return jsonify(success=True, office=_office_dict(office)), 201
+
+    @bp.put("/api/offices/<int:office_id>")
+    @csrf.exempt
+    def update_office(office_id: int):
+        owner_type, owner_id = _owner()
+        office = _owned_office(office_id, owner_type, owner_id)
+        if not office:
+            return jsonify(error="办事处不存在"), 404
+        data = _payload()
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return jsonify(error="办事处名称不能为空"), 400
+        duplicate = ReimbursementOffice.query.filter(
+            ReimbursementOffice.owner_type == owner_type,
+            ReimbursementOffice.owner_id == owner_id,
+            ReimbursementOffice.name == name,
+            ReimbursementOffice.id != office.id,
+        ).first()
+        if duplicate:
+            return jsonify(error="办事处名称已存在"), 409
+        old_name = office.name
+        office.name = name
+        if "sort_order" in data:
+            office.sort_order = int(data.get("sort_order") or 0)
+        if old_name != name:
+            ReimbursementInvoice.query.filter_by(
+                owner_type=owner_type, owner_id=owner_id, office=old_name
+            ).update({"office": name}, synchronize_session=False)
+            ReimbursementPeriod.query.filter_by(
+                owner_type=owner_type, owner_id=owner_id, office=old_name
+            ).update({"office": name}, synchronize_session=False)
+        db.session.commit()
+        return jsonify(success=True, office=_office_dict(office))
+
+    @bp.delete("/api/offices/<int:office_id>")
+    @csrf.exempt
+    def remove_office(office_id: int):
+        owner_type, owner_id = _owner()
+        office = _owned_office(office_id, owner_type, owner_id)
+        if not office:
+            return jsonify(error="办事处不存在"), 404
+        invoices = ReimbursementInvoice.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, office=office.name
+        )
+        periods = ReimbursementPeriod.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, office=office.name
+        )
+        invoice_count, period_count = invoices.count(), periods.count()
+        migrate_to = request.args.get("migrate_to", type=int)
+        if (invoice_count or period_count) and not migrate_to:
+            return jsonify(
+                error="该办事处仍有关联数据，请选择迁移目标办事处",
+                invoice_count=invoice_count,
+                period_count=period_count,
+                needs_migration=True,
+            ), 409
+        if migrate_to:
+            target = _owned_office(migrate_to, owner_type, owner_id)
+            if not target or target.id == office.id:
+                return jsonify(error="迁移目标办事处无效"), 400
+            invoices.update({"office": target.name}, synchronize_session=False)
+            periods.update({"office": target.name}, synchronize_session=False)
+        db.session.delete(office)
+        db.session.commit()
+        return jsonify(success=True)
+
     @bp.get("/api/invoices")
     def list_invoices():
         owner_type, owner_id = _owner()
@@ -1175,7 +1423,10 @@ def register_routes(bp: Blueprint) -> None:
         product_line_error = _assign_invoice_product_line(invoice, data)
         if product_line_error:
             return product_line_error
-        for key in ("vendor", "description", "file_url", "file_name", "office", "customer_level", "remarks"):
+        office_error = _assign_invoice_office(invoice, data)
+        if office_error:
+            return office_error
+        for key in ("vendor", "description", "file_url", "file_name", "customer_level", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
         invoice.status = data.get("status") if data.get("status") in STATUS_LABELS else "pending"
@@ -1220,15 +1471,60 @@ def register_routes(bp: Blueprint) -> None:
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
         if not invoice:
             return jsonify(error="发票不存在"), 404
-        if invoice.file_url.startswith("/tools/reimbursement/preview/"):
-            filename = invoice.file_url.rsplit("/", 1)[-1]
-            path = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement" / filename
-            if path.exists():
-                path.unlink()
+        for path in set(_invoice_family_paths(invoice)):
+            path.unlink(missing_ok=True)
         _remove_invoice_aux(invoice)
         db.session.delete(invoice)
         db.session.commit()
         return jsonify(success=True)
+
+    @bp.get("/api/periods/<int:period_id>/invoices/print")
+    def print_period_invoices(period_id: int):
+        owner_type, owner_id = _owner()
+        period = _owned_period(period_id, owner_type, owner_id)
+        if not period:
+            return "报销周期不存在", 404
+        invoices = (
+            ReimbursementInvoice.query.filter_by(
+                owner_type=owner_type,
+                owner_id=owner_id,
+                period_id=period.id,
+            )
+            .order_by(ReimbursementInvoice.invoice_date, ReimbursementInvoice.id)
+            .all()
+        )
+        rendered_pages = []
+        for index, invoice in enumerate(invoices, 1):
+            pages = _printable_invoice_pages(invoice)
+            if not pages:
+                rendered_pages.append(
+                    f'<section class="invoice-page missing"><h2>附件不可用</h2>'
+                    f'<p>第 {index} 张：{html.escape(invoice.invoice_number or invoice.file_name or "未命名发票")}</p></section>'
+                )
+                continue
+            for page_number, data_url in enumerate(pages, 1):
+                title = html.escape(invoice.invoice_number or invoice.file_name or f"第 {index} 张发票")
+                rendered_pages.append(
+                    '<section class="invoice-page">'
+                    f'<header><strong>{index}. {title}</strong>'
+                    f'<span>{html.escape(invoice.vendor or "")} · {html.escape(invoice.office or "")}'
+                    f' · 第 {page_number}/{len(pages)} 页</span></header>'
+                    f'<img src="{data_url}" alt="{title}"></section>'
+                )
+        body = "\n".join(rendered_pages) or (
+            '<section class="invoice-page missing"><h2>当前周期没有可打印的发票</h2></section>'
+        )
+        period_name = html.escape(period.name)
+        document = f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>{period_name} 发票打印</title>
+<style>
+@page{{size:A4;margin:9mm}}*{{box-sizing:border-box}}body{{margin:0;font-family:"Microsoft YaHei",sans-serif;color:#17231f;background:#eef3f1}}
+.invoice-page{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;padding:9mm;display:flex;flex-direction:column;break-after:page;page-break-after:always}}
+.invoice-page:last-child{{break-after:auto;page-break-after:auto}}header{{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #d8e1de;padding-bottom:5mm;margin-bottom:5mm;font-size:12px}}
+header span{{color:#5c6f68;text-align:right}}img{{display:block;max-width:100%;max-height:260mm;margin:auto;object-fit:contain}}.missing{{align-items:center;justify-content:center;text-align:center}}
+@media print{{body{{background:#fff}}.invoice-page{{margin:0;padding:0;width:auto;min-height:auto}}header{{margin-bottom:3mm}}img{{max-height:274mm}}}}
+</style></head><body>{body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>"""
+        return document, 200, {"Content-Type": "text/html; charset=utf-8"}
 
     @bp.get("/api/summary/<int:period_id>")
     def period_summary(period_id: int):

@@ -51,7 +51,11 @@
       <div class="card-body">
         <h6 class="text-muted text-uppercase small">使用提示</h6>
         <ul class="small text-muted ps-3 mb-0">
+          {% if tool.id == 'reimbursement' %}
+          <li>发票原件会随报销记录保留，删除发票记录时一并删除附件。</li>
+          {% else %}
           <li>文件处理完会立即从服务器删除。</li>
+          {% endif %}
           <li>单文件最大 {{ config.MAX_UPLOAD_MB }} MB。</li>
           <li>遇到问题请刷新页面或换个浏览器试试。</li>
         </ul>

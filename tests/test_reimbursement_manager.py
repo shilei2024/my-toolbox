@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 import json
 import struct
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 
 import xlrd
 from flask import Blueprint, Flask
@@ -22,6 +24,7 @@ from tools.reimbursement import PRODUCT_LINES
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
+    DEFAULT_OFFICES,
     DETAIL_TEMPLATE,
     _build_cover_xls,
     _build_detail_xls,
@@ -241,6 +244,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         headers = {"X-RB-Anon-Id": "crud-test"}
         bootstrap = client.get("/tools/reimbursement/api/bootstrap", headers=headers).get_json()
         by_name = {item["name"]: item for item in bootstrap["product_lines"]}
+        office = bootstrap["offices"][0]
         period = client.post(
             "/tools/reimbursement/api/periods",
             headers=headers,
@@ -259,6 +263,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                 "period_id": period["id"],
                 "product_line_id": by_name["DIODES"]["id"],
                 "product_line_code": "错误代码",
+                "office_id": office["id"],
                 "invoice_number": "PL-1",
                 "total_amount": 88,
             },
@@ -288,6 +293,99 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(migrated.status_code, 200)
         invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
         self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("MSTAR", "02"))
+
+    def test_office_crud_is_independent_and_prints_retained_invoice(self):
+        app = Flask(__name__)
+        with tempfile.TemporaryDirectory() as upload_root:
+            app.config.update(
+                SECRET_KEY="test",
+                SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+                SQLALCHEMY_TRACK_MODIFICATIONS=False,
+                UPLOAD_DIR=upload_root,
+            )
+            db.init_app(app)
+            login_manager.init_app(app)
+            login_manager.user_loader(lambda _user_id: None)
+            blueprint = Blueprint("rb_office_test", __name__, url_prefix="/tools/reimbursement")
+            register_routes(blueprint)
+            app.register_blueprint(blueprint)
+            with app.app_context():
+                db.create_all()
+            client = app.test_client()
+            headers = {"X-RB-Anon-Id": "office-test"}
+            bootstrap = client.get("/tools/reimbursement/api/bootstrap", headers=headers).get_json()
+            self.assertEqual([item["name"] for item in bootstrap["offices"]], DEFAULT_OFFICES)
+            self.assertNotIn("office", bootstrap["product_lines"][0])
+
+            created = client.post(
+                "/tools/reimbursement/api/offices",
+                headers=headers,
+                json={"name": "测试办", "sort_order": 5},
+            )
+            self.assertEqual(created.status_code, 201)
+            test_office = created.get_json()["office"]
+            period = client.post(
+                "/tools/reimbursement/api/periods",
+                headers=headers,
+                json={
+                    "name": "2026年9-10月",
+                    "start_year": 2026,
+                    "start_month": 9,
+                    "end_year": 2026,
+                    "end_month": 10,
+                },
+            ).get_json()["period"]
+
+            upload_dir = Path(upload_root) / "reimbursement"
+            upload_dir.mkdir(parents=True)
+            file_id = "abc123def456"
+            (upload_dir / f"{file_id}.png").write_bytes(
+                __import__("base64").b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII="
+                )
+            )
+            invoice = client.post(
+                "/tools/reimbursement/api/invoices",
+                headers=headers,
+                json={
+                    "period_id": period["id"],
+                    "office_id": test_office["id"],
+                    "invoice_number": "PRINT-1",
+                    "file_name": "发票.png",
+                    "file_url": f"/tools/reimbursement/preview/{file_id}.png",
+                },
+            )
+            self.assertEqual(invoice.status_code, 201)
+            self.assertEqual(invoice.get_json()["invoice"]["office"], "测试办")
+
+            updated = client.put(
+                f"/tools/reimbursement/api/offices/{test_office['id']}",
+                headers=headers,
+                json={"name": "测试办-新", "sort_order": 6},
+            )
+            self.assertEqual(updated.status_code, 200)
+            invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
+            self.assertEqual(invoices[0]["office"], "测试办-新")
+
+            printed = client.get(
+                f"/tools/reimbursement/api/periods/{period['id']}/invoices/print",
+                headers=headers,
+            )
+            self.assertEqual(printed.status_code, 200)
+            self.assertIn("window.print()", printed.get_data(as_text=True))
+            self.assertIn("PRINT-1", printed.get_data(as_text=True))
+
+            blocked = client.delete(
+                f"/tools/reimbursement/api/offices/{test_office['id']}",
+                headers=headers,
+            )
+            self.assertEqual(blocked.status_code, 409)
+            target = bootstrap["offices"][0]
+            migrated = client.delete(
+                f"/tools/reimbursement/api/offices/{test_office['id']}?migrate_to={target['id']}",
+                headers=headers,
+            )
+            self.assertEqual(migrated.status_code, 200)
 
     def test_cover_export_uses_original_workbook_layout(self):
         output = _build_cover_xls(self.cover_data)
