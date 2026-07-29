@@ -158,6 +158,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "customer_level": invoice.customer_level,
         "remarks": invoice.remarks,
         "upload_date": invoice.upload_date.isoformat() if invoice.upload_date else "",
+        "linked_detail": _invoice_aux_data(invoice),
     }
 
 
@@ -344,9 +345,124 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
     )
     for row in rows:
         value = json.loads(row.data_json or "{}")
+        if row.kind == "vehicle":
+            start = _money(value.get("km_start"))
+            end = _money(value.get("km_end"))
+            value["km_total"] = (
+                float(max(Decimal("0"), end - start))
+                if value.get("km_start") not in (None, "") and value.get("km_end") not in (None, "")
+                else ""
+            )
         value["id"] = row.id
         result.setdefault(row.kind, []).append(value)
     return result
+
+
+def _invoice_aux_data(invoice: ReimbursementInvoice) -> dict[str, Any] | None:
+    if not invoice.id:
+        return None
+    rows = ReimbursementAuxDetail.query.filter_by(
+        owner_type=invoice.owner_type, owner_id=invoice.owner_id
+    ).all()
+    for row in rows:
+        value = json.loads(row.data_json or "{}")
+        if value.get("invoice_id") == invoice.id:
+            value["kind"] = row.kind
+            return value
+    return None
+
+
+def _linked_kind(category: ReimbursementCategory | None) -> str | None:
+    if not category:
+        return None
+    if category.export_key == "entertainment":
+        return "entertainment"
+    if category.export_key in {"travel_transport", "travel_hotel"}:
+        return "travel"
+    return None
+
+
+def _sync_invoice_aux(
+    invoice: ReimbursementInvoice,
+    category: ReimbursementCategory | None,
+    linked_detail: dict[str, Any] | None,
+) -> None:
+    """Create or update the detail row generated from an entertainment/travel invoice."""
+    desired_kind = _linked_kind(category)
+    matched: list[tuple[ReimbursementAuxDetail, dict[str, Any]]] = []
+    rows = ReimbursementAuxDetail.query.filter_by(
+        owner_type=invoice.owner_type, owner_id=invoice.owner_id
+    ).all()
+    for row in rows:
+        value = json.loads(row.data_json or "{}")
+        if value.get("invoice_id") == invoice.id:
+            matched.append((row, value))
+
+    if not desired_kind:
+        for row, _ in matched:
+            db.session.delete(row)
+        return
+
+    detail = dict(linked_detail or {})
+    if desired_kind == "entertainment":
+        values = {
+            "invoice_id": invoice.id,
+            "auto_generated": True,
+            "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
+            "category": detail.get("category") or "餐费",
+            "place": detail.get("place") or invoice.vendor,
+            "customer": detail.get("customer") or "",
+            "participants": detail.get("participants") or "",
+            "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
+            "purpose": detail.get("purpose") or invoice.product_line,
+            "approval": detail.get("approval") or "",
+        }
+    else:
+        values = {
+            "invoice_id": invoice.id,
+            "auto_generated": True,
+            "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
+            "location": detail.get("location") or "",
+            "customer": detail.get("customer") or "",
+            "expense_type": detail.get("expense_type") or (category.name if category else ""),
+            "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
+            "purpose": detail.get("purpose") or invoice.product_line,
+        }
+
+    if matched:
+        target, _ = matched[0]
+        target.period_id = invoice.period_id
+        target.kind = desired_kind
+        target.data_json = json.dumps(values, ensure_ascii=False)
+        for duplicate, _ in matched[1:]:
+            db.session.delete(duplicate)
+        return
+
+    max_order = (
+        db.session.query(func.max(ReimbursementAuxDetail.sort_order))
+        .filter_by(period_id=invoice.period_id, kind=desired_kind)
+        .scalar()
+    )
+    db.session.add(
+        ReimbursementAuxDetail(
+            owner_type=invoice.owner_type,
+            owner_id=invoice.owner_id,
+            period_id=invoice.period_id,
+            kind=desired_kind,
+            sort_order=(max_order or 0) + 1,
+            data_json=json.dumps(values, ensure_ascii=False),
+        )
+    )
+
+
+def _remove_invoice_aux(invoice: ReimbursementInvoice) -> None:
+    rows = ReimbursementAuxDetail.query.filter_by(
+        owner_type=invoice.owner_type, owner_id=invoice.owner_id
+    ).all()
+    for row in rows:
+        value = json.loads(row.data_json or "{}")
+        if value.get("invoice_id") == invoice.id:
+            db.session.delete(row)
 
 
 def _number_to_chinese(amount: float) -> str:
@@ -494,13 +610,15 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
 
 
 def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]) -> io.BytesIO:
+    from xlwt import Formula
+
     entertainment, vehicles, travels = aux["entertainment"], aux["vehicle"], aux["travel"]
     if len(entertainment) > 9:
         raise ValueError("应酬费母版最多容纳 9 条明细")
     if len(vehicles) > 11:
         raise ValueError("派车单母版最多容纳 11 条明细")
-    if len(travels) > 18:
-        raise ValueError("出差明细母版最多容纳 18 条明细")
+    if len(travels) > 17:
+        raise ValueError("出差明细母版需保留最后一行为合计，最多容纳 17 条明细")
     source, target = _template_copy(DETAIL_TEMPLATE)
     header = data["header"]
 
@@ -508,10 +626,8 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
     for row in range(3, 12):
         for col in range(8):
             _write_cell(source, target, 0, row, col, "")
-    ent_total = 0.0
     for offset, item in enumerate(entertainment):
         amount = float(item.get("amount") or 0)
-        ent_total += amount
         values = [
             _excel_date(item.get("date", "")),
             item.get("category", ""),
@@ -524,21 +640,18 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 0, 3 + offset, col, value)
-    _write_cell(source, target, 0, 12, 5, round(ent_total, 2))
+    _write_cell(source, target, 0, 12, 0, "合计")
+    _write_cell(source, target, 0, 12, 5, Formula("SUM(F4:F12)"))
 
     _write_cell(source, target, 1, 1, 0, f"员工姓名：{header['employee_name']}")
     _write_cell(source, target, 1, 1, 9, f" {header['period']}派车单")
     for row in range(4, 15):
         for col in range(10):
             _write_cell(source, target, 1, row, col, "")
-    totals = [0.0, 0.0, 0.0]
     for offset, item in enumerate(vehicles):
-        km = float(item.get("km_total") or 0)
-        toll = float(item.get("toll_fee") or 0)
-        parking = float(item.get("parking_fee") or 0)
-        totals = [totals[0] + km, totals[1] + toll, totals[2] + parking]
         date_value = _date(item.get("date"))
         compact_date = int(date_value.strftime("%Y%m%d")) if date_value else ""
+        excel_row = 5 + offset
         values = [
             compact_date,
             item.get("from_location", ""),
@@ -546,15 +659,15 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
             item.get("contact", ""),
             item.get("km_start", ""),
             item.get("km_end", ""),
-            km,
-            toll,
-            parking,
+            Formula(f'IF(OR(E{excel_row}="",F{excel_row}=""),"",MAX(0,F{excel_row}-E{excel_row}))'),
+            float(item.get("toll_fee") or 0),
+            float(item.get("parking_fee") or 0),
             item.get("remarks", ""),
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 1, 4 + offset, col, value)
-    for col, value in zip((6, 7, 8), totals):
-        _write_cell(source, target, 1, 15, col, round(value, 2))
+    for col, formula in zip((6, 7, 8), ("SUM(G5:G15)", "SUM(H5:H15)", "SUM(I5:I15)")):
+        _write_cell(source, target, 1, 15, col, Formula(formula))
 
     _write_cell(source, target, 2, 1, 0, f"员工姓名：{header['employee_name']}")
     for row in range(3, 21):
@@ -571,6 +684,8 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 2, 3 + offset, col, value)
+    _write_cell(source, target, 2, 20, 0, "合计")
+    _write_cell(source, target, 2, 20, 4, Formula("SUM(E4:E20)"))
     output = io.BytesIO()
     target.save(output)
     output.seek(0)
@@ -846,11 +961,15 @@ def register_routes(bp: Blueprint) -> None:
     @csrf.exempt
     def create_invoice():
         owner_type, owner_id = _owner()
+        data = _payload()
         invoice = ReimbursementInvoice(owner_type=owner_type, owner_id=owner_id, period_id=0)
-        error = save_invoice(invoice, _payload())
+        error = save_invoice(invoice, data)
         if error:
             return jsonify(error=error), 400
         db.session.add(invoice)
+        db.session.flush()
+        category = _owned_category(invoice.category_id, owner_type, owner_id)
+        _sync_invoice_aux(invoice, category, data.get("linked_detail"))
         db.session.commit()
         return jsonify(success=True, invoice=_invoice_dict(invoice)), 201
 
@@ -861,9 +980,12 @@ def register_routes(bp: Blueprint) -> None:
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
         if not invoice:
             return jsonify(error="发票不存在"), 404
-        error = save_invoice(invoice, _payload())
+        data = _payload()
+        error = save_invoice(invoice, data)
         if error:
             return jsonify(error=error), 400
+        category = _owned_category(invoice.category_id, owner_type, owner_id)
+        _sync_invoice_aux(invoice, category, data.get("linked_detail"))
         db.session.commit()
         return jsonify(success=True, invoice=_invoice_dict(invoice))
 
@@ -879,6 +1001,7 @@ def register_routes(bp: Blueprint) -> None:
             path = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement" / filename
             if path.exists():
                 path.unlink()
+        _remove_invoice_aux(invoice)
         db.session.delete(invoice)
         db.session.commit()
         return jsonify(success=True)
@@ -902,6 +1025,16 @@ def register_routes(bp: Blueprint) -> None:
         ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
         for kind in ("entertainment", "vehicle", "travel"):
             for index, row in enumerate(data.get(kind) or []):
+                value = dict(row)
+                value.pop("id", None)
+                if kind == "vehicle":
+                    start = value.get("km_start")
+                    end = value.get("km_end")
+                    value["km_total"] = (
+                        float(max(Decimal("0"), _money(end) - _money(start)))
+                        if start not in (None, "") and end not in (None, "")
+                        else ""
+                    )
                 db.session.add(
                     ReimbursementAuxDetail(
                         owner_type=owner_type,
@@ -909,7 +1042,7 @@ def register_routes(bp: Blueprint) -> None:
                         period_id=period.id,
                         kind=kind,
                         sort_order=index,
-                        data_json=json.dumps(row, ensure_ascii=False),
+                        data_json=json.dumps(value, ensure_ascii=False),
                     )
                 )
         db.session.commit()

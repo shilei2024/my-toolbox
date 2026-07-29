@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import io
+import json
+import struct
 import unittest
+from datetime import date
 
 import xlrd
+from flask import Flask
+from xlrd.compdoc import CompDoc
 
+from extensions import db
+from models import ReimbursementAuxDetail, ReimbursementCategory, ReimbursementInvoice, ReimbursementPeriod
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
@@ -12,6 +19,7 @@ from tools.reimbursement.manager import (
     _build_cover_xls,
     _build_detail_xls,
     _period_parts,
+    _sync_invoice_aux,
 )
 
 
@@ -30,6 +38,26 @@ def _style_signature(book, sheet, row, col):
         },
         xf.background.__dict__,
     )
+
+
+def _formula_cells(contents):
+    """Return (sheet_index, row, col) locations from BIFF FORMULA records."""
+    stream = CompDoc(contents).get_named_stream("Workbook")
+    position = 0
+    sheet_index = -1
+    cells = set()
+    while position + 4 <= len(stream):
+        record_id, size = struct.unpack_from("<HH", stream, position)
+        payload = stream[position + 4 : position + 4 + size]
+        if record_id == 0x0809 and size >= 4:
+            substream_type = struct.unpack_from("<H", payload, 2)[0]
+            if substream_type == 0x0010:
+                sheet_index += 1
+        elif record_id == 0x0006 and size >= 6 and sheet_index >= 0:
+            row, col = struct.unpack_from("<HH", payload, 0)
+            cells.add((sheet_index, row, col))
+        position += 4 + size
+    return cells
 
 
 class ReimbursementManagerTests(unittest.TestCase):
@@ -94,6 +122,59 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(_period_parts("2025年12月-2026年1月"), (2025, 12, 2026, 1))
         self.assertEqual(_period_parts("2026年7-8月"), (2026, 7, 2026, 8))
 
+    def test_invoice_creates_and_updates_linked_detail(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            period = ReimbursementPeriod(
+                owner_type="anon",
+                owner_id="test",
+                name="2026年7-8月",
+                start_year=2026,
+                start_month=7,
+                end_year=2026,
+                end_month=8,
+            )
+            entertainment = ReimbursementCategory(
+                owner_type="anon", owner_id="test", name="招待费", export_key="entertainment"
+            )
+            travel = ReimbursementCategory(
+                owner_type="anon", owner_id="test", name="出差住宿费", export_key="travel_hotel"
+            )
+            db.session.add_all([period, entertainment, travel])
+            db.session.flush()
+            invoice = ReimbursementInvoice(
+                owner_type="anon",
+                owner_id="test",
+                period_id=period.id,
+                category_id=entertainment.id,
+                invoice_number="INV-1",
+                invoice_date=date(2026, 7, 1),
+                total_amount=100.5,
+                vendor="测试餐厅",
+                product_line="DIODES",
+            )
+            db.session.add(invoice)
+            db.session.flush()
+            _sync_invoice_aux(invoice, entertainment, {"customer": "客户A", "participants": "张三"})
+            db.session.flush()
+            row = ReimbursementAuxDetail.query.one()
+            self.assertEqual(row.kind, "entertainment")
+            self.assertEqual(json.loads(row.data_json)["invoice_id"], invoice.id)
+
+            invoice.category_id = travel.id
+            _sync_invoice_aux(invoice, travel, {"location": "上海", "customer": "客户B"})
+            db.session.flush()
+            rows = ReimbursementAuxDetail.query.all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].kind, "travel")
+            self.assertEqual(json.loads(rows[0].data_json)["location"], "上海")
+
     def test_cover_export_uses_original_workbook_layout(self):
         output = _build_cover_xls(self.cover_data)
         generated = self.assert_template_layout_preserved(
@@ -122,8 +203,27 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "purpose": "DIODES",
                     }
                 ],
-                "vehicle": [],
-                "travel": [],
+                "vehicle": [
+                    {
+                        "date": "2026-07-02",
+                        "from_location": "公司",
+                        "to_location": "客户",
+                        "km_start": 100,
+                        "km_end": 135.5,
+                        "toll_fee": 10,
+                        "parking_fee": 5,
+                    }
+                ],
+                "travel": [
+                    {
+                        "date": "2026-07-03",
+                        "location": "上海",
+                        "customer": "客户",
+                        "expense_type": "住宿费",
+                        "amount": 300,
+                        "purpose": "DIODES",
+                    }
+                ],
             },
         )
         generated = self.assert_template_layout_preserved(
@@ -135,7 +235,19 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(detail.cell_value(1, 0), "员工姓名：测试员工")
         self.assertEqual(detail.cell_value(3, 2), "测试餐厅")
         self.assertEqual(detail.cell_value(3, 5), 100.5)
-        self.assertEqual(detail.cell_value(12, 5), 100.5)
+        self.assertEqual(detail.cell_value(12, 0), "合计")
+        self.assertEqual(generated.sheet_by_name("出差明细表").cell_value(20, 0), "合计")
+        formulas = _formula_cells(output.getvalue())
+        self.assertTrue(
+            {
+                (0, 12, 5),
+                (1, 4, 6),
+                (1, 15, 6),
+                (1, 15, 7),
+                (1, 15, 8),
+                (2, 20, 4),
+            }.issubset(formulas)
+        )
 
 
 if __name__ == "__main__":

@@ -58,6 +58,9 @@
   .rb-aux-pane { display:none; }
   .rb-aux-pane.active { display:block; }
   .rb-aux-table input,.rb-aux-table select { min-width:100px; font-size:.78rem; padding:.25rem .4rem; }
+  .rb-aux-table tfoot th { background:#f1f5f9; color:#0f172a; font-weight:700; white-space:nowrap; }
+  .rb-linked-detail { border:1px solid #a9d6c8; background:#f3fbf8; border-radius:12px; padding:16px; }
+  .rb-linked-detail .rb-linked-title { color:var(--brand); font-weight:700; }
   .rb-upload { border:1.5px dashed #a9c9bf; background:#f4fbf8; border-radius:12px; padding:18px; text-align:center; cursor:pointer; }
   .rb-upload:hover { border-color:var(--brand); }
   .rb-file-note { font-size:.76rem; color:var(--muted); margin-top:7px; }
@@ -173,6 +176,11 @@
       <div class="col-md-6"><label class="form-label">摘要</label><input class="form-control" id="rbInvDescription"></div>
       <div class="col-md-6"><label class="form-label">备注</label><input class="form-control" id="rbInvRemarks"></div>
     </div>
+    <div class="rb-linked-detail mt-3 d-none" id="rbLinkedDetail">
+      <div class="rb-linked-title"><i class="bi bi-link-45deg me-1"></i><span id="rbLinkedTitle"></span></div>
+      <div class="rb-file-note mt-1 mb-3">保存发票后会自动生成或同步对应明细条目，无需再次手工添加。</div>
+      <div class="row g-3" id="rbLinkedFields"></div>
+    </div>
   </div>
   <div class="modal-footer"><button class="rb-btn rb-btn-light" data-bs-dismiss="modal">取消</button><button class="rb-btn rb-btn-primary" onclick="RB.saveInvoice()">保存发票</button></div>
 </div></div></div>
@@ -206,6 +214,8 @@ const RB = {
     document.getElementById('rbInvoiceFile').addEventListener('change',e=>this.uploadFile(e.target.files[0]));
     document.getElementById('rbInvAmount').addEventListener('input',()=>this.calcTotal());
     document.getElementById('rbInvTax').addEventListener('input',()=>this.calcTotal());
+    document.getElementById('rbInvCategory').addEventListener('change',()=>this.renderLinkedDetail());
+    ['rbInvDate','rbInvVendor','rbInvTotal','rbInvProduct'].forEach(id=>document.getElementById(id).addEventListener('change',()=>this.syncLinkedDefaults(true)));
     document.getElementById('rbSearch').addEventListener('keydown',e=>{if(e.key==='Enter')this.loadInvoices(1)});
     try{ this.state.reference=await this.api('/tools/reimbursement/reference'); await this.reload(); }catch(e){this.toast(e.message,true)}
   },
@@ -247,19 +257,44 @@ const RB = {
   openInvoice(id=null){
     const i=id?this.state.invoices.find(x=>x.id===id):null;document.getElementById('rbInvoiceTitle').textContent=i?'编辑发票':'新增发票';
     const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office||this.state.periods.find(p=>p.is_active)?.office||'深圳办',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
-    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);document.getElementById('rbUploadedFile').textContent=i?.file_name?`已关联：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.modal('rbInvoiceModal').show();
+    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);document.getElementById('rbUploadedFile').textContent=i?.file_name?`已关联：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
   },
-  calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2)},
-  syncProductCode(){const name=document.getElementById('rbInvProduct').value;const p=(this.state.reference?.product_lines||[]).find(x=>x.name===name);if(p)document.getElementById('rbInvProductCode').value=p.code},
+  calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2);this.syncLinkedDefaults(true)},
+  syncProductCode(){const name=document.getElementById('rbInvProduct').value;const p=(this.state.reference?.product_lines||[]).find(x=>x.name===name);if(p)document.getElementById('rbInvProductCode').value=p.code;this.syncLinkedDefaults(true)},
+  linkedCategory(){const id=+document.getElementById('rbInvCategory').value;return this.state.categories.find(c=>c.id===id)||null},
+  renderLinkedDetail(detail=null){
+    const category=this.linkedCategory(),kind=category?.export_key==='entertainment'?'entertainment':['travel_transport','travel_hotel'].includes(category?.export_key)?'travel':null;
+    const box=document.getElementById('rbLinkedDetail'),fields=document.getElementById('rbLinkedFields');
+    this.state.activeLinkedKind=kind;
+    if(!kind){box.classList.add('d-none');fields.innerHTML='';return}
+    box.classList.remove('d-none');document.getElementById('rbLinkedTitle').textContent=kind==='entertainment'?'关联应酬费明细':'关联出差明细';
+    const specs=kind==='entertainment'
+      ?[['date','日期','date',3],['category','费用类别','text',3],['place','用餐地点/名称','text',6],['customer','客户名称','text',4],['participants','主要参与人','text',4],['amount','金额','number',4],['purpose','事由/产品线','text',8],['approval','主管审批','text',4]]
+      :[['date','日期','date',3],['location','出差地','text',3],['customer','客户名称','text',3],['expense_type','费用类型','text',3],['amount','金额','number',4],['purpose','事由/产品线','text',8]];
+    fields.innerHTML=specs.map(([key,label,type,width])=>`<div class="col-md-${width}"><label class="form-label">${label}</label><input id="rbLink_${key}" class="form-control" type="${type}" ${type==='number'?'step="0.01"':''} value="${this.esc(detail?.[key]??'')}"></div>`).join('');
+    this.syncLinkedDefaults(false);
+  },
+  syncLinkedDefaults(force=false){
+    const kind=this.state.activeLinkedKind;if(!kind)return;const category=this.linkedCategory();
+    const defaults=kind==='entertainment'
+      ?{date:document.getElementById('rbInvDate').value,category:'餐费',place:document.getElementById('rbInvVendor').value,amount:document.getElementById('rbInvTotal').value,purpose:document.getElementById('rbInvProduct').value}
+      :{date:document.getElementById('rbInvDate').value,expense_type:category?.name||'',amount:document.getElementById('rbInvTotal').value,purpose:document.getElementById('rbInvProduct').value};
+    Object.entries(defaults).forEach(([key,value])=>{const el=document.getElementById('rbLink_'+key);if(el&&(force||!el.value))el.value=value||''});
+  },
+  linkedDetailPayload(){
+    const kind=this.state.activeLinkedKind;if(!kind)return null;
+    const keys=kind==='entertainment'?['date','category','place','customer','participants','amount','purpose','approval']:['date','location','customer','expense_type','amount','purpose'];
+    return Object.fromEntries(keys.map(key=>[key,document.getElementById('rbLink_'+key)?.value||'']));
+  },
   async uploadFile(file){
     if(!file)return;if(file.size>20*1024*1024){this.toast('单文件不能超过 20MB',true);return}
     const fd=new FormData();fd.append('file',file);document.getElementById('rbUploadedFile').textContent='正在上传并识别…';
     try{const uploaded=await this.api('/tools/reimbursement/upload',{method:'POST',body:fd});document.getElementById('rbFileUrl').value=uploaded.full_url||uploaded.preview_url;document.getElementById('rbFileName').value=uploaded.original_name;document.getElementById('rbFileSize').value=uploaded.size||file.size;document.getElementById('rbUploadedFile').textContent=`已上传：${uploaded.original_name}`;
-      const image_base64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file)});const ocr=await this.api('/tools/reimbursement/ocr',{method:'POST',body:{file_id:uploaded.file_id,image_base64}}).catch(()=>null);if(ocr?.success){const d=ocr.data||{};document.getElementById('rbInvNumber').value=d.invoice_number||'';document.getElementById('rbInvDate').value=d.invoice_date||'';document.getElementById('rbInvVendor').value=d.seller_name||'';document.getElementById('rbInvAmount').value=d.amount_excluding_tax||'';document.getElementById('rbInvTax').value=d.tax_amount||'';document.getElementById('rbInvTotal').value=d.total_amount||'';document.getElementById('rbInvDescription').value=d.description||'';this.toast('上传完成，已回填识别结果')}else this.toast('上传完成，请核对并补充发票信息');
+      const image_base64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file)});const ocr=await this.api('/tools/reimbursement/ocr',{method:'POST',body:{file_id:uploaded.file_id,image_base64}}).catch(()=>null);if(ocr?.success){const d=ocr.data||{};document.getElementById('rbInvNumber').value=d.invoice_number||'';document.getElementById('rbInvDate').value=d.invoice_date||'';document.getElementById('rbInvVendor').value=d.seller_name||'';document.getElementById('rbInvAmount').value=d.amount_excluding_tax||'';document.getElementById('rbInvTax').value=d.tax_amount||'';document.getElementById('rbInvTotal').value=d.total_amount||'';document.getElementById('rbInvDescription').value=d.description||'';this.syncLinkedDefaults(true);this.toast('上传完成，已回填发票及关联明细')}else this.toast('上传完成，请核对并补充发票信息');
     }catch(e){document.getElementById('rbUploadedFile').textContent='上传失败';this.toast(e.message,true)}
   },
-  invoicePayload(){const val=id=>document.getElementById(id).value;return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line:val('rbInvProduct'),product_line_code:val('rbInvProductCode'),office:val('rbInvOffice'),customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize')}},
-  async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(id?'发票已更新':'发票已保存');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
+  invoicePayload(){const val=id=>document.getElementById(id).value;return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line:val('rbInvProduct'),product_line_code:val('rbInvProductCode'),office:val('rbInvOffice'),customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
+  async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(this.state.activeLinkedKind?(id?'发票及关联明细已更新':'发票及关联明细已生成'):(id?'发票已更新':'发票已保存'));await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   async deleteInvoice(id){if(!confirm('确定删除这张发票记录及其本地附件吗？'))return;try{await this.api('/tools/reimbursement/api/invoices/'+id,{method:'DELETE'});this.toast('发票已删除');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${!p.is_active?`<button class="rb-btn rb-btn-light" onclick="RB.activatePeriod(${p.id})">设为当前</button>`:''}<button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
   openPeriod(id=null){const p=id?this.state.periods.find(x=>x.id===id):null;const now=new Date(),sm=now.getMonth()+1,em=sm%12+1,ey=now.getFullYear()+(sm===12?1:0);document.getElementById('rbPeriodId').value=p?.id||'';document.getElementById('rbPeriodName').value=p?.name||'';document.getElementById('rbStartYear').value=p?.start_year||now.getFullYear();document.getElementById('rbStartMonth').value=p?.start_month||sm;document.getElementById('rbEndYear').value=p?.end_year||ey;document.getElementById('rbEndMonth').value=p?.end_month||em;this.modal('rbPeriodModal').show()},
@@ -278,8 +313,28 @@ const RB = {
     entertainment:[['date','日期','date'],['category','费用类别','text'],['place','用餐地点/名称','text'],['customer','客户名称','text'],['participants','参与人','text'],['amount','金额','number'],['purpose','事由/产品线','text']],
     vehicle:[['date','日期','date'],['from_location','出发地','text'],['to_location','目的地','text'],['contact','联系人','text'],['km_start','起','number'],['km_end','止','number'],['km_total','公里','number'],['toll_fee','过桥费','number'],['parking_fee','停车费','number'],['remarks','备注','text']],
     travel:[['date','日期','date'],['location','出差地','text'],['customer','客户名称','text'],['expense_type','费用类型','text'],['amount','金额','number'],['purpose','事由/产品线','text']]
-  };Object.entries(schemas).forEach(([kind,fields])=>{const rows=this.state.aux[kind]||[];document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).innerHTML=`<div class="rb-table-wrap"><table class="rb-table rb-aux-table"><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody>${rows.map((r,ri)=>`<tr>${fields.map(f=>`<td><input class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(r[f[0]]??'')}" onchange="RB.setAux('${kind}',${ri},'${f[0]}',this.value)"></td>`).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('')}</tbody></table></div><button class="rb-btn rb-btn-light mt-2" onclick="RB.addAux('${kind}')"><i class="bi bi-plus"></i>添加一行</button>`})},
-  setAux(kind,row,key,value){this.state.aux[kind][row][key]=value},addAux(kind){this.state.aux[kind].push({});this.renderAux()},removeAux(kind,row){this.state.aux[kind].splice(row,1);this.renderAux()},
+  };Object.entries(schemas).forEach(([kind,fields])=>{
+    const rows=this.state.aux[kind]||[],sum=key=>rows.reduce((total,row)=>total+(parseFloat(row[key])||0),0).toFixed(2);
+    const totalKeys=kind==='entertainment'?{amount:sum('amount')}:kind==='vehicle'?{km_total:sum('km_total'),toll_fee:sum('toll_fee'),parking_fee:sum('parking_fee')}:{amount:sum('amount')};
+    const body=rows.map((r,ri)=>`<tr>${fields.map(f=>{const key=f[0],readonly=kind==='vehicle'&&key==='km_total';return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(r[key]??'')}" ${readonly?'readonly title="公里数由止减起自动计算"':''} oninput="RB.setAux('${kind}',${ri},'${key}',this.value)"></td>`}).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('');
+    const footer=`<tr>${fields.map((f,index)=>`<th>${index===0?'合计':(totalKeys[f[0]]??'')}</th>`).join('')}<th></th></tr>`;
+    document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).innerHTML=`<div class="rb-table-wrap"><table class="rb-table rb-aux-table"><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody>${body}</tbody><tfoot>${footer}</tfoot></table></div><button class="rb-btn rb-btn-light mt-2" onclick="RB.addAux('${kind}')"><i class="bi bi-plus"></i>添加一行</button>`;
+  })},
+  setAux(kind,row,key,value){
+    this.state.aux[kind][row][key]=value;
+    if(kind==='vehicle'&&['km_start','km_end'].includes(key)){
+      const item=this.state.aux[kind][row],start=parseFloat(item.km_start),end=parseFloat(item.km_end);
+      item.km_total=Number.isFinite(start)&&Number.isFinite(end)?Math.max(0,end-start).toFixed(2):'';
+      const output=document.getElementById(`rbAux_vehicle_${row}_km_total`);if(output)output.value=item.km_total;
+    }
+    this.updateAuxFooter(kind);
+  },
+  updateAuxFooter(kind){
+    const rows=this.state.aux[kind]||[],sum=key=>rows.reduce((total,row)=>total+(parseFloat(row[key])||0),0).toFixed(2);
+    const pane=document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)),fields=kind==='vehicle'?['km_total','toll_fee','parking_fee']:['amount'];
+    fields.forEach(key=>{const header=[...pane.querySelectorAll('thead th')].findIndex(th=>th.textContent==={km_total:'公里',toll_fee:'过桥费',parking_fee:'停车费',amount:'金额'}[key]);const cell=pane.querySelector(`tfoot th:nth-child(${header+1})`);if(cell)cell.textContent=sum(key)});
+  },
+  addAux(kind){this.state.aux[kind].push({});this.renderAux()},removeAux(kind,row){this.state.aux[kind].splice(row,1);this.renderAux()},
   async saveAux(){const id=+document.getElementById('rbExportPeriod').value;try{await this.api('/tools/reimbursement/api/aux/'+id,{method:'PUT',body:this.state.aux});this.toast('三张明细表已保存')}catch(e){this.toast(e.message,true)}},
   exportFile(kind){const id=+document.getElementById('rbExportPeriod').value;if(!id){this.toast('请先选择周期',true);return}window.location.href=`/tools/reimbursement/api/export/${kind}/${id}`;}
 };
