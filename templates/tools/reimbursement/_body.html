@@ -1,1689 +1,287 @@
-<!-- 报销助手主页面 — 上传→校对→封面→打印 -->
-{% raw %}
 <style>
-  :root {
-    --rb-primary: #198754;
-    --rb-bg: #f6f9fc;
-    --rb-border: #dee2e6;
-    --rb-radius: 0.5rem;
-  }
-
-  /* 步骤条 */
-  .rb-steps { display: flex; margin-bottom: 2rem; }
-  .rb-step { flex: 1; text-align: center; position: relative; }
-  .rb-step::after { content: ''; position: absolute; top: 18px; left: 60%; width: 80%; height: 2px; background: #dee2e6; z-index: 0; }
-  .rb-step:last-child::after { display: none; }
-  .rb-step.active .rb-step-circle { background: var(--rb-primary); color: #fff; border-color: var(--rb-primary); }
-  .rb-step.done .rb-step-circle { background: #d1e7dd; color: var(--rb-primary); border-color: var(--rb-primary); }
-  .rb-step-circle { width: 38px; height: 38px; border-radius: 50%; border: 2px solid #dee2e6; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.9rem; background: #fff; position: relative; z-index: 1; transition: all 0.3s; }
-  .rb-step-label { display: block; margin-top: 0.4rem; font-size: 0.85rem; color: #6c757d; }
-  .rb-step.active .rb-step-label, .rb-step.done .rb-step-label { color: var(--rb-primary); font-weight: 500; }
-
-  /* 拖拽上传区 */
-  .rb-upload-zone { border: 2px dashed #adb5bd; border-radius: var(--rb-radius); padding: 2.5rem; text-align: center; cursor: pointer; transition: all 0.3s; background: #f8f9fa; }
-  .rb-upload-zone:hover, .rb-upload-zone.dragover { border-color: var(--rb-primary); background: #d1e7dd; }
-  .rb-upload-zone i { font-size: 2.5rem; color: var(--rb-primary); }
-
-  /* 缩略图列表 */
-  .rb-thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
-  .rb-thumb-card { border: 1px solid var(--rb-border); border-radius: var(--rb-radius); overflow: hidden; position: relative; background: #fff; cursor: move; }
-  .rb-thumb-card img { width: 100%; height: 120px; object-fit: cover; display: block; }
-  .rb-thumb-card .card-body { padding: 0.5rem; font-size: 0.75rem; color: #6c757d; }
-  .rb-thumb-card .card-body .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-  .rb-thumb-card .btn-remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(220,53,69,0.9); color: #fff; border: none; font-size: 0.7rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .rb-thumb-card .drag-handle { position: absolute; top: 4px; left: 4px; color: #fff; background: rgba(0,0,0,0.4); border-radius: 3px; padding: 1px 5px; font-size: 0.7rem; cursor: grab; }
-  .rb-thumb-card .ocr-badge { position: absolute; bottom: 4px; right: 4px; padding: 1px 6px; border-radius: 3px; font-size: 0.65rem; }
-  .ocr-done { background: #d1e7dd; color: #0f5132; }
-  .ocr-pending { background: #fff3cd; color: #664d03; }
-  .rb-thumb-card img { cursor: pointer; transition: transform 0.2s; }
-  .rb-thumb-card img:hover { transform: scale(1.03); }
-
-  /* 图片放大预览 Lightbox */
-  .rb-lightbox { display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.88); justify-content: center; align-items: center; flex-direction: column; }
-  .rb-lightbox.active { display: flex; }
-  .rb-lightbox img { max-width: 92vw; max-height: 80vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
-  .rb-lightbox .lb-filename { color: #fff; margin-top: 16px; font-size: 0.9rem; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .rb-lightbox .lb-close { position: absolute; top: 20px; right: 28px; color: #fff; font-size: 2rem; cursor: pointer; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.12); border-radius: 50%; transition: background 0.2s; }
-  .rb-lightbox .lb-close:hover { background: rgba(255,255,255,0.25); }
-  .rb-lightbox .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); color: #fff; font-size: 2.2rem; cursor: pointer; width: 50px; height: 60px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border-radius: 8px; transition: background 0.2s; user-select: none; }
-  .rb-lightbox .lb-nav:hover { background: rgba(255,255,255,0.25); }
-  .rb-lightbox .lb-prev { left: 16px; }
-  .rb-lightbox .lb-next { right: 16px; }
-
-  /* 编辑表格 */
-  .rb-table-wrapper { overflow-x: auto; max-height: 55vh; }
-  .rb-table-wrapper table { min-width: 1400px; font-size: 0.8rem; }
-  .rb-table-wrapper th { position: sticky; top: 0; background: #e9ecef; z-index: 2; white-space: nowrap; padding: 0.4rem 0.5rem; font-size: 0.78rem; }
-  .rb-table-wrapper td { padding: 0.25rem 0.3rem; vertical-align: middle; }
-  .rb-table-wrapper input, .rb-table-wrapper select { font-size: 0.78rem; padding: 0.2rem 0.3rem; border: 1px solid #dee2e6; border-radius: 3px; width: 100%; min-width: 60px; }
-  .rb-table-wrapper input:focus, .rb-table-wrapper select:focus { border-color: var(--rb-primary); outline: none; box-shadow: 0 0 0 0.15rem rgba(25,135,84,.15); }
-  .td-narrow input { width: 70px; }
-  .td-code input { width: 50px; }
-  .td-amount input { text-align: right; }
-  .low-confidence { background: #fff3cd !important; }
-
-  /* 辅助表（应酬费/派车/出差） */
-  .rb-aux-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: -0.5rem; padding: 0.5rem; }
-  .rb-aux-wrapper table { font-size: 0.8rem; white-space: nowrap; margin-bottom: 0; }
-  .rb-aux-wrapper th { background: #f0f2f5; font-size: 0.75rem; font-weight: 600; padding: 0.4rem 0.5rem; position: sticky; top: 0; z-index: 1; }
-  .rb-aux-wrapper td { padding: 0.3rem 0.4rem; vertical-align: middle; }
-  .rb-aux-wrapper input, .rb-aux-wrapper select { font-size: 0.8rem; padding: 0.25rem 0.4rem; border: 1px solid #dee2e6; border-radius: 4px; background: #fff; }
-  .rb-aux-wrapper input:focus, .rb-aux-wrapper select:focus { border-color: var(--rb-primary); outline: none; box-shadow: 0 0 0 0.15rem rgba(25,135,84,.15); }
-  .rb-aux-wrapper input[type="date"] { min-width: 110px; }
-  .rb-aux-wrapper input[type="number"] { min-width: 70px; text-align: right; }
-  .rb-aux-wrapper .td-delete { width: 32px; text-align: center; }
-  .rb-aux-wrapper .btn-del-aux { padding: 0 4px; font-size: 0.75rem; line-height: 1.4; }
-
-  /* 封面预览 */
-  .rb-cover-preview { border: 1px solid var(--rb-border); border-radius: var(--rb-radius); padding: 2rem; background: #fff; max-width: 800px; margin: 0 auto; }
-  .rb-cover-preview h4 { text-align: center; font-size: 1.2rem; margin-bottom: 1rem; }
-  .rb-cover-preview table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
-  .rb-cover-preview table td, .rb-cover-preview table th { border: 1px solid #333; padding: 4px 6px; }
-  .rb-cover-preview table th { background: #e9ecef; text-align: center; }
-
-  /* 打印样式 */
-  @media print {
-    body * { visibility: hidden; }
-    #rb-print-area, #rb-print-area * { visibility: visible; }
-    #rb-print-area { position: absolute; left: 0; top: 0; width: 210mm; }
-  }
-
-  .hidden { display: none !important; }
+  .rb-app { --ink:#172033; --muted:#697386; --line:#e6eaf0; --brand:#176b57; --brand-2:#e8f5f0; color:var(--ink); }
+  .rb-shell { background:#f4f7f6; border:1px solid var(--line); border-radius:22px; overflow:hidden; min-height:760px; }
+  .rb-topbar { padding:22px 26px; color:#fff; background:linear-gradient(125deg,#123f36,#176b57 58%,#25836d); position:relative; }
+  .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); }
+  .rb-topbar h2 { font-size:1.35rem; margin:0 0 5px; font-weight:700; letter-spacing:.02em; }
+  .rb-topbar p { margin:0; color:rgba(255,255,255,.72); font-size:.86rem; }
+  .rb-nav { display:flex; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow:auto; scrollbar-width:none; }
+  .rb-nav::-webkit-scrollbar { display:none; }
+  .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; }
+  .rb-nav button.active { color:var(--brand); border-color:var(--brand); }
+  .rb-main { padding:22px; }
+  .rb-view { display:none; }
+  .rb-view.active { display:block; }
+  .rb-card { background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 8px 24px rgba(19,38,31,.045); }
+  .rb-card-head { padding:16px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .rb-card-head h3 { margin:0; font-size:1rem; font-weight:700; }
+  .rb-card-body { padding:18px; }
+  .rb-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:18px; }
+  .rb-kpi { padding:18px; background:#fff; border:1px solid var(--line); border-radius:16px; position:relative; overflow:hidden; }
+  .rb-kpi:after { content:""; position:absolute; right:-16px; bottom:-25px; width:82px; height:82px; border-radius:50%; background:var(--brand-2); }
+  .rb-kpi .label { color:var(--muted); font-size:.78rem; margin-bottom:7px; }
+  .rb-kpi .value { font-size:1.55rem; font-weight:750; letter-spacing:-.03em; }
+  .rb-grid-2 { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.8fr); gap:16px; }
+  .rb-active-period { padding:18px; background:linear-gradient(135deg,#ecf8f3,#fff); border:1px solid #cfe8de; border-radius:14px; }
+  .rb-active-period .name { font-size:1.1rem; font-weight:700; color:var(--brand); }
+  .rb-toolbar { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  .rb-toolbar .form-control,.rb-toolbar .form-select { width:auto; min-width:145px; font-size:.84rem; }
+  .rb-btn { border:1px solid transparent; border-radius:9px; padding:8px 12px; font-size:.82rem; font-weight:650; display:inline-flex; align-items:center; gap:6px; }
+  .rb-btn-primary { background:var(--brand); color:#fff; }
+  .rb-btn-primary:hover { background:#105846; color:#fff; }
+  .rb-btn-light { background:#fff; border-color:var(--line); color:var(--ink); }
+  .rb-btn-danger { background:#fff; border-color:#f1c6c7; color:#b42318; }
+  .rb-table-wrap { overflow:auto; }
+  .rb-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+  .rb-table th { color:#657083; background:#f8fafb; font-size:.75rem; font-weight:700; text-align:left; padding:11px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .rb-table td { padding:11px 12px; border-bottom:1px solid #edf0f3; vertical-align:middle; }
+  .rb-table tr:last-child td { border-bottom:0; }
+  .rb-empty { color:var(--muted); text-align:center; padding:38px 15px!important; }
+  .rb-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:999px; font-size:.72rem; font-weight:650; }
+  .rb-status-pending { color:#8a5a00; background:#fff6dc; }
+  .rb-status-approved { color:#176b57; background:#e8f5f0; }
+  .rb-status-rejected { color:#a12622; background:#feeceb; }
+  .rb-period-grid,.rb-category-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+  .rb-period-card,.rb-category-card { padding:17px; background:#fff; border:1px solid var(--line); border-radius:14px; }
+  .rb-period-card.active { border-color:#76bda8; box-shadow:0 0 0 3px rgba(23,107,87,.08); }
+  .rb-period-card .title,.rb-category-card .title { font-weight:700; margin-bottom:6px; }
+  .rb-meta { color:var(--muted); font-size:.77rem; }
+  .rb-card-actions { display:flex; gap:7px; margin-top:14px; flex-wrap:wrap; }
+  .rb-color { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .rb-summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+  .rb-summary-box { background:#f8faf9; border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .rb-summary-box small { color:var(--muted); }
+  .rb-summary-box strong { display:block; font-size:1.25rem; margin-top:4px; }
+  .rb-aux-tabs { display:flex; gap:7px; margin:18px 0 10px; }
+  .rb-aux-tabs button { border:1px solid var(--line); background:#fff; padding:7px 11px; border-radius:8px; font-size:.78rem; }
+  .rb-aux-tabs button.active { background:var(--brand-2); color:var(--brand); border-color:#a9d6c8; }
+  .rb-aux-pane { display:none; }
+  .rb-aux-pane.active { display:block; }
+  .rb-aux-table input,.rb-aux-table select { min-width:100px; font-size:.78rem; padding:.25rem .4rem; }
+  .rb-upload { border:1.5px dashed #a9c9bf; background:#f4fbf8; border-radius:12px; padding:18px; text-align:center; cursor:pointer; }
+  .rb-upload:hover { border-color:var(--brand); }
+  .rb-file-note { font-size:.76rem; color:var(--muted); margin-top:7px; }
+  .rb-toast { position:fixed; right:24px; bottom:24px; z-index:11000; min-width:260px; max-width:380px; background:#172033; color:#fff; padding:12px 15px; border-radius:11px; box-shadow:0 12px 35px rgba(0,0,0,.22); display:none; font-size:.84rem; }
+  .rb-toast.show { display:block; animation:rbIn .18s ease-out; }
+  .rb-toast.error { background:#9f2925; }
+  @keyframes rbIn { from{transform:translateY(8px);opacity:0} to{transform:none;opacity:1} }
+  @media(max-width:900px){ .rb-kpis{grid-template-columns:repeat(2,1fr)} .rb-grid-2{grid-template-columns:1fr} .rb-period-grid,.rb-category-grid{grid-template-columns:repeat(2,1fr)} }
+  @media(max-width:600px){ .rb-main{padding:14px} .rb-kpis{grid-template-columns:1fr 1fr;gap:9px} .rb-kpi{padding:14px}.rb-period-grid,.rb-category-grid{grid-template-columns:1fr}.rb-topbar{padding:19px}.rb-summary-grid{grid-template-columns:1fr} }
 </style>
 
-<!-- ===== 步骤条 ===== -->
-<div class="rb-steps" id="rbSteps">
-  <div class="rb-step active" data-step="1">
-    <span class="rb-step-circle">1</span>
-    <span class="rb-step-label">上传发票</span>
-  </div>
-  <div class="rb-step" data-step="2">
-    <span class="rb-step-circle">2</span>
-    <span class="rb-step-label">核对明细</span>
-  </div>
-  <div class="rb-step" data-step="3">
-    <span class="rb-step-circle">3</span>
-    <span class="rb-step-label">预览封面</span>
-  </div>
-  <div class="rb-step" data-step="4">
-    <span class="rb-step-circle">4</span>
-    <span class="rb-step-label">打印输出</span>
-  </div>
-</div>
+<div class="rb-app">
+  <div class="rb-shell">
+    <div class="rb-topbar">
+      <h2><i class="bi bi-receipt-cutoff me-2"></i>发票报销管理</h2>
+      <p>发票归档、双月周期、费用分类与财务模板导出</p>
+    </div>
+    <div class="rb-nav" id="rbNav">
+      <button class="active" data-view="dashboard"><i class="bi bi-grid me-1"></i>仪表盘</button>
+      <button data-view="invoices"><i class="bi bi-receipt me-1"></i>发票管理</button>
+      <button data-view="periods"><i class="bi bi-calendar3 me-1"></i>周期管理</button>
+      <button data-view="categories"><i class="bi bi-tags me-1"></i>类别管理</button>
+      <button data-view="export"><i class="bi bi-file-earmark-excel me-1"></i>汇总导出</button>
+    </div>
 
-<!-- ===== 步骤 1：上传发票 ===== -->
-<div id="rbStep1">
-  <!-- 费用期间选择 -->
-  <div class="card mb-3 border-primary">
-    <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
-      <strong class="me-2 small text-nowrap">费用期间：</strong>
-      <select class="form-select form-select-sm" id="rbPeriodSel" style="width:auto;min-width:150px;" onchange="onPeriodSwitch()">
-        <option value="__new__">+ 新建期间</option>
-      </select>
-      <input class="form-control form-control-sm hidden" id="rbPeriodNew" placeholder="如：7-8月" style="width:120px;" onkeydown="if(event.key==='Enter')createPeriod()">
-      <button class="btn btn-outline-primary btn-sm" id="rbPeriodCreateBtn" onclick="createPeriod()" title="创建"><i class="bi bi-check"></i></button>
-      <button class="btn btn-outline-warning btn-sm hidden" id="rbPeriodEditBtn" onclick="startEditPeriod()" title="编辑"><i class="bi bi-pencil"></i></button>
-      <button class="btn btn-outline-danger btn-sm hidden" id="rbPeriodDelBtn" onclick="deletePeriod()" title="删除"><i class="bi bi-trash"></i></button>
-      <span class="text-muted small ms-2" id="rbPeriodInfo"></span>
-    </div>
-  </div>
-  <!-- 报销基本信息 -->
-  <div class="card mb-3">
-    <div class="card-header bg-white">
-      <strong>报销基本信息</strong>
-    </div>
-    <div class="card-body">
-      <div class="row g-2">
-        <div class="col-md-3">
-          <label class="form-label small">报销人姓名 <span class="text-danger">*</span></label>
-          <input class="form-control form-control-sm" id="rbEmpName" placeholder="如：张三" value="张三">
+    <div class="rb-main">
+      <section class="rb-view active" id="rbViewDashboard">
+        <div class="rb-kpis">
+          <div class="rb-kpi"><div class="label">发票总数</div><div class="value" id="rbStatCount">0</div></div>
+          <div class="rb-kpi"><div class="label">累计价税合计</div><div class="value" id="rbStatAmount">¥0.00</div></div>
+          <div class="rb-kpi"><div class="label">待报销</div><div class="value" id="rbStatPending">0</div></div>
+          <div class="rb-kpi"><div class="label">报销周期</div><div class="value" id="rbStatPeriods">0</div></div>
         </div>
-        <div class="col-md-2">
-          <label class="form-label small">部门</label>
-          <select class="form-select form-select-sm" id="rbDept"></select>
+        <div class="rb-grid-2">
+          <div class="rb-card">
+            <div class="rb-card-head"><h3>最近发票</h3><button class="rb-btn rb-btn-light" onclick="RB.showView('invoices')">查看全部</button></div>
+            <div class="rb-table-wrap"><table class="rb-table"><thead><tr><th>发票号码</th><th>开票单位</th><th>类别</th><th>价税合计</th><th>状态</th></tr></thead><tbody id="rbRecentBody"></tbody></table></div>
+          </div>
+          <div class="rb-card">
+            <div class="rb-card-head"><h3>当前周期</h3></div>
+            <div class="rb-card-body" id="rbActivePeriod"></div>
+          </div>
         </div>
-        <div class="col-md-2">
-          <label class="form-label small">办事处</label>
-          <select class="form-select form-select-sm" id="rbOffice">
-            <option value="深圳办">深圳办</option>
+      </section>
+
+      <section class="rb-view" id="rbViewInvoices">
+        <div class="rb-toolbar">
+          <input class="form-control" id="rbSearch" placeholder="搜索发票号码或开票单位">
+          <select class="form-select" id="rbFilterPeriod"></select>
+          <select class="form-select" id="rbFilterCategory"></select>
+          <select class="form-select" id="rbFilterStatus">
+            <option value="">全部状态</option><option value="pending">待报销</option><option value="approved">已通过</option><option value="rejected">已驳回</option>
           </select>
+          <button class="rb-btn rb-btn-light" onclick="RB.loadInvoices(1)"><i class="bi bi-search"></i>筛选</button>
+          <button class="rb-btn rb-btn-primary ms-auto" onclick="RB.openInvoice()"><i class="bi bi-plus-lg"></i>上传发票</button>
         </div>
-        <div class="col-md-2">
-          <label class="form-label small">报销日期</label>
-          <input class="form-control form-control-sm" type="date" id="rbDate">
+        <div class="rb-card">
+          <div class="rb-table-wrap"><table class="rb-table"><thead><tr><th>序号</th><th>发票号码</th><th>开票日期</th><th>开票单位</th><th>类别</th><th>价税合计</th><th>状态</th><th>操作</th></tr></thead><tbody id="rbInvoiceBody"></tbody></table></div>
+          <div class="rb-card-body d-flex justify-content-between align-items-center py-2"><span class="rb-meta" id="rbPageInfo"></span><div class="d-flex gap-2"><button class="rb-btn rb-btn-light" id="rbPrev" onclick="RB.changePage(-1)">上一页</button><button class="rb-btn rb-btn-light" id="rbNext" onclick="RB.changePage(1)">下一页</button></div></div>
         </div>
-        <div class="col-md-3">
-          <label class="form-label small">费用期间</label>
-          <input class="form-control form-control-sm" id="rbPeriod" placeholder="如：7-8月">
+      </section>
+
+      <section class="rb-view" id="rbViewPeriods">
+        <div class="rb-toolbar"><button class="rb-btn rb-btn-primary" onclick="RB.openPeriod()"><i class="bi bi-plus-lg"></i>新增周期</button><button class="rb-btn rb-btn-light" onclick="RB.createNextPeriod()"><i class="bi bi-arrow-right-circle"></i>生成下一周期</button></div>
+        <div class="rb-period-grid" id="rbPeriodGrid"></div>
+      </section>
+
+      <section class="rb-view" id="rbViewCategories">
+        <div class="rb-toolbar"><button class="rb-btn rb-btn-primary" onclick="RB.openCategory()"><i class="bi bi-plus-lg"></i>新增类别</button></div>
+        <div class="rb-category-grid" id="rbCategoryGrid"></div>
+      </section>
+
+      <section class="rb-view" id="rbViewExport">
+        <div class="rb-toolbar"><select class="form-select" id="rbExportPeriod" onchange="RB.loadSummary()"></select><button class="rb-btn rb-btn-light" onclick="RB.loadSummary()"><i class="bi bi-arrow-clockwise"></i>刷新汇总</button></div>
+        <div class="rb-card">
+          <div class="rb-card-head"><h3>周期汇总</h3><div class="d-flex gap-2 flex-wrap"><button class="rb-btn rb-btn-primary" onclick="RB.exportFile('cover')"><i class="bi bi-download"></i>导出封面及费用分类表</button><button class="rb-btn rb-btn-primary" onclick="RB.exportFile('details')"><i class="bi bi-download"></i>导出应酬/出差/派车明细</button></div></div>
+          <div class="rb-card-body">
+            <div class="rb-summary-grid" id="rbSummaryCards"></div>
+            <div class="rb-table-wrap"><table class="rb-table"><thead><tr><th>类别</th><th>发票数量</th><th>金额合计</th><th>税额合计</th><th>价税合计</th></tr></thead><tbody id="rbSummaryBody"></tbody></table></div>
+            <div class="rb-aux-tabs"><button class="active" data-aux="entertainment">应酬费明细</button><button data-aux="vehicle">派车单</button><button data-aux="travel">出差明细</button></div>
+            <div id="rbAuxEntertainment" class="rb-aux-pane active"></div>
+            <div id="rbAuxVehicle" class="rb-aux-pane"></div>
+            <div id="rbAuxTravel" class="rb-aux-pane"></div>
+            <button class="rb-btn rb-btn-light mt-3" onclick="RB.saveAux()"><i class="bi bi-save"></i>保存三张明细表</button>
+          </div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 上传区 -->
-  <div class="rb-upload-zone" id="rbUploadZone">
-    <i class="bi bi-cloud-upload"></i>
-    <p class="mt-2 mb-1 fw-bold">点击或拖拽上传发票</p>
-    <p class="text-muted small mb-0">支持 JPG / PNG / PDF，可一次选择多个文件</p>
-    <input type="file" id="rbFileInput" multiple accept=".jpg,.jpeg,.png,.pdf,.bmp,.gif,.webp" hidden>
-  </div>
-
-  <div class="rb-thumb-grid" id="rbThumbGrid"></div>
-
-  <div class="mt-3 d-flex gap-2 justify-content-between">
-    <div>
-      <button class="btn btn-outline-danger btn-sm" id="rbClearBtn"><i class="bi bi-trash"></i> 清空全部</button>
-      <button class="btn btn-outline-secondary btn-sm ms-1" id="rbDownloadTpl"><i class="bi bi-download"></i> 下载空白模板</button>
-    </div>
-    <button class="btn btn-primary" id="rbNextToStep2">下一步：核对明细 <i class="bi bi-arrow-right"></i></button>
-  </div>
-</div>
-
-<!-- ===== 步骤 2：核对发票明细 ===== -->
-<div id="rbStep2" class="hidden">
-  <div class="alert alert-info small mb-3">
-    <i class="bi bi-info-circle"></i> 请逐行填写或修正发票信息。点击单元格直接编辑。
-    每张发票需指定<strong>产品线</strong>和<strong>费用类别</strong>。
-  </div>
-
-  <div class="d-flex gap-2 mb-3">
-    <button class="btn btn-outline-success btn-sm" id="rbAddRow"><i class="bi bi-plus-circle"></i> 手动添加一行</button>
-    <button class="btn btn-outline-secondary btn-sm" id="rbBackToStep1"><i class="bi bi-arrow-left"></i> 返回上传</button>
-    <button class="btn btn-primary btn-sm ms-auto" id="rbGenCover">生成预览封面</button>
-  </div>
-
-  <div class="rb-table-wrapper">
-    <table class="table table-bordered table-sm bg-white" id="rbEditTable">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>发票号码</th>
-          <th>开票日期</th>
-          <th>销方名称</th>
-          <th>金额(不含税)</th>
-          <th>税额</th>
-          <th>价税合计</th>
-          <th>产品线</th>
-          <th>代码</th>
-          <th>办事处</th>
-          <th>费用类别</th>
-          <th>客户等级</th>
-          <th>明细摘要</th>
-          <th>备注</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="rbEditTbody"></tbody>
-    </table>
-  </div>
-
-  <!-- 费用类别汇总预览 (小表格) -->
-  <div class="card mt-3" id="rbSummaryCard">
-    <div class="card-header bg-light small fw-bold">费用类别汇总</div>
-    <div class="card-body p-2" id="rbSummaryBody"></div>
-  </div>
-
-  <!-- 应酬费明细分表 -->
-  <div class="card mt-3" id="rbEntCard">
-    <div class="card-header bg-light small d-flex justify-content-between align-items-center">
-      <span class="fw-bold">应酬费明细表</span>
-      <button class="btn btn-outline-success btn-sm" id="rbAddEntRow"><i class="bi bi-plus-circle"></i> 添加</button>
-    </div>
-    <div class="card-body p-2">
-      <div class="rb-aux-wrapper">
-        <table class="table table-bordered table-sm mb-0" id="rbEntTable">
-          <thead><tr><th>日期</th><th>费用类别</th><th>用餐地点/名称</th><th>客户名称</th><th>参与人</th><th>金额</th><th>事由/产品线</th><th class="td-delete"></th></tr></thead>
-          <tbody id="rbEntTbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- 派车单 -->
-  <div class="card mt-3" id="rbVehCard">
-    <div class="card-header bg-light small d-flex justify-content-between align-items-center">
-      <span class="fw-bold">派车单</span>
-      <button class="btn btn-outline-success btn-sm" id="rbAddVehRow"><i class="bi bi-plus-circle"></i> 添加</button>
-    </div>
-    <div class="card-body p-2">
-      <div class="rb-aux-wrapper">
-        <table class="table table-bordered table-sm mb-0" id="rbVehTable">
-          <thead><tr><th>日期</th><th>出发地</th><th>目的地</th><th>联系人</th><th>起</th><th>止</th><th>公里</th><th>过桥费</th><th>停车费</th><th>备注</th><th class="td-delete"></th></tr></thead>
-          <tbody id="rbVehTbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- 出差明细 -->
-  <div class="card mt-3" id="rbTravelCard">
-    <div class="card-header bg-light small d-flex justify-content-between align-items-center">
-      <span class="fw-bold">出差明细表</span>
-      <button class="btn btn-outline-success btn-sm" id="rbAddTravelRow"><i class="bi bi-plus-circle"></i> 添加</button>
-    </div>
-    <div class="card-body p-2">
-      <div class="rb-aux-wrapper">
-        <table class="table table-bordered table-sm mb-0" id="rbTravelTable">
-          <thead><tr><th>日期</th><th>出差地</th><th>客户名称</th><th>费用类型</th><th>金额</th><th>事由/产品线</th><th class="td-delete"></th></tr></thead>
-          <tbody id="rbTravelTbody"></tbody>
-        </table>
-      </div>
+      </section>
     </div>
   </div>
 </div>
 
-<!-- ===== 步骤 3：预览封面 ===== -->
-<div id="rbStep3" class="hidden">
-  <div class="d-flex gap-2 mb-3 flex-wrap">
-    <button class="btn btn-outline-secondary btn-sm" id="rbBackToStep2"><i class="bi bi-arrow-left"></i> 返回编辑</button>
-    <button class="btn btn-primary btn-sm ms-auto" id="rbNextToStep4">下一步：批量打印原始发票 <i class="bi bi-arrow-right"></i></button>
-    <button class="btn btn-success btn-sm" id="rbPrintCover"><i class="bi bi-printer"></i> 打印报销封面</button>
-    <button class="btn btn-outline-success btn-sm" id="rbExportCover"><i class="bi bi-file-earmark-excel"></i> 导出封面文件</button>
-    <button class="btn btn-outline-success btn-sm" id="rbExportDetails"><i class="bi bi-file-earmark-excel"></i> 导出明细文件</button>
-  </div>
-  <div id="rbCoverPreview" class="rb-cover-preview"></div>
-</div>
-
-<!-- ===== 步骤 4：打印发票 ===== -->
-<div id="rbStep4" class="hidden">
-  <h5 class="mb-3">原始发票批量打印</h5>
-  <div class="d-flex gap-3 align-items-center mb-3">
-    <div>
-      <label class="form-label small mb-1">每页发票数</label>
-      <select class="form-select form-select-sm" id="rbLayout" style="width:120px">
-        <option value="2">每页 2 张</option>
-        <option value="4">每页 4 张</option>
-      </select>
+<div class="modal fade" id="rbInvoiceModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="rbInvoiceTitle">新增发票</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input type="hidden" id="rbInvoiceId">
+    <div class="rb-upload mb-3" onclick="document.getElementById('rbInvoiceFile').click()"><i class="bi bi-cloud-arrow-up fs-3 text-success"></i><div class="fw-semibold mt-1">点击选择或更换发票文件</div><div class="rb-file-note">JPG、PNG 或 PDF，单文件最大 20MB；上传后自动尝试 OCR</div><input type="file" id="rbInvoiceFile" accept=".jpg,.jpeg,.png,.pdf" hidden></div>
+    <div class="rb-file-note mb-3" id="rbUploadedFile">尚未上传文件</div>
+    <input type="hidden" id="rbFileUrl"><input type="hidden" id="rbFileName"><input type="hidden" id="rbFileSize">
+    <div class="row g-3">
+      <div class="col-md-3"><label class="form-label">报销周期 *</label><select class="form-select" id="rbInvPeriod"></select></div>
+      <div class="col-md-3"><label class="form-label">费用类别</label><select class="form-select" id="rbInvCategory"></select></div>
+      <div class="col-md-3"><label class="form-label">报销状态</label><select class="form-select" id="rbInvStatus"><option value="pending">待报销</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select></div>
+      <div class="col-md-3"><label class="form-label">开票日期</label><input type="date" class="form-control" id="rbInvDate"></div>
+      <div class="col-md-4"><label class="form-label">发票号码</label><input class="form-control" id="rbInvNumber"></div>
+      <div class="col-md-8"><label class="form-label">开票单位</label><input class="form-control" id="rbInvVendor"></div>
+      <div class="col-md-4"><label class="form-label">金额（不含税）</label><input type="number" step="0.01" class="form-control" id="rbInvAmount"></div>
+      <div class="col-md-4"><label class="form-label">税额</label><input type="number" step="0.01" class="form-control" id="rbInvTax"></div>
+      <div class="col-md-4"><label class="form-label">价税合计</label><input type="number" step="0.01" class="form-control" id="rbInvTotal"></div>
+      <div class="col-md-4"><label class="form-label">产品线</label><input class="form-control" list="rbProductLines" id="rbInvProduct" onchange="RB.syncProductCode()"><datalist id="rbProductLines"></datalist></div>
+      <div class="col-md-2"><label class="form-label">产品线代码</label><input class="form-control" id="rbInvProductCode"></div>
+      <div class="col-md-3"><label class="form-label">办事处</label><input class="form-control" id="rbInvOffice" value="深圳办"></div>
+      <div class="col-md-3"><label class="form-label">客户等级</label><select class="form-select" id="rbInvLevel"><option value="">未分类</option><option>0-1</option><option>level 1</option><option>level 2</option><option>level 3</option></select></div>
+      <div class="col-md-6"><label class="form-label">摘要</label><input class="form-control" id="rbInvDescription"></div>
+      <div class="col-md-6"><label class="form-label">备注</label><input class="form-control" id="rbInvRemarks"></div>
     </div>
-    <button class="btn btn-outline-primary btn-sm" id="rbPreviewLayout">预览排版</button>
-    <button class="btn btn-success btn-sm" id="rbPrintInvoices"><i class="bi bi-printer"></i> 打印原始发票</button>
-    <button class="btn btn-outline-secondary btn-sm" id="rbBackToStep3"><i class="bi bi-arrow-left"></i> 返回封面</button>
   </div>
-  <div id="rbInvoiceLayoutPreview" style="max-width:800px;margin:0 auto;"></div>
-</div>
+  <div class="modal-footer"><button class="rb-btn rb-btn-light" data-bs-dismiss="modal">取消</button><button class="rb-btn rb-btn-primary" onclick="RB.saveInvoice()">保存发票</button></div>
+</div></div></div>
 
-<!-- ===== 隐藏打印区 ===== -->
-<div id="rbPrintArea" style="display:none;"></div>
+<div class="modal fade" id="rbPeriodModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">报销周期</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"><input type="hidden" id="rbPeriodId"><div class="mb-3"><label class="form-label">周期名称</label><input class="form-control" id="rbPeriodName" placeholder="留空可自动生成"></div><div class="row g-2"><div class="col-6"><label class="form-label">开始年份</label><input type="number" class="form-control" id="rbStartYear"></div><div class="col-6"><label class="form-label">开始月份</label><input type="number" min="1" max="12" class="form-control" id="rbStartMonth"></div><div class="col-6"><label class="form-label">结束年份</label><input type="number" class="form-control" id="rbEndYear"></div><div class="col-6"><label class="form-label">结束月份</label><input type="number" min="1" max="12" class="form-control" id="rbEndMonth"></div></div></div>
+  <div class="modal-footer"><button class="rb-btn rb-btn-light" data-bs-dismiss="modal">取消</button><button class="rb-btn rb-btn-primary" onclick="RB.savePeriod()">保存</button></div>
+</div></div></div>
 
-<!-- ===== 图片放大预览 Lightbox ===== -->
-<div class="rb-lightbox" id="rbLightbox" onclick="closeLightbox(event)">
-  <span class="lb-close" onclick="closeLightbox()">&times;</span>
-  <span class="lb-nav lb-prev" onclick="event.stopPropagation();navLightbox(-1)">&#8249;</span>
-  <span class="lb-nav lb-next" onclick="event.stopPropagation();navLightbox(1)">&#8250;</span>
-  <img id="rbLightboxImg" src="" alt="" onclick="event.stopPropagation()">
-  <div class="lb-filename" id="rbLightboxName"></div>
-</div>
+<div class="modal fade" id="rbCategoryModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">费用类别</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"><input type="hidden" id="rbCategoryId"><div class="mb-3"><label class="form-label">类别名称</label><input class="form-control" id="rbCategoryName"></div><div class="row g-2"><div class="col-6"><label class="form-label">导出映射</label><select class="form-select" id="rbCategoryKey"><option value="entertainment">招待费</option><option value="travel_transport">出差交通费</option><option value="travel_hotel">出差住宿费</option><option value="local_transport">市内交通费</option><option value="vehicle">车辆费用</option><option value="communication">通讯费</option><option value="office_supplies">办公费</option><option value="delivery">快递费</option><option value="welfare">福利</option><option value="other">其他</option></select></div><div class="col-6"><label class="form-label">标签颜色</label><input type="color" class="form-control form-control-color w-100" id="rbCategoryColor" value="#64748b"></div></div><div class="mt-3"><label class="form-label">描述</label><input class="form-control" id="rbCategoryDesc"></div></div>
+  <div class="modal-footer"><button class="rb-btn rb-btn-light" data-bs-dismiss="modal">取消</button><button class="rb-btn rb-btn-primary" onclick="RB.saveCategory()">保存</button></div>
+</div></div></div>
+<div class="rb-toast" id="rbToast"></div>
 
 <script>
-// ===== 全局状态 =====
-const STATE = {
-  invoices: [],       // { file_id, filename, original_name, preview_url, data:{...}, product_line, expense_category, ... }
-  header: { employee_name:'张三', department:'', date:'', period:'', office:'深圳办', expense_period:'' },
-  reference: null,
-  entertainment: [],
-  vehicles: [],
-  travels: [],
-  currentPeriod: '',   // 当前期间
-  allPeriods: [],      // 已有期间列表
-  _saveTimer: null,    // 防抖
-  _rawFiles: {},       // file_id → File 对象（浏览器内存，不序列化）
+const RB = {
+  state:{periods:[],categories:[],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
+  modal(name){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(name)); },
+  anonId(){ let id=localStorage.getItem('rb_anon_id'); if(!id){id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);localStorage.setItem('rb_anon_id',id)} return id; },
+  async api(url,options={}){ options.headers={...options.headers,'X-RB-Anon-Id':this.anonId()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
+  toast(message,error=false){ const el=document.getElementById('rbToast'); el.textContent=message; el.className='rb-toast show'+(error?' error':''); clearTimeout(this.toastTimer); this.toastTimer=setTimeout(()=>el.className='rb-toast',2800); },
+  money(v){return '¥'+Number(v||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})},
+  esc(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML},
+  status(v){return `<span class="rb-badge rb-status-${v.status}">${this.esc(v.status_label||v.status)}</span>`},
+  async init(){
+    document.querySelectorAll('#rbNav button').forEach(b=>b.addEventListener('click',()=>this.showView(b.dataset.view)));
+    document.querySelectorAll('.rb-aux-tabs button').forEach(b=>b.addEventListener('click',()=>this.showAux(b.dataset.aux)));
+    document.getElementById('rbInvoiceFile').addEventListener('change',e=>this.uploadFile(e.target.files[0]));
+    document.getElementById('rbInvAmount').addEventListener('input',()=>this.calcTotal());
+    document.getElementById('rbInvTax').addEventListener('input',()=>this.calcTotal());
+    document.getElementById('rbSearch').addEventListener('keydown',e=>{if(e.key==='Enter')this.loadInvoices(1)});
+    try{ this.state.reference=await this.api('/tools/reimbursement/reference'); await this.reload(); }catch(e){this.toast(e.message,true)}
+  },
+  async reload(){
+    const data=await this.api('/tools/reimbursement/api/bootstrap');
+    Object.assign(this.state,data);
+    this.renderDashboard();this.fillSelectors();this.renderPeriods();this.renderCategories();
+  },
+  showView(name){
+    document.querySelectorAll('#rbNav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
+    document.querySelectorAll('.rb-view').forEach(v=>v.classList.remove('active'));
+    document.getElementById('rbView'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
+    if(name==='invoices')this.loadInvoices(1); if(name==='export')this.loadSummary();
+  },
+  renderDashboard(){
+    const s=this.state.stats||{}; document.getElementById('rbStatCount').textContent=s.invoice_count||0;document.getElementById('rbStatAmount').textContent=this.money(s.total_amount);document.getElementById('rbStatPending').textContent=s.pending_count||0;document.getElementById('rbStatPeriods').textContent=this.state.periods.length;
+    document.getElementById('rbRecentBody').innerHTML=this.state.recent.length?this.state.recent.map(i=>`<tr><td>${this.esc(i.invoice_number||'—')}</td><td>${this.esc(i.vendor||'—')}</td><td>${i.category?`<span class="rb-badge" style="color:${i.category.color};background:${i.category.color}18"><span class="rb-color" style="background:${i.category.color}"></span>${this.esc(i.category.name)}</span>`:'—'}</td><td>${this.money(i.total_amount)}</td><td>${this.status(i)}</td></tr>`).join(''):'<tr><td colspan="5" class="rb-empty">还没有发票记录</td></tr>';
+    const p=this.state.periods.find(x=>x.is_active)||this.state.periods[0];
+    document.getElementById('rbActivePeriod').innerHTML=p?`<div class="rb-active-period"><div class="rb-meta mb-1">正在使用</div><div class="name">${this.esc(p.name)}</div><div class="rb-meta mt-2">${p.start_year}.${p.start_month} — ${p.end_year}.${p.end_month}</div><hr><div class="d-flex justify-content-between"><span>${p.invoice_count} 张发票</span><strong>${this.money(p.total_amount)}</strong></div></div>`:`<div class="rb-empty">尚未创建周期<br><button class="rb-btn rb-btn-primary mt-3" onclick="RB.showView('periods');RB.openPeriod()">创建第一个周期</button></div>`;
+  },
+  fillSelectors(){
+    const periodOptions='<option value="">全部周期</option>'+this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
+    const categoryOptions='<option value="">全部类别</option>'+this.state.categories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
+    document.getElementById('rbFilterPeriod').innerHTML=periodOptions;document.getElementById('rbFilterCategory').innerHTML=categoryOptions;
+    document.getElementById('rbInvPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
+    document.getElementById('rbInvCategory').innerHTML='<option value="">未分类</option>'+this.state.categories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
+    const selected=document.getElementById('rbExportPeriod').value;document.getElementById('rbExportPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}" ${String(p.id)===selected?'selected':''}>${this.esc(p.name)}</option>`).join('');
+    const pl=this.state.reference?.product_lines||[];document.getElementById('rbProductLines').innerHTML=pl.map(p=>`<option value="${this.esc(p.name)}"></option>`).join('');
+  },
+  async loadInvoices(page=1){
+    const q=new URLSearchParams({page,per_page:20});[['q','rbSearch'],['period_id','rbFilterPeriod'],['category_id','rbFilterCategory'],['status','rbFilterStatus']].forEach(([k,id])=>{const v=document.getElementById(id).value;if(v)q.set(k,v)});
+    try{const d=await this.api('/tools/reimbursement/api/invoices?'+q);this.state.invoices=d.invoices;this.state.page=d.pagination.page;this.state.pages=d.pagination.pages;this.renderInvoices(d.pagination)}catch(e){this.toast(e.message,true)}
+  },
+  renderInvoices(p){
+    document.getElementById('rbInvoiceBody').innerHTML=this.state.invoices.length?this.state.invoices.map((i,n)=>`<tr><td>${(p.page-1)*p.per_page+n+1}</td><td>${this.esc(i.invoice_number||'—')}</td><td>${i.invoice_date||'—'}</td><td>${this.esc(i.vendor||'—')}</td><td>${i.category?`<span class="rb-badge" style="color:${i.category.color};background:${i.category.color}18">${this.esc(i.category.name)}</span>`:'—'}</td><td><strong>${this.money(i.total_amount)}</strong></td><td>${this.status(i)}</td><td><div class="d-flex gap-1">${i.file_url?`<a class="rb-btn rb-btn-light py-1" href="${this.esc(i.file_url)}" target="_blank">预览</a>`:''}<button class="rb-btn rb-btn-light py-1" onclick="RB.openInvoice(${i.id})">编辑</button><button class="rb-btn rb-btn-danger py-1" onclick="RB.deleteInvoice(${i.id})">删除</button></div></td></tr>`).join(''):'<tr><td colspan="8" class="rb-empty">没有符合条件的发票</td></tr>';
+    document.getElementById('rbPageInfo').textContent=`第 ${p.page}/${p.pages} 页，共 ${p.total} 条`;document.getElementById('rbPrev').disabled=p.page<=1;document.getElementById('rbNext').disabled=p.page>=p.pages;
+  },
+  changePage(delta){const p=this.state.page+delta;if(p>=1&&p<=this.state.pages)this.loadInvoices(p)},
+  openInvoice(id=null){
+    const i=id?this.state.invoices.find(x=>x.id===id):null;document.getElementById('rbInvoiceTitle').textContent=i?'编辑发票':'新增发票';
+    const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office||this.state.periods.find(p=>p.is_active)?.office||'深圳办',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
+    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);document.getElementById('rbUploadedFile').textContent=i?.file_name?`已关联：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.modal('rbInvoiceModal').show();
+  },
+  calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2)},
+  syncProductCode(){const name=document.getElementById('rbInvProduct').value;const p=(this.state.reference?.product_lines||[]).find(x=>x.name===name);if(p)document.getElementById('rbInvProductCode').value=p.code},
+  async uploadFile(file){
+    if(!file)return;if(file.size>20*1024*1024){this.toast('单文件不能超过 20MB',true);return}
+    const fd=new FormData();fd.append('file',file);document.getElementById('rbUploadedFile').textContent='正在上传并识别…';
+    try{const uploaded=await this.api('/tools/reimbursement/upload',{method:'POST',body:fd});document.getElementById('rbFileUrl').value=uploaded.full_url||uploaded.preview_url;document.getElementById('rbFileName').value=uploaded.original_name;document.getElementById('rbFileSize').value=uploaded.size||file.size;document.getElementById('rbUploadedFile').textContent=`已上传：${uploaded.original_name}`;
+      const image_base64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file)});const ocr=await this.api('/tools/reimbursement/ocr',{method:'POST',body:{file_id:uploaded.file_id,image_base64}}).catch(()=>null);if(ocr?.success){const d=ocr.data||{};document.getElementById('rbInvNumber').value=d.invoice_number||'';document.getElementById('rbInvDate').value=d.invoice_date||'';document.getElementById('rbInvVendor').value=d.seller_name||'';document.getElementById('rbInvAmount').value=d.amount_excluding_tax||'';document.getElementById('rbInvTax').value=d.tax_amount||'';document.getElementById('rbInvTotal').value=d.total_amount||'';document.getElementById('rbInvDescription').value=d.description||'';this.toast('上传完成，已回填识别结果')}else this.toast('上传完成，请核对并补充发票信息');
+    }catch(e){document.getElementById('rbUploadedFile').textContent='上传失败';this.toast(e.message,true)}
+  },
+  invoicePayload(){const val=id=>document.getElementById(id).value;return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line:val('rbInvProduct'),product_line_code:val('rbInvProductCode'),office:val('rbInvOffice'),customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize')}},
+  async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(id?'发票已更新':'发票已保存');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
+  async deleteInvoice(id){if(!confirm('确定删除这张发票记录及其本地附件吗？'))return;try{await this.api('/tools/reimbursement/api/invoices/'+id,{method:'DELETE'});this.toast('发票已删除');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
+  renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${!p.is_active?`<button class="rb-btn rb-btn-light" onclick="RB.activatePeriod(${p.id})">设为当前</button>`:''}<button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
+  openPeriod(id=null){const p=id?this.state.periods.find(x=>x.id===id):null;const now=new Date(),sm=now.getMonth()+1,em=sm%12+1,ey=now.getFullYear()+(sm===12?1:0);document.getElementById('rbPeriodId').value=p?.id||'';document.getElementById('rbPeriodName').value=p?.name||'';document.getElementById('rbStartYear').value=p?.start_year||now.getFullYear();document.getElementById('rbStartMonth').value=p?.start_month||sm;document.getElementById('rbEndYear').value=p?.end_year||ey;document.getElementById('rbEndMonth').value=p?.end_month||em;this.modal('rbPeriodModal').show()},
+  async savePeriod(){const id=document.getElementById('rbPeriodId').value,v=x=>document.getElementById(x).value,p={name:v('rbPeriodName'),start_year:+v('rbStartYear'),start_month:+v('rbStartMonth'),end_year:+v('rbEndYear'),end_month:+v('rbEndMonth')};try{await this.api('/tools/reimbursement/api/periods'+(id?'/'+id:''),{method:id?'PUT':'POST',body:p});this.modal('rbPeriodModal').hide();this.toast('周期已保存');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async createNextPeriod(){try{await this.api('/tools/reimbursement/api/periods/next',{method:'POST',body:{}});this.toast('下一周期已生成');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async activatePeriod(id){const p=this.state.periods.find(x=>x.id===id);try{await this.api('/tools/reimbursement/api/periods/'+id,{method:'PUT',body:{start_year:p.start_year,start_month:p.start_month,end_year:p.end_year,end_month:p.end_month,name:p.name,is_active:true}});this.toast('当前周期已切换');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async deletePeriod(id){if(!confirm('确定删除这个周期吗？若含发票将再次确认。'))return;try{await this.api('/tools/reimbursement/api/periods/'+id,{method:'DELETE'});this.toast('周期已删除');await this.reload()}catch(e){if(e.data?.needs_confirmation&&confirm(`该周期有 ${e.data.invoice_count} 张发票，仍要全部删除吗？`)){await this.api('/tools/reimbursement/api/periods/'+id+'?force=1',{method:'DELETE'});this.toast('周期及发票已删除');await this.reload()}else if(!e.data?.needs_confirmation)this.toast(e.message,true)}},
+  renderCategories(){document.getElementById('rbCategoryGrid').innerHTML=this.state.categories.map(c=>`<div class="rb-category-card"><div class="d-flex align-items-center gap-2"><span class="rb-color" style="background:${c.color};width:12px;height:12px"></span><div class="title mb-0">${this.esc(c.name)}</div></div><div class="rb-meta mt-2">${this.esc(c.description||'暂无描述')}</div><div class="rb-meta mt-2">导出映射：${this.esc(c.export_key)}</div><div class="rb-card-actions"><button class="rb-btn rb-btn-light" onclick="RB.openCategory(${c.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deleteCategory(${c.id})">删除</button></div></div>`).join('')},
+  openCategory(id=null){const c=id?this.state.categories.find(x=>x.id===id):null;document.getElementById('rbCategoryId').value=c?.id||'';document.getElementById('rbCategoryName').value=c?.name||'';document.getElementById('rbCategoryKey').value=c?.export_key||'other';document.getElementById('rbCategoryColor').value=c?.color||'#64748b';document.getElementById('rbCategoryDesc').value=c?.description||'';this.modal('rbCategoryModal').show()},
+  async saveCategory(){const id=document.getElementById('rbCategoryId').value,v=x=>document.getElementById(x).value;try{await this.api('/tools/reimbursement/api/categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body:{name:v('rbCategoryName'),export_key:v('rbCategoryKey'),color:v('rbCategoryColor'),description:v('rbCategoryDesc')}});this.modal('rbCategoryModal').hide();this.toast('类别已保存');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async deleteCategory(id){const targets=this.state.categories.filter(x=>x.id!==id);if(!confirm('确定删除这个类别吗？有关联发票时需迁移。'))return;try{await this.api('/tools/reimbursement/api/categories/'+id,{method:'DELETE'});this.toast('类别已删除');await this.reload()}catch(e){if(e.data?.needs_migration){const name=prompt(`该类别有 ${e.data.invoice_count} 张发票。请输入迁移目标类别名称：`,targets[0]?.name||'');const target=targets.find(x=>x.name===name);if(!target){this.toast('未找到迁移目标类别',true);return}await this.api(`/tools/reimbursement/api/categories/${id}?migrate_to=${target.id}`,{method:'DELETE'});this.toast('发票已迁移，类别已删除');await this.reload()}else this.toast(e.message,true)}},
+  async loadSummary(){const id=+document.getElementById('rbExportPeriod').value;if(!id){document.getElementById('rbSummaryBody').innerHTML='<tr><td colspan="5" class="rb-empty">请先创建并选择报销周期</td></tr>';return}try{const d=await this.api('/tools/reimbursement/api/summary/'+id);this.state.summary=d.summary;this.state.aux=d.aux;this.renderSummary()}catch(e){this.toast(e.message,true)}},
+  renderSummary(){const s=this.state.summary;document.getElementById('rbSummaryCards').innerHTML=`<div class="rb-summary-box"><small>发票数量</small><strong>${s.invoice_count} 张</strong></div><div class="rb-summary-box"><small>税额合计</small><strong>${this.money(s.tax_amount)}</strong></div><div class="rb-summary-box"><small>价税合计</small><strong>${this.money(s.total_amount)}</strong></div>`;document.getElementById('rbSummaryBody').innerHTML=s.by_category.map(c=>`<tr><td><span class="rb-color me-2" style="background:${c.color}"></span>${this.esc(c.name)}</td><td>${c.invoice_count}</td><td>${this.money(c.amount)}</td><td>${this.money(c.tax_amount)}</td><td><strong>${this.money(c.total_amount)}</strong></td></tr>`).join('');this.renderAux()},
+  showAux(kind){document.querySelectorAll('.rb-aux-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.aux===kind));document.querySelectorAll('.rb-aux-pane').forEach(p=>p.classList.remove('active'));document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).classList.add('active')},
+  renderAux(){const schemas={
+    entertainment:[['date','日期','date'],['category','费用类别','text'],['place','用餐地点/名称','text'],['customer','客户名称','text'],['participants','参与人','text'],['amount','金额','number'],['purpose','事由/产品线','text']],
+    vehicle:[['date','日期','date'],['from_location','出发地','text'],['to_location','目的地','text'],['contact','联系人','text'],['km_start','起','number'],['km_end','止','number'],['km_total','公里','number'],['toll_fee','过桥费','number'],['parking_fee','停车费','number'],['remarks','备注','text']],
+    travel:[['date','日期','date'],['location','出差地','text'],['customer','客户名称','text'],['expense_type','费用类型','text'],['amount','金额','number'],['purpose','事由/产品线','text']]
+  };Object.entries(schemas).forEach(([kind,fields])=>{const rows=this.state.aux[kind]||[];document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).innerHTML=`<div class="rb-table-wrap"><table class="rb-table rb-aux-table"><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody>${rows.map((r,ri)=>`<tr>${fields.map(f=>`<td><input class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(r[f[0]]??'')}" onchange="RB.setAux('${kind}',${ri},'${f[0]}',this.value)"></td>`).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('')}</tbody></table></div><button class="rb-btn rb-btn-light mt-2" onclick="RB.addAux('${kind}')"><i class="bi bi-plus"></i>添加一行</button>`})},
+  setAux(kind,row,key,value){this.state.aux[kind][row][key]=value},addAux(kind){this.state.aux[kind].push({});this.renderAux()},removeAux(kind,row){this.state.aux[kind].splice(row,1);this.renderAux()},
+  async saveAux(){const id=+document.getElementById('rbExportPeriod').value;try{await this.api('/tools/reimbursement/api/aux/'+id,{method:'PUT',body:this.state.aux});this.toast('三张明细表已保存')}catch(e){this.toast(e.message,true)}},
+  exportFile(kind){const id=+document.getElementById('rbExportPeriod').value;if(!id){this.toast('请先选择周期',true);return}window.location.href=`/tools/reimbursement/api/export/${kind}/${id}`;}
 };
-
-// ===== 初始化 =====
-document.addEventListener('DOMContentLoaded', async () => {
-  // 加载参考数据
-  const resp = await fetch('/tools/reimbursement/reference');
-  STATE.reference = await resp.json();
-  fillSelect('rbDept', STATE.reference.departments);
-  fillSelect('rbOffice', STATE.reference.offices);
-
-  // 加载期间列表（替代 sessionStorage）
-  await loadPeriods();
-  bindEvents();
-});
-
-// ===== 持久化存储 =====
-function getAnonId() {
-  // Vercel serverless 会在冷启动时丢失 Flask session — 用 localStorage 兜底
-  let aid = localStorage.getItem('rb_anon_id');
-  if (!aid) {
-    // 首次访问时生成一个稳定 ID
-    aid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now());
-    localStorage.setItem('rb_anon_id', aid);
-  }
-  return aid;
-}
-
-function rbFetch(url, options = {}) {
-  options.headers = {
-    ...options.headers,
-    'X-RB-Anon-Id': getAnonId(),
-  };
-  return fetch(url, options);
-}
-
-function saveState() {
-  // 防抖 1 秒后自动保存到后端
-  clearTimeout(STATE._saveTimer);
-  STATE._saveTimer = setTimeout(() => _doSave(), 1000);
-}
-
-function saveStateNow() {
-  // 立即保存（切换期间前用）
-  clearTimeout(STATE._saveTimer);
-  return _doSave();
-}
-
-async function _doSave() {
-  if (!STATE.currentPeriod) return;
-  try {
-    const payload = {
-      period: STATE.currentPeriod,
-      data: {
-        invoices: STATE.invoices,
-        header: STATE.header,
-        entertainment: STATE.entertainment,
-        vehicles: STATE.vehicles,
-        travels: STATE.travels,
-      },
-    };
-    const resp = await rbFetch('/tools/reimbursement/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      console.warn('保存失败 (HTTP %d): %s', resp.status, err.error || resp.statusText);
-    }
-  } catch(e) { console.warn('自动保存失败:', e); }
-}
-
-// 上传发票后立即保存（不等防抖）
-function saveStateImmediate() {
-  clearTimeout(STATE._saveTimer);
-  return _doSave();
-}
-
-// ===== 期间管理 =====
-async function loadPeriods() {
-  try {
-    const resp = await rbFetch('/tools/reimbursement/periods');
-    const data = await resp.json();
-    if (data.success) {
-      STATE.allPeriods = data.periods || [];
-      renderPeriodSelector();
-      // 自动选择最近的期间
-      if (STATE.allPeriods.length > 0) {
-        await switchToPeriod(STATE.allPeriods[0].period);
-      } else {
-        // 无历史数据，默认当前月
-        const now = new Date();
-        const defaultPeriod = (now.getMonth() + 1) + '月';
-        await switchToPeriod(defaultPeriod);
-      }
-    }
-  } catch(e) { console.warn('加载期间失败:', e); }
-}
-
-function renderPeriodSelector() {
-  const sel = document.getElementById('rbPeriodSel');
-  let html = '<option value="__new__">+ 新建期间</option>';
-  STATE.allPeriods.forEach(p => {
-    const selected = p.period === STATE.currentPeriod ? 'selected' : '';
-    html += `<option value="${p.period}" ${selected}>${p.period}${p.employee ? ' - '+p.employee : ''} (${p.invoice_count}张 ¥${(p.total_amount ?? 0).toFixed(0)})</option>`;
-  });
-  sel.innerHTML = html;
-
-  // 更新基本信息区的期间字段
-  document.getElementById('rbPeriod').value = STATE.currentPeriod || '';
-  document.getElementById('rbPeriodNew').value = '';
-
-  // 按钮显示/隐藏：选中内容期间时显示编辑和删除
-  const hasPeriod = STATE.currentPeriod && STATE.allPeriods.find(p => p.period === STATE.currentPeriod);
-  document.getElementById('rbPeriodEditBtn').classList.toggle('hidden', !hasPeriod);
-  document.getElementById('rbPeriodDelBtn').classList.toggle('hidden', !hasPeriod);
-
-  // 信息栏
-  const info = document.getElementById('rbPeriodInfo');
-  const current = STATE.allPeriods.find(p => p.period === STATE.currentPeriod);
-  if (current) {
-    info.textContent = `${current.invoice_count} 张发票 · ¥${current.total_amount.toFixed(2)} · 最后更新 ${current.updated_at ? new Date(current.updated_at).toLocaleString('zh-CN') : '-'}`;
-  } else if (STATE.currentPeriod) {
-    info.textContent = '新期间，暂无数据';
-  } else {
-    info.textContent = '请选择或创建费用期间';
-  }
-}
-
-function onPeriodSwitch() {
-  const sel = document.getElementById('rbPeriodSel');
-  const val = sel.value;
-  const newInput = document.getElementById('rbPeriodNew');
-  const createBtn = document.getElementById('rbPeriodCreateBtn');
-
-  if (val === '__new__') {
-    newInput.classList.remove('hidden');
-    createBtn.classList.remove('hidden');
-    newInput.focus();
-  } else {
-    newInput.classList.add('hidden');
-    createBtn.classList.add('hidden');
-    switchToPeriod(val);
-  }
-}
-
-async function createPeriod() {
-  const input = document.getElementById('rbPeriodNew');
-  const period = input.value.trim();
-  if (!period) { alert('请输入期间名称，如：7-8月'); return; }
-  // 检查是否与已有期间重名
-  if (STATE.allPeriods.find(p => p.period === period)) {
-    alert(`期间 "${period}" 已存在`);
-    return;
-  }
-  await switchToPeriod(period);
-}
-
-async function startEditPeriod() {
-  if (!STATE.currentPeriod) return;
-  const newName = prompt('修改期间名称：', STATE.currentPeriod);
-  if (!newName || newName.trim() === STATE.currentPeriod) return;
-  const trimmed = newName.trim();
-  if (!trimmed) { alert('期间名称不能为空'); return; }
-  if (STATE.allPeriods.find(p => p.period === trimmed)) {
-    alert(`期间 "${trimmed}" 已存在`);
-    return;
-  }
-  try {
-    const resp = await rbFetch('/tools/reimbursement/rename-period', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ old_period: STATE.currentPeriod, new_period: trimmed }),
-    });
-    const data = await resp.json();
-    if (data.success) {
-      // 更新本地状态
-      const p = STATE.allPeriods.find(p => p.period === data.old_period);
-      if (p) p.period = data.new_period;
-      STATE.currentPeriod = data.new_period;
-      document.getElementById('rbPeriod').value = data.new_period;
-      renderPeriodSelector();
-      await saveStateNow();
-    } else {
-      alert('重命名失败: ' + (data.error || '未知错误'));
-    }
-  } catch(e) { alert('网络错误: ' + e.message); }
-}
-
-async function deletePeriod() {
-  if (!STATE.currentPeriod) return;
-  if (!confirm(`确定删除期间 "${STATE.currentPeriod}" 的全部数据？此操作不可恢复！`)) return;
-  try {
-    const resp = await rbFetch('/tools/reimbursement/delete-period', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ period: STATE.currentPeriod }),
-    });
-    const data = await resp.json();
-    if (data.success) {
-      // 移除本地记录
-      STATE.allPeriods = STATE.allPeriods.filter(p => p.period !== STATE.currentPeriod);
-      STATE.currentPeriod = '';
-      STATE.invoices = [];
-      STATE.entertainment = [];
-      STATE.vehicles = [];
-      STATE.travels = [];
-      STATE.header = { employee_name:'张三', department:'', date:'', period:'', office:'深圳办' };
-      document.getElementById('rbPeriod').value = '';
-      document.getElementById('rbEmpName').value = STATE.header.employee_name;
-      document.getElementById('rbDept').value = '';
-      document.getElementById('rbDate').value = '';
-      renderPeriodSelector();
-      renderThumbnails();
-      // 如果只剩"+新建"，自动选中第一个期间
-      if (STATE.allPeriods.length > 0) {
-        await switchToPeriod(STATE.allPeriods[0].period);
-      }
-    } else {
-      alert('删除失败: ' + (data.error || '未知错误'));
-    }
-  } catch(e) { alert('网络错误: ' + e.message); }
-}
-
-async function switchToPeriod(period) {
-  if (!period || period === STATE.currentPeriod) return;
-  syncHeader();
-  // 保存当前期间数据
-  await saveStateNow();
-
-  // 加载新期间
-  try {
-    const resp = await rbFetch('/tools/reimbursement/load/' + encodeURIComponent(period));
-    const data = await resp.json();
-    STATE.currentPeriod = period;
-
-    if (data.success && data.data) {
-      const d = data.data;
-      STATE.invoices = (d.invoices || []).map(inv => {
-        if (!inv.full_url) inv.full_url = inv.preview_url || '';
-        if (!inv.ocr_provider) inv.ocr_provider = '';
-        return inv;
-      });
-      STATE.header = d.header || { employee_name:'张三', department:'', date:'', period:period, office:'深圳办' };
-      STATE.entertainment = d.entertainment || [];
-      STATE.vehicles = d.vehicles || [];
-      STATE.travels = d.travels || [];
-    } else {
-      // 新期间，初始化空数据
-      STATE.invoices = [];
-      STATE._rawFiles = {};
-      STATE.entertainment = [];
-      STATE.vehicles = [];
-      STATE.travels = [];
-      STATE.header = { employee_name:'张三', department:'', date:'', period:period, office:'深圳办' };
-    }
-  } catch(e) {
-    console.warn('加载期间失败:', e);
-  }
-
-  // 更新 UI
-  document.getElementById('rbPeriod').value = period;
-  document.getElementById('rbEmpName').value = STATE.header.employee_name || '';
-  document.getElementById('rbDept').value = STATE.header.department || '';
-  document.getElementById('rbOffice').value = STATE.header.office || '深圳办';
-  document.getElementById('rbDate').value = STATE.header.date || '';
-  document.getElementById('rbPeriodNew').classList.add('hidden');
-  document.getElementById('rbPeriodCreateBtn').classList.add('hidden');
-
-  renderThumbnails();
-  // 如已进入 step2/3，一并刷新
-  if (!document.getElementById('rbStep2').classList.contains('hidden')) {
-    renderEditTable();
-    renderAuxTables();
-    updateSummary();
-  }
-  if (!document.getElementById('rbStep3').classList.contains('hidden')) {
-    genCover();
-  }
-
-  // 重新加载期间列表以刷新元数据
-  if (!STATE.allPeriods.find(p => p.period === period)) {
-    await loadPeriods();
-  } else {
-    renderPeriodSelector();
-  }
-}
-
-function fillSelect(id, items) {
-  const sel = document.getElementById(id);
-  if (!sel || !items) return;
-  items.forEach(v => {
-    if (v) { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
-  });
-}
-
-// ===== 事件绑定 =====
-function bindEvents() {
-  const zone = document.getElementById('rbUploadZone');
-  const input = document.getElementById('rbFileInput');
-
-  zone.addEventListener('click', () => input.click());
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    handleFiles(e.dataTransfer.files);
-  });
-  input.addEventListener('change', () => handleFiles(input.files));
-
-  document.getElementById('rbClearBtn').addEventListener('click', clearAll);
-  document.getElementById('rbNextToStep2').addEventListener('click', goToStep2);
-  document.getElementById('rbBackToStep1').addEventListener('click', () => switchStep(1));
-  document.getElementById('rbBackToStep2').addEventListener('click', () => switchStep(2));
-  document.getElementById('rbBackToStep3').addEventListener('click', () => switchStep(3));
-  document.getElementById('rbNextToStep4').addEventListener('click', () => switchStep(4));
-  document.getElementById('rbGenCover').addEventListener('click', genCover);
-  document.getElementById('rbPrintCover').addEventListener('click', () => {
-    const area = document.getElementById('rbCoverPreview');
-    printElement(area.innerHTML, '费用报销单');
-  });
-  document.getElementById('rbExportCover').addEventListener('click', exportCoverFile);
-  document.getElementById('rbExportDetails').addEventListener('click', exportDetailFile);
-  document.getElementById('rbDownloadTpl').addEventListener('click', downloadTemplates);
-  document.getElementById('rbAddRow').addEventListener('click', addManualRow);
-  document.getElementById('rbPreviewLayout').addEventListener('click', previewLayout);
-  document.getElementById('rbPrintInvoices').addEventListener('click', printInvoices);
-
-  // 辅助表添加按钮
-  document.getElementById('rbAddEntRow').addEventListener('click', () => addAuxRow('ent'));
-  document.getElementById('rbAddVehRow').addEventListener('click', () => addAuxRow('veh'));
-  document.getElementById('rbAddTravelRow').addEventListener('click', () => addAuxRow('travel'));
-
-  // 头信息变化时保存
-  ['rbEmpName','rbDept','rbOffice','rbDate','rbPeriod'].forEach(id => {
-    document.getElementById(id)?.addEventListener('change', syncHeader);
-  });
-}
-
-// ===== 文件处理（上传 + 自动 OCR） =====
-async function handleFiles(files) {
-  for (const f of files) {
-    const fd = new FormData();
-    fd.append('file', f);
-    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-
-    try {
-      const resp = await fetch('/tools/reimbursement/upload', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': csrf },
-        body: fd,
-      });
-      const data = await resp.json();
-      if (data.success) {
-        const newInv = {
-          id: data.file_id,
-          filename: data.filename,
-          original_name: data.original_name,
-          preview_url: data.preview_url,
-          full_url: data.full_url || data.preview_url,
-          thumb_data: data.thumb_b64 ? ('data:image/' + (data.filename.toLowerCase().endsWith('.pdf') ? 'png' : 'jpeg') + ';base64,' + data.thumb_b64) : data.preview_url,
-          ocr_done: false,
-          data: {
-            invoice_number: '', invoice_date: '', seller_name: '',
-            amount_excluding_tax: '', tax_amount: '', total_amount: '', description: '',
-          },
-          product_line: '', product_line_code: '', expense_type: '', office: STATE.header.office || '深圳办',
-          customer_level: '', remarks: '',
-        };
-        STATE.invoices.push(newInv);
-        STATE._rawFiles[data.file_id] = f;  // 保存原始文件供 OCR 用
-        renderThumbnails();
-        saveStateNow();
-
-        // 上传完成后自动 OCR
-        const idx = STATE.invoices.length - 1;
-        ocrInvoice(idx);
-      } else {
-        alert('上传失败: ' + (data.error || '未知错误'));
-      }
-    } catch(e) {
-      alert('上传异常: ' + e.message);
-    }
-  }
-  saveStateNow();
-}
-
-function renderThumbnails() {
-  const grid = document.getElementById('rbThumbGrid');
-  grid.innerHTML = STATE.invoices.map((inv, i) => `
-    <div class="rb-thumb-card" draggable="true" data-idx="${i}">
-      <span class="drag-handle">☰</span>
-      <button class="btn-remove" onclick="event.stopPropagation();removeInvoice(${i})">✕</button>
-      <img src="${inv.thumb_data || inv.preview_url}" alt="${inv.original_name}" data-filename="${inv.original_name}" data-idx="${i}"
-           onclick="event.stopPropagation();openLightbox(${i})"
-           onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22140%22 height=%22120%22><rect fill=%22%23e9ecef%22 width=%22140%22 height=%22120%22/><text x=%2270%22 y=%2265%22 text-anchor=%22middle%22 fill=%22%236c757d%22 font-size=%2212%22>发票 ${i+1}</text></svg>'">
-      <div class="card-body">
-        <span class="name" style="display:block;margin-bottom:4px;" title="${inv.original_name}">${inv.original_name}</span>
-        <button class="btn btn-outline-primary btn-sm py-0 px-1" style="font-size:0.65rem;width:100%;" onclick="event.stopPropagation();ocrInvoice(${i})" id="ocrBtn${i}">
-          <i class="bi bi-cpu"></i> ${inv.ocr_done ? '重新识别' : 'OCR 识别'}
-        </button>
-      </div>
-    </div>
-  `).join('');
-
-  // 拖拽排序
-  setupDragSort();
-}
-
-// ===== Lightbox 图片放大预览 =====
-let lightboxIdx = -1;
-
-function openLightbox(idx) {
-  lightboxIdx = idx;
-  const inv = STATE.invoices[idx];
-  if (!inv) return;
-  const lb = document.getElementById('rbLightbox');
-  // 优先使用高清大图，降级到缩略图
-  document.getElementById('rbLightboxImg').src = inv.full_url || inv.preview_url;
-  document.getElementById('rbLightboxName').textContent = inv.original_name;
-  lb.classList.add('active');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeLightbox(e) {
-  // 如果点击的是 lightbox 背景（非图片），也关闭
-  if (e && e.target !== document.getElementById('rbLightbox')) return;
-  document.getElementById('rbLightbox').classList.remove('active');
-  document.body.style.overflow = '';
-  lightboxIdx = -1;
-}
-
-function navLightbox(dir) {
-  if (lightboxIdx < 0) return;
-  const newIdx = lightboxIdx + dir;
-  if (newIdx >= 0 && newIdx < STATE.invoices.length) {
-    openLightbox(newIdx);
-  }
-}
-
-// 键盘导航：ESC关闭，左右箭头切换
-document.addEventListener('keydown', function(e) {
-  if (!document.getElementById('rbLightbox').classList.contains('active')) return;
-  if (e.key === 'Escape') closeLightbox();
-  if (e.key === 'ArrowLeft') navLightbox(-1);
-  if (e.key === 'ArrowRight') navLightbox(1);
-});
-
-function setupDragSort() {
-  const cards = document.querySelectorAll('.rb-thumb-card');
-  cards.forEach((card, i) => {
-    card.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', i.toString()); card.style.opacity = '0.5'; });
-    card.addEventListener('dragend', e => { card.style.opacity = '1'; });
-    card.addEventListener('dragover', e => { e.preventDefault(); card.style.borderColor = 'var(--rb-primary)'; });
-    card.addEventListener('dragleave', e => { card.style.borderColor = 'var(--rb-border)'; });
-    card.addEventListener('drop', e => {
-      e.preventDefault();
-      card.style.borderColor = 'var(--rb-border)';
-      const from = parseInt(e.dataTransfer.getData('text/plain'));
-      const to = i;
-      if (from !== to) {
-        const moved = STATE.invoices.splice(from, 1)[0];
-        STATE.invoices.splice(to, 0, moved);
-        renderThumbnails();
-        saveState();
-      }
-    });
-  });
-}
-
-function removeInvoice(idx) {
-  if (confirm('确定删除这张发票？')) {
-    const inv = STATE.invoices[idx];
-    if (inv) delete STATE._rawFiles[inv.id];
-    STATE.invoices.splice(idx, 1);
-    renderThumbnails();
-    saveState();
-  }
-}
-
-function clearAll() {
-  if (confirm('确定清空所有发票数据？此操作不可恢复。')) {
-    STATE.invoices = [];
-    STATE._rawFiles = {};
-    STATE.entertainment = [];
-    STATE.vehicles = [];
-    STATE.travels = [];
-    renderThumbnails();
-    saveStateNow();
-  }
-}
-
-// ===== 步骤切换 =====
-function switchStep(n) {
-  syncHeader();
-  [1,2,3,4].forEach(i => {
-    document.getElementById('rbStep'+i).classList.toggle('hidden', i !== n);
-    const stepEl = document.querySelector(`.rb-step[data-step="${i}"]`);
-    if (stepEl) {
-      stepEl.classList.remove('active','done');
-      if (i < n) stepEl.classList.add('done');
-      if (i === n) stepEl.classList.add('active');
-    }
-  });
-  // 根据不同步骤初始化对应的UI
-  if (n === 1) {
-    // 返回上传步骤时，刷新缩略图（可能OCR状态变了）
-    renderThumbnails();
-  }
-  if (n === 2) {
-    // 返回编辑步骤时，刷新编辑表格和汇总
-    renderEditTable();
-    renderAuxTables();
-    updateSummary();
-  }
-  if (n === 3) {
-    // 进入预览步骤时，重新生成封面（确保数据最新）
-    genCover();
-    return; // genCover 内部会调用 switchStep(3) 或 alert，不要重复 saveState
-  }
-  saveState();
-}
-
-function goToStep2() {
-  if (STATE.invoices.length === 0) { alert('请先上传至少一张发票'); return; }
-  syncHeader();
-  if (!STATE.header.employee_name) { alert('请填写报销人姓名'); return; }
-  switchStep(2);
-}
-
-function syncHeader() {
-  STATE.header = {
-    employee_name: document.getElementById('rbEmpName').value,
-    department: document.getElementById('rbDept').value,
-    office: document.getElementById('rbOffice').value,
-    date: document.getElementById('rbDate').value,
-    period: document.getElementById('rbPeriod').value,
-  };
-}
-
-// ===== 步骤 2：编辑表格 =====
-function renderEditTable() {
-  const tbody = document.getElementById('rbEditTbody');
-  const pls = STATE.reference?.product_lines || [];
-
-  tbody.innerHTML = STATE.invoices.map((inv, i) => {
-    const plOpts = pls.map(pl =>
-      `<option value="${pl.name}" data-code="${pl.code}" data-office="${pl.office}" ${inv.product_line===pl.name?'selected':''}>${pl.name}</option>`
-    ).join('');
-
-    return `<tr>
-      <td class="text-center">${i+1}</td>
-      <td><input value="${esc(inv.data.invoice_number)}" onchange="updateField(${i},'invoice_number',this.value)"></td>
-      <td class="td-narrow"><input type="date" value="${esc(inv.data.invoice_date)}" onchange="updateField(${i},'invoice_date',this.value)"></td>
-      <td><input value="${esc(inv.data.seller_name)}" onchange="updateField(${i},'seller_name',this.value)"></td>
-      <td class="td-amount"><input type="number" step="0.01" value="${esc(inv.data.amount_excluding_tax)}" onchange="updateField(${i},'amount_excluding_tax',this.value);autoCalcTax(${i})"></td>
-      <td class="td-amount"><input type="number" step="0.01" value="${esc(inv.data.tax_amount)}" onchange="updateField(${i},'tax_amount',this.value);autoCalcTax(${i})"></td>
-      <td class="td-amount"><input type="number" step="0.01" value="${esc(inv.data.total_amount)}" onchange="updateField(${i},'total_amount',this.value)"></td>
-      <td><select style="min-width:120px" onchange="onPlChange(${i},this)">${plOpts}</select></td>
-      <td class="td-code"><input value="${esc(inv.product_line_code)}" readonly></td>
-      <td><input value="${esc(inv.office)}" style="width:70px" onchange="invUpdate(${i},'office',this.value)"></td>
-      <td><select onchange="invUpdate(${i},'expense_type',this.value)">${expenseOpts(inv.expense_type)}</select></td>
-      <td><select onchange="invUpdate(${i},'customer_level',this.value)">${levelOpts(inv.customer_level)}</select></td>
-      <td><input value="${esc(inv.data.description)}" onchange="updateField(${i},'description',this.value)"></td>
-      <td><input value="${esc(inv.remarks||'')}" onchange="invUpdate(${i},'remarks',this.value)" style="min-width:80px"></td>
-      <td class="text-center"><button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="removeInvoice(${i});renderEditTable()" title="删除">✕</button></td>
-    </tr>`;
-  }).join('');
-
-  renderAuxTables();
-  updateSummary();
-}
-
-function expenseOpts(selected) {
-  const cats = STATE.reference?.expense_categories || [];
-  return cats.map(c => `<option value="${c.key}" ${selected===c.key?'selected':''}>${c.label}</option>`).join('');
-}
-
-function levelOpts(selected) {
-  const levels = STATE.reference?.customer_levels || [];
-  return levels.map(l => `<option value="${l.name}" ${selected===l.name?'selected':''}>${l.label}</option>`).join('');
-}
-
-// ===== 工具函数 =====
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-function normalizeDate(raw) {
-  // 将各种日期格式统一转为 YYYY-MM-DD
-  if (!raw || !raw.trim()) return '';
-  raw = raw.trim();
-  // 已经是 YYYY-MM-DD 或 YYYY/MM/DD
-  let m = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
-  // 中文格式：2024年01月15日
-  m = raw.match(/^(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日$/);
-  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
-  // 纯数字
-  m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (m) return m[1] + '-' + m[2] + '-' + m[3];
-  return raw;
-}
-
-function updateField(idx, field, val) {
-  if (STATE.invoices[idx]) STATE.invoices[idx].data[field] = val;
-  saveState();
-}
-
-function invUpdate(idx, field, val) {
-  if (STATE.invoices[idx]) STATE.invoices[idx][field] = val;
-  saveState();
-  updateSummary();
-}
-
-function onPlChange(idx, sel) {
-  const opt = sel.selectedOptions[0];
-  STATE.invoices[idx].product_line = sel.value;
-  STATE.invoices[idx].product_line_code = opt.dataset.code || '';
-  STATE.invoices[idx].office = opt.dataset.office || STATE.header.office || '深圳办';
-  // 只更新当前行的代码和办事处，不重渲染整个表格（避免丢失编辑）
-  const tr = sel.closest('tr');
-  if (tr) {
-    const tds = tr.querySelectorAll('td');
-    const codeInput = tds[8]?.querySelector('input');
-    const officeInput = tds[9]?.querySelector('input');
-    if (codeInput) codeInput.value = STATE.invoices[idx].product_line_code;
-    if (officeInput) officeInput.value = STATE.invoices[idx].office;
-  }
-  saveState();
-}
-
-function autoCalcTax(idx) {
-  const inv = STATE.invoices[idx];
-  const amt = parseFloat(inv.data.amount_excluding_tax) || 0;
-  const tax = parseFloat(inv.data.tax_amount) || 0;
-  if (amt > 0 || tax > 0) {
-    inv.data.total_amount = (amt + tax).toFixed(2);
-  }
-  saveState();
-}
-
-function addManualRow() {
-  STATE.invoices.push({
-    id: 'manual_' + Date.now(),
-    filename: '', original_name: '手动录入',
-    preview_url: '',
-    data: { invoice_number:'', invoice_date:'', seller_name:'', amount_excluding_tax:'', tax_amount:'', total_amount:'', description:'' },
-    product_line:'', product_line_code:'', expense_type:'', office: STATE.header.office || '深圳办',
-    customer_level:'', remarks:'',
-  });
-  renderEditTable();
-  saveState();
-}
-
-// ===== 辅助表（应酬费/派车/出差） =====
-function addAuxRow(type) {
-  if (type === 'ent') {
-    STATE.entertainment.push({ date:'',category:'餐费',place:'',customer:'',participants:'',amount:'',purpose:'' });
-  } else if (type === 'veh') {
-    STATE.vehicles.push({ date:'',from_location:'公司',to_location:'',contact:'',km_start:'',km_end:'',km_total:'',toll_fee:'',parking_fee:'',remarks:'' });
-  } else if (type === 'travel') {
-    STATE.travels.push({ date:'',location:'',customer:'',expense_type:'',amount:'',purpose:'' });
-  }
-  renderAuxTables();
-  saveState();
-}
-
-function renderAuxTables() {
-  // 应酬费
-  const entBody = document.getElementById('rbEntTbody');
-  let entHtml = STATE.entertainment.map((e,i) => entRow(e,i)).join('');
-  // 合计行
-  const entTotal = STATE.entertainment.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-  entHtml += `<tr class="table-secondary fw-bold">
-    <td colspan="5" class="text-end">合计</td>
-    <td class="text-end">${entTotal > 0 ? entTotal.toFixed(2) : '-'}</td>
-    <td colspan="2"></td>
-  </tr>`;
-  entBody.innerHTML = entHtml;
-
-  // 派车
-  const vehBody = document.getElementById('rbVehTbody');
-  let vehHtml = STATE.vehicles.map((v,i) => vehRow(v,i)).join('');
-  const kmTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.km_total) || 0), 0);
-  const tollTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.toll_fee) || 0), 0);
-  const parkTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.parking_fee) || 0), 0);
-  vehHtml += `<tr class="table-secondary fw-bold">
-    <td colspan="6" class="text-end">合计</td>
-    <td class="text-end">${kmTotal > 0 ? kmTotal.toFixed(1) : '-'}</td>
-    <td class="text-end">${tollTotal > 0 ? tollTotal.toFixed(2) : '-'}</td>
-    <td class="text-end">${parkTotal > 0 ? parkTotal.toFixed(2) : '-'}</td>
-    <td colspan="2"></td>
-  </tr>`;
-  vehBody.innerHTML = vehHtml;
-
-  // 出差
-  const trBody = document.getElementById('rbTravelTbody');
-  trBody.innerHTML = STATE.travels.map((t,i) => travelRow(t,i)).join('');
-}
-
-function entRow(e,i) {
-  return `<tr>
-    <td><input type="date" value="${esc(e.date)}" onchange="updateAux('ent',${i},'date',this.value)"></td>
-    <td><select onchange="updateAux('ent',${i},'category',this.value)">${STATE.reference?.entertainment_categories?.map(c=>`<option ${e.category===c?'selected':''}>${c}</option>`).join('')||''}</select></td>
-    <td><input value="${esc(e.place)}" placeholder="如：某某酒楼" onchange="updateAux('ent',${i},'place',this.value)"></td>
-    <td><input value="${esc(e.customer)}" placeholder="客户名称" onchange="updateAux('ent',${i},'customer',this.value)"></td>
-    <td><input value="${esc(e.participants)}" placeholder="参与人" onchange="updateAux('ent',${i},'participants',this.value)"></td>
-    <td><input type="number" step="0.01" value="${esc(e.amount)}" placeholder="0.00" onchange="updateAux('ent',${i},'amount',this.value)"></td>
-    <td><input value="${esc(e.purpose)}" placeholder="事由" onchange="updateAux('ent',${i},'purpose',this.value)"></td>
-    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('ent',${i})">✕</button></td>
-  </tr>`;
-}
-
-function vehRow(v,i) {
-  const kmTotal = calcKmTotal(v);
-  return `<tr>
-    <td><input type="date" value="${esc(v.date)}" onchange="updateAux('veh',${i},'date',this.value)"></td>
-    <td><input value="${esc(v.from_location)}" placeholder="出发地" onchange="updateAux('veh',${i},'from_location',this.value)"></td>
-    <td><input value="${esc(v.to_location)}" placeholder="目的地" onchange="updateAux('veh',${i},'to_location',this.value)"></td>
-    <td><input value="${esc(v.contact)}" placeholder="联系人" onchange="updateAux('veh',${i},'contact',this.value)"></td>
-    <td><input type="number" step="0.1" value="${esc(v.km_start)}" placeholder="0" onchange="updateAuxKm(${i},'km_start',this.value)"></td>
-    <td><input type="number" step="0.1" value="${esc(v.km_end)}" placeholder="0" onchange="updateAuxKm(${i},'km_end',this.value)"></td>
-    <td class="text-center fw-bold" id="kmTotal${i}">${kmTotal || '-'}</td>
-    <td><input type="number" step="0.01" value="${esc(v.toll_fee)}" placeholder="0.00" onchange="updateAux('veh',${i},'toll_fee',this.value)"></td>
-    <td><input type="number" step="0.01" value="${esc(v.parking_fee)}" placeholder="0.00" onchange="updateAux('veh',${i},'parking_fee',this.value)"></td>
-    <td><input value="${esc(v.remarks)}" placeholder="备注" onchange="updateAux('veh',${i},'remarks',this.value)"></td>
-    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('veh',${i})">✕</button></td>
-  </tr>`;
-}
-
-function calcKmTotal(v) {
-  const start = parseFloat(v.km_start);
-  const end = parseFloat(v.km_end);
-  if (!isNaN(start) && !isNaN(end) && end >= start) {
-    return (end - start).toFixed(1);
-  }
-  return '';
-}
-
-function updateAuxKm(idx, field, val) {
-  const arr = STATE.vehicles;
-  if (!arr[idx]) return;
-  arr[idx][field] = val;
-  // 自动计算公里数
-  const start = parseFloat(arr[idx].km_start);
-  const end = parseFloat(arr[idx].km_end);
-  if (!isNaN(start) && !isNaN(end) && end >= start) {
-    arr[idx].km_total = (end - start).toFixed(1);
-  } else {
-    arr[idx].km_total = '';
-  }
-  // 更新单行公里显示
-  const td = document.getElementById('kmTotal' + idx);
-  if (td) {
-    td.textContent = arr[idx].km_total || '-';
-  }
-  // 刷新合计行
-  refreshVehTotal();
-  saveState();
-}
-
-function travelRow(t,i) {
-  return `<tr>
-    <td><input type="date" value="${esc(t.date)}" onchange="updateAux('travel',${i},'date',this.value)"></td>
-    <td><input value="${esc(t.location)}" placeholder="出差地" onchange="updateAux('travel',${i},'location',this.value)"></td>
-    <td><input value="${esc(t.customer)}" placeholder="客户名称" onchange="updateAux('travel',${i},'customer',this.value)"></td>
-    <td><input value="${esc(t.expense_type)}" placeholder="费用类型" onchange="updateAux('travel',${i},'expense_type',this.value)"></td>
-    <td><input type="number" step="0.01" value="${esc(t.amount)}" placeholder="0.00" onchange="updateAux('travel',${i},'amount',this.value)"></td>
-    <td><input value="${esc(t.purpose)}" placeholder="事由" onchange="updateAux('travel',${i},'purpose',this.value)"></td>
-    <td class="td-delete"><button class="btn btn-outline-danger btn-del-aux" onclick="removeAux('travel',${i})">✕</button></td>
-  </tr>`;
-}
-
-function updateAux(type, idx, field, val) {
-  const arr = type === 'ent' ? STATE.entertainment : type === 'veh' ? STATE.vehicles : STATE.travels;
-  if (arr[idx]) arr[idx][field] = val;
-  // 金额相关字段变动时，刷新合计行
-  if (type === 'ent' && field === 'amount') refreshEntTotal();
-  if (type === 'veh' && (field === 'km_total' || field === 'toll_fee' || field === 'parking_fee')) refreshVehTotal();
-  if (type === 'veh' && (field === 'km_start' || field === 'km_end')) {
-    // 起止里程变化由 updateAuxKm 处理
-  }
-  saveState();
-}
-
-function refreshEntTotal() {
-  const total = STATE.entertainment.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-  const rows = document.querySelectorAll('#rbEntTbody tr');
-  const last = rows[rows.length - 1];
-  if (last && last.classList.contains('table-secondary')) {
-    const tds = last.querySelectorAll('td');
-    if (tds.length >= 6) tds[5].textContent = total > 0 ? total.toFixed(2) : '-';
-  }
-}
-
-function refreshVehTotal() {
-  const kmTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.km_total) || 0), 0);
-  const tollTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.toll_fee) || 0), 0);
-  const parkTotal = STATE.vehicles.reduce((sum, v) => sum + (parseFloat(v.parking_fee) || 0), 0);
-  const rows = document.querySelectorAll('#rbVehTbody tr');
-  const last = rows[rows.length - 1];
-  if (last && last.classList.contains('table-secondary')) {
-    const tds = last.querySelectorAll('td');
-    if (tds.length >= 9) {
-      tds[6].textContent = kmTotal > 0 ? kmTotal.toFixed(1) : '-';
-      tds[7].textContent = tollTotal > 0 ? tollTotal.toFixed(2) : '-';
-      tds[8].textContent = parkTotal > 0 ? parkTotal.toFixed(2) : '-';
-    }
-  }
-}
-
-function removeAux(type, idx) {
-  const arr = type === 'ent' ? STATE.entertainment : type === 'veh' ? STATE.vehicles : STATE.travels;
-  arr.splice(idx, 1);
-  renderAuxTables();
-  saveState();
-}
-
-function updateSummary() {
-  const body = document.getElementById('rbSummaryBody');
-  const cats = STATE.reference?.expense_categories || [];
-  const totals = {};
-  cats.forEach(c => { totals[c.key] = 0; });
-
-  STATE.invoices.forEach(inv => {
-    const type = inv.expense_type;
-    const amt = parseFloat(inv.data.total_amount) || 0;
-    if (type && totals[type] !== undefined) totals[type] += amt;
-  });
-
-  body.innerHTML = '<div class="row g-2">' + cats.map(c =>
-    `<div class="col-auto"><span class="small text-muted">${c.label}：</span><strong class="small">¥${totals[c.key].toFixed(2)}</strong></div>`
-  ).join('') + `<div class="col-auto"><span class="small text-muted">合计：</span><strong class="text-success">¥${Object.values(totals).reduce((a,b)=>a+b,0).toFixed(2)}</strong></div></div>`;
-}
-
-// ===== 步骤 3：生成封面 =====
-async function genCover() {
-  syncHeader();
-  saveStateNow();
-
-  const payload = {
-    header: STATE.header,
-    invoices: STATE.invoices.map(inv => ({
-      ...inv.data,
-      product_line: inv.product_line,
-      product_line_code: inv.product_line_code,
-      office: inv.office,
-      expense_type: inv.expense_type,
-      customer_level: inv.customer_level,
-      remarks: inv.remarks,
-    })),
-    entertainment: STATE.entertainment,
-    vehicles: STATE.vehicles,
-    travels: STATE.travels,
-  };
-
-  const resp = await fetch('/tools/reimbursement/cover-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const cover = await resp.json();
-
-  if (!cover.success) { alert('封面生成失败'); return; }
-
-  // 渲染封面 HTML
-  renderCoverHTML(cover);
-  // 直接切换到步骤3（不触发 genCover 递归）
-  switchStepOnly(3);
-}
-
-// 纯步骤切换（不触发 genCover/renderEditTable 等副作用）
-function switchStepOnly(n) {
-  syncHeader();
-  [1,2,3,4].forEach(i => {
-    document.getElementById('rbStep'+i).classList.toggle('hidden', i !== n);
-    const stepEl = document.querySelector(`.rb-step[data-step="${i}"]`);
-    if (stepEl) {
-      stepEl.classList.remove('active','done');
-      if (i < n) stepEl.classList.add('done');
-      if (i === n) stepEl.classList.add('active');
-    }
-  });
-  saveState();
-}
-
-function renderCoverHTML(cover) {
-  const cats = STATE.reference?.expense_categories || [];
-  const hasDataCols = cats.map(c => {
-    const has = cover.groups.some(g => (g.totals[c.key] || 0) !== 0);
-    return has;
-  });
-
-  const headRow = cats.map((c,idx) =>
-    hasDataCols[idx] ? `<th>${c.label}</th>` : ''
-  ).join('');
-
-  let html = `
-  <style>
-    @media print {
-      body { margin: 0; }
-      .cover-page { page-break-after: always; width: 210mm; padding: 15mm 12mm; margin: 0 auto; font-family: 'Microsoft YaHei','PingFang SC',sans-serif; font-size: 11px; }
-      .cover-title { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 8px; }
-      .cover-info { margin-bottom: 10px; display: flex; gap: 2em; flex-wrap: wrap; }
-      .cover-info span { margin-right: 1em; }
-      table.cover-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-      table.cover-table th, table.cover-table td { border: 1px solid #333; padding: 3px 5px; text-align: center; font-size: 10px; }
-      table.cover-table th { background: #e9ecef; }
-      table.cover-table td { text-align: center; }
-      table.cover-table td.td-left { text-align: left; }
-      table.cover-table td.td-right { text-align: right; }
-      .cover-total { margin-top: 8px; }
-      .cover-sign { display: flex; justify-content: space-between; margin-top: 20px; }
-      .cover-sign div { flex: 1; }
-      .print-only { }
-    }
-    @media screen {
-      .cover-page { background: #fff; padding: 30px 25px; max-width: 794px; margin: 0 auto; font-size: 11px; font-family: 'Microsoft YaHei','PingFang SC',sans-serif; border: 1px solid #ddd; }
-      .cover-title { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 10px; }
-      .cover-info { margin-bottom: 12px; }
-      .cover-info span { margin-right: 1.5em; }
-      table.cover-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-      table.cover-table th, table.cover-table td { border: 1px solid #333; padding: 4px 6px; text-align: center; font-size: 10px; }
-      table.cover-table th { background: #e9ecef; }
-      table.cover-table td.td-left { text-align: left; }
-      table.cover-table td.td-right { text-align: right; }
-      .cover-total { margin-top: 10px; font-size: 12px; }
-      .cover-sign { display: flex; justify-content: space-between; margin-top: 30px; }
-      .cover-sign div { flex: 1; }
-    }
-  </style>
-
-  <!-- 页面1：费用报销单封面 -->
-  <div class="cover-page">
-    <div class="cover-title">费 用 报 销 单</div>
-    <div class="cover-info">
-      <span>员工姓名：${cover.header.employee_name || '___'}</span>
-      <span>部门：${cover.header.department || '___'}</span>
-      <span>报销日期：${cover.header.date || '___'}</span>
-    </div>
-    <table class="cover-table">
-      <thead><tr>
-        <th>序号</th><th>产品线</th><th>代码</th><th>办事处</th><th>费用期间</th>
-        ${headRow}
-        <th>备注</th>
-      </tr></thead>
-      <tbody>
-        ${cover.groups.map((g,idx) => `
-        <tr>
-          <td>${idx+1}</td>
-          <td class="td-left">${g.product_line}</td>
-          <td>${g.code}</td>
-          <td>${g.office||''}</td>
-          <td>${cover.header.period||''}</td>
-          ${cats.map((c,ci) => {
-            const v = g.totals[c.key] || 0;
-            return hasDataCols[ci] ? `<td class="td-right">${v!==0 ? v.toFixed(2) : ''}</td>` : '';
-          }).join('')}
-          <td>${(g.remarks||[]).join('；')}</td>
-        </tr>`).join('')}
-        <tr style="font-weight:bold;background:#f0f0f0">
-          <td colspan="5">合 计</td>
-          ${cats.map((c,ci) => {
-            const v = cover.grand_totals[c.key] || 0;
-            return hasDataCols[ci] ? `<td class="td-right">${v!==0 ? v.toFixed(2) : ''}</td>` : '';
-          }).join('')}
-          <td></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="cover-total">
-      <div>费用总额（小写）：¥ ${cover.total_all.toFixed(2)}</div>
-      <div>费用总额（大写）：${cover.total_cn}</div>
-      <div>单据张数：${cover.invoice_count} 张</div>
-    </div>
-    <div class="cover-sign">
-      <div>申请人：${cover.header.employee_name||'___'}<br>日期：${cover.header.date||'___'}</div>
-      <div>财务审核：<br>日期：</div>
-      <div>部门主管：<br>日期：</div>
-      <div>总经理：<br>日期：</div>
-    </div>
-  </div>
-
-  <!-- 页面2：按客户等级费用分类表 -->
-  <div class="cover-page">
-    <div class="cover-title">按客户等级费用分类明细表</div>
-    <table class="cover-table">
-      <thead><tr><th>序号</th><th>客户等级</th><th>招待费</th><th>差旅费</th><th>其他费用</th><th>费用合计</th><th>备注</th></tr></thead>
-      <tbody>
-        ${(cover.level_groups||[]).map((lg,idx) => `
-        <tr>
-          <td>${idx+1}</td><td>${lg.level}</td>
-          <td class="td-right">${lg.entertainment!==0 ? lg.entertainment.toFixed(2) : ''}</td>
-          <td class="td-right">${lg.travel!==0 ? lg.travel.toFixed(2) : ''}</td>
-          <td class="td-right">${lg.other!==0 ? lg.other.toFixed(2) : ''}</td>
-          <td class="td-right">${lg.total!==0 ? lg.total.toFixed(2) : ''}</td>
-          <td></td>
-        </tr>`).join('')}
-        <tr style="font-weight:bold;background:#f0f0f0">
-          <td colspan="2">合 计</td>
-          <td class="td-right">${(cover.level_groups||[]).reduce((s,g)=>s+(g.entertainment||0),0).toFixed(2)}</td>
-          <td class="td-right">${(cover.level_groups||[]).reduce((s,g)=>s+(g.travel||0),0).toFixed(2)}</td>
-          <td class="td-right">${(cover.level_groups||[]).reduce((s,g)=>s+(g.other||0),0).toFixed(2)}</td>
-          <td class="td-right">${cover.total_all.toFixed(2)}</td>
-          <td></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="cover-total">
-      <div>费用总额（小写）：¥ ${cover.total_all.toFixed(2)}</div>
-      <div>费用总额（大写）：${cover.total_cn}</div>
-    </div>
-    <div class="cover-sign">
-      <div>申请人：${cover.header.employee_name||'___'}<br>日期：${cover.header.date||'___'}</div>
-      <div>部门主管：<br>日期：</div>
-    </div>
-  </div>`;
-
-  // 应酬费明细
-  const ents = STATE.entertainment;
-  if (ents.length > 0) {
-    const entTotal = ents.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
-    html += `
-    <div class="cover-page">
-      <div class="cover-title">应酬费报销明细</div>
-      <div class="cover-info"><span>员工姓名：${cover.header.employee_name||'___'}</span></div>
-      <table class="cover-table">
-        <thead><tr><th>时间</th><th>费用类别</th><th>用餐地点/名称</th><th>客户名称</th><th>主要参与人全称</th><th>金额</th><th>事由（产品线）</th></tr></thead>
-        <tbody>
-          ${ents.map((e,i) => `<tr>
-            <td>${e.date}</td><td>${e.category}</td><td>${esc(e.place)}</td><td>${esc(e.customer)}</td>
-            <td>${esc(e.participants)}</td><td class="td-right">${e.amount||''}</td><td>${esc(e.purpose)}</td>
-          </tr>`).join('')}
-          <tr style="font-weight:bold"><td colspan="5">合计</td><td class="td-right">${entTotal.toFixed(2)}</td><td></td></tr>
-        </tbody>
-      </table>
-    </div>`;
-  }
-
-  // 派车单
-  const vehs = STATE.vehicles;
-  if (vehs.length > 0) {
-    const vehKm = vehs.reduce((s,v) => s + (parseFloat(v.km_total)||0), 0);
-    const vehToll = vehs.reduce((s,v) => s + (parseFloat(v.toll_fee)||0), 0);
-    const vehPark = vehs.reduce((s,v) => s + (parseFloat(v.parking_fee)||0), 0);
-    html += `
-    <div class="cover-page">
-      <div class="cover-title">派 车 单</div>
-      <div class="cover-info"><span>员工姓名：${cover.header.employee_name||'___'}</span><span>${cover.header.period||''}派车单</span></div>
-      <table class="cover-table">
-        <thead><tr><th>日期</th><th>出发地</th><th>目的地</th><th>客户联系人</th><th>起</th><th>止</th><th>公里数</th><th>过桥费</th><th>停车费</th><th>备注</th></tr></thead>
-        <tbody>
-          ${vehs.map(v => `<tr>
-            <td>${v.date}</td><td>${esc(v.from_location)}</td><td>${esc(v.to_location)}</td><td>${esc(v.contact)}</td>
-            <td>${v.km_start||''}</td><td>${v.km_end||''}</td><td>${v.km_total||''}</td>
-            <td class="td-right">${v.toll_fee||''}</td><td class="td-right">${v.parking_fee||''}</td><td>${esc(v.remarks)}</td>
-          </tr>`).join('')}
-          <tr style="font-weight:bold"><td colspan="6">合计</td><td>${vehKm.toFixed(1)}</td><td class="td-right">${vehToll.toFixed(2)}</td><td class="td-right">${vehPark.toFixed(2)}</td><td></td></tr>
-        </tbody>
-      </table>
-    </div>`;
-  }
-
-  // 出差明细
-  const travels = STATE.travels;
-  if (travels.length > 0) {
-    const trTotal = travels.reduce((s,t) => s + (parseFloat(t.amount)||0), 0);
-    html += `
-    <div class="cover-page">
-      <div class="cover-title">出差明细表</div>
-      <div class="cover-info"><span>员工姓名：${cover.header.employee_name||'___'}</span></div>
-      <table class="cover-table">
-        <thead><tr><th>日期</th><th>出差地</th><th>客户名称</th><th>费用类型</th><th>金额</th><th>事由（产品线）</th></tr></thead>
-        <tbody>
-          ${travels.map(t => `<tr>
-            <td>${t.date}</td><td>${esc(t.location)}</td><td>${esc(t.customer)}</td><td>${esc(t.expense_type)}</td>
-            <td class="td-right">${t.amount||''}</td><td>${esc(t.purpose)}</td>
-          </tr>`).join('')}
-          <tr style="font-weight:bold"><td colspan="4">合计</td><td class="td-right">${trTotal.toFixed(2)}</td><td></td></tr>
-        </tbody>
-      </table>
-    </div>`;
-  }
-
-  document.getElementById('rbCoverPreview').innerHTML = html;
-}
-
-// ===== 打印 =====
-function printElement(html, title) {
-  const w = window.open('', '_blank', 'width=900,height=700');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>${html.match(/<style>[^<]*<\/style>/g)?.join('')||''}</head><body>${html.replace(/<style>[^<]*<\/style>/g,'')}</body></html>`);
-  w.document.close();
-  setTimeout(() => { w.print(); }, 500);
-}
-
-// ===== 步骤4：发票排版打印 =====
-function previewLayout() {
-  const count = parseInt(document.getElementById('rbLayout').value);
-  const area = document.getElementById('rbInvoiceLayoutPreview');
-  const invs = STATE.invoices.filter(i => i.preview_url);
-
-  if (invs.length === 0) { area.innerHTML = '<p class="text-muted text-center">没有可打印的发票图片</p>'; return; }
-
-  const perRow = count === 4 ? 2 : count === 2 ? 2 : 1;
-  const perCol = count === 4 ? 2 : 1;
-  const cols = [];
-  for (let i = 0; i < invs.length; i += count) {
-    cols.push(invs.slice(i, i + count));
-  }
-
-  area.innerHTML = `<style>
-    @media print {
-      .inv-page { page-break-after: always; width: 210mm; margin: 0; padding: 10mm; }
-      .inv-grid { display: grid; grid-template-columns: repeat(${perRow}, 1fr); gap: 5mm; }
-      .inv-item { text-align: center; }
-      .inv-item img { max-width: 100%; max-height: ${count===4?'120mm':'250mm'}; object-fit: contain; }
-    }
-    @media screen {
-      .inv-page { background: #fff; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; max-width: 794px; }
-      .inv-grid { display: grid; grid-template-columns: repeat(${perRow}, 1fr); gap: 10px; }
-      .inv-item { text-align: center; border: 1px dashed #dee2e6; padding: 8px; }
-      .inv-item img { max-width: 100%; max-height: ${count===4?'200px':'400px'}; object-fit: contain; }
-      .inv-item .lbl { font-size: 0.7rem; color: #6c757d; margin-top: 4px; }
-    }
-  </style>` +
-
-  cols.map((pageInvs, pageIdx) => `
-    <div class="inv-page">
-      <div class="inv-grid">
-        ${pageInvs.map((inv, i) => `
-          <div class="inv-item">
-            <img src="${inv.preview_url}" alt="${inv.original_name}">
-            <div class="lbl">${pageIdx*count+i+1}. ${inv.original_name||inv.filename||''}</div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `).join('');
-
-  document.getElementById('rbLayout').value = count;
-}
-
-function printInvoices() {
-  previewLayout();
-  setTimeout(() => { window.print(); }, 300);
-}
-
-// ===== 全局函数暴露 =====
-window.removeInvoice = removeInvoice;
-window.ocrInvoice = ocrInvoice;
-
-// ===== OCR 后自动分类费用类型 =====
-function autoCategorize(inv) {
-  const seller = (inv.data.seller_name || '').toLowerCase();
-  const desc = (inv.data.description || '').toLowerCase();
-  const filename = (inv.original_name || '').toLowerCase();
-  const combined = seller + ' ' + desc + ' ' + filename;
-
-  // 餐饮类 → 招待费
-  const mealKw = ['餐', '餐饮', '食', '饭', '菜', '火锅', '烧烤', '酒楼', '餐厅', '饭店', '美食', '快餐', '外卖', '咖啡', '茶'];
-  if (mealKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'entertainment';
-    return;
-  }
-  // 交通类 → 市内交通费 / 车辆费用
-  const transportKw = ['交通', '出租车', '打车', '滴滴', '高德', '地铁', '公交', '高铁', '火车', '机票', '航班', '机场', '加油', '停车', '过路', '高速', 'etc', '充电'];
-  if (transportKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'local_transport';
-    return;
-  }
-  // 车辆费用
-  const vehicleKw = ['加油', '洗车', '保养', '维修', '年检', '车险', '车', 'etc', '高速费', '过路费'];
-  if (vehicleKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'vehicle';
-    return;
-  }
-  // 住宿类 → 出差住宿费
-  const hotelKw = ['酒店', '宾馆', '住宿', '民宿', '客栈', '旅馆', '公寓'];
-  if (hotelKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'travel_hotel';
-    return;
-  }
-  // 办公类
-  const officeKw = ['办公', '文具', '耗材', '打印', '复印', '纸张', '硒鼓', '墨盒'];
-  if (officeKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'office_supplies';
-    return;
-  }
-  // 快递类
-  const deliveryKw = ['快递', '物流', '顺丰', '邮政', 'ems', '圆通', '中通', '韵达', '申通', '京东快递'];
-  if (deliveryKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'delivery';
-    return;
-  }
-  // 通讯类
-  const commKw = ['话费', '通讯', '宽带', '流量', '移动', '联通', '电信', '月租'];
-  if (commKw.some(k => combined.includes(k))) {
-    inv.expense_type = 'communication';
-    return;
-  }
-}
-
-// ===== OCR 识别（优先使用服务器原始文件，base64 作为降级） =====
-async function ocrInvoice(idx) {
-  const inv = STATE.invoices[idx];
-  if (!inv) return;
-  
-  const btn = document.getElementById('ocrBtn'+idx);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 识别中...'; }
-
-  try {
-    const payload = { file_id: inv.id };
-
-    // 优先从浏览器内存中读取原始文件（Vercel 不共享 /tmp，不能依赖服务器预览 URL）
-    const rawFile = STATE._rawFiles[inv.id];
-    if (rawFile) {
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(rawFile);
-      });
-      payload.image_base64 = base64;
-    } else {
-      // 降级：尝试从服务器获取（页面刷新后 rawFile 已丢失）
-      try {
-        const imgResp = await fetch(inv.preview_url);
-        const blob = await imgResp.blob();
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-        payload.image_base64 = base64;
-      } catch(e) {
-        console.warn('无法读取图片:', e);
-      }
-    }
-
-    if (!payload.image_base64) {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> OCR 识别'; }
-      alert('无法获取图片数据，请重新上传发票。');
-      return;
-    }
-
-    // 发送到 OCR 端点
-    const ocrResp = await fetch('/tools/reimbursement/ocr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const ocrData = await ocrResp.json();
-    
-    if (ocrData.success && ocrData.data) {
-      // 回填发票数据
-      const d = ocrData.data;
-      if (d.invoice_number) inv.data.invoice_number = d.invoice_number;
-      if (d.invoice_date) inv.data.invoice_date = normalizeDate(d.invoice_date);
-      if (d.seller_name) inv.data.seller_name = d.seller_name;
-      if (d.amount_excluding_tax) inv.data.amount_excluding_tax = d.amount_excluding_tax;
-      if (d.tax_amount) inv.data.tax_amount = d.tax_amount;
-      if (d.total_amount) inv.data.total_amount = d.total_amount;
-      if (d.description) inv.data.description = d.description;
-      inv.ocr_done = true;
-      inv.ocr_provider = ocrData.provider || 'unknown';
-
-      // ===== OCR 后自动分类 =====
-      autoCategorize(inv);
-
-      saveState();
-      
-      if (btn) {
-        const providerLabel = ocrData.provider === 'baidu' ? '百度' : ocrData.provider === 'paddleocr' ? 'Paddle' : '已';
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-outline-success');
-        btn.innerHTML = `<i class="bi bi-check-circle"></i> ${providerLabel}识别`;
-      }
-      renderEditTable(); // 如果正在步骤2，刷新表格
-    } else {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> 重试识别'; }
-      alert('识别失败，请手动填写或重试。' + (ocrData.note ? '\n' + ocrData.note : ''));
-    }
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cpu"></i> 重试识别'; }
-    alert('识别异常: ' + e.message);
-  }
-}
-
-// ===== 下载空白模板 =====
-async function downloadTemplates() {
-  const templates = [
-    { id: 'entertainment', name: '应酬费、出差明细、派车单' },
-    { id: 'cover', name: '报销封面及费用分类表' },
-  ];
-  for (const tpl of templates) {
-    window.open(`/tools/reimbursement/download-template/${tpl.id}`, '_blank');
-  }
-}
-
-// ===== 导出文件1：报销封面及费用分类表 =====
-async function exportCoverFile() {
-  const resp = await fetch('/tools/reimbursement/cover-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      header: STATE.header,
-      invoices: STATE.invoices.map(inv => ({
-        ...inv.data, product_line: inv.product_line, product_line_code: inv.product_line_code,
-        office: inv.office, expense_type: inv.expense_type, customer_level: inv.customer_level, remarks: inv.remarks,
-      })),
-    }),
-  });
-  const cover = await resp.json();
-  if (!cover.success) { alert('数据准备失败'); return; }
-
-  const exportResp = await fetch('/tools/reimbursement/export-cover', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cover_data: cover }),
-  });
-  downloadBlob(exportResp, `报销封面及费用分类表_${STATE.header.employee_name||'报销'}_${(STATE.header.period||'').replace(/\s/g,'_')}.xlsx`);
-}
-
-// ===== 导出文件2：应酬费、出差明细、派车单 =====
-async function exportDetailFile() {
-  const resp = await fetch('/tools/reimbursement/cover-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      header: STATE.header,
-      invoices: STATE.invoices.map(inv => ({
-        ...inv.data, product_line: inv.product_line, product_line_code: inv.product_line_code,
-        office: inv.office, expense_type: inv.expense_type, customer_level: inv.customer_level, remarks: inv.remarks,
-      })),
-    }),
-  });
-  const cover = await resp.json();
-  if (!cover.success) { alert('数据准备失败'); return; }
-
-  const exportResp = await fetch('/tools/reimbursement/export-details', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cover_data: cover, entertainment: STATE.entertainment, vehicles: STATE.vehicles, travels: STATE.travels }),
-  });
-  downloadBlob(exportResp, `应酬费_出差明细_派车单_${STATE.header.employee_name||'报销'}_${(STATE.header.period||'').replace(/\s/g,'_')}.xlsx`);
-}
-
-// ===== 通用下载 blob =====
-async function downloadBlob(response, filename) {
-  if (response.ok) {
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  } else {
-    const err = await response.json().catch(() => ({}));
-    alert('导出失败: ' + (err.error || '未知错误'));
-  }
-}
+document.addEventListener('DOMContentLoaded',()=>RB.init());
 </script>
-{% endraw %}

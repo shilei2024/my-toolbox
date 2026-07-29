@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from flask_login import UserMixin
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -245,5 +247,107 @@ class ReimbursementRecord(db.Model):
     owner_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     period: Mapped[str] = mapped_column(String(64), nullable=False)
     data_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ReimbursementPeriod(db.Model):
+    """A reimbursement cycle owned by one signed-in or anonymous user."""
+
+    __tablename__ = "reimbursement_periods"
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "name", name="uq_rb_period_owner_name"),
+        Index("ix_rb_period_owner_dates", "owner_type", "owner_id", "start_year", "start_month"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    start_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    employee_name: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    department: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    office: Mapped[str] = mapped_column(String(80), nullable=False, default="深圳办")
+    reimbursement_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ReimbursementCategory(db.Model):
+    """User-editable invoice category used by filters, summaries and exports."""
+
+    __tablename__ = "reimbursement_categories"
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "name", name="uq_rb_category_owner_name"),
+        Index("ix_rb_category_owner_order", "owner_type", "owner_id", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    export_key: Mapped[str] = mapped_column(String(40), nullable=False, default="other")
+    color: Mapped[str] = mapped_column(String(16), nullable=False, default="#64748b")
+    description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ReimbursementInvoice(db.Model):
+    """Normalized invoice record; the uploaded file remains addressable by URL."""
+
+    __tablename__ = "reimbursement_invoices"
+    __table_args__ = (
+        Index("ix_rb_invoice_period", "period_id"),
+        Index("ix_rb_invoice_category", "category_id"),
+        Index("ix_rb_invoice_owner_status", "owner_type", "owner_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    period_id: Mapped[int] = mapped_column(db.ForeignKey("reimbursement_periods.id"), nullable=False)
+    category_id: Mapped[Optional[int]] = mapped_column(db.ForeignKey("reimbursement_categories.id"), nullable=True)
+    invoice_number: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    invoice_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    total_amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    vendor: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    file_url: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    product_line: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    product_line_code: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    office: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    customer_level: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    remarks: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    upload_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ReimbursementAuxDetail(db.Model):
+    """Template-specific entertainment, vehicle and travel rows."""
+
+    __tablename__ = "reimbursement_aux_details"
+    __table_args__ = (
+        Index("ix_rb_aux_period_kind", "period_id", "kind", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    period_id: Mapped[int] = mapped_column(db.ForeignKey("reimbursement_periods.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    data_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

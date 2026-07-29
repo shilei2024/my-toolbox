@@ -261,9 +261,16 @@ def upload():
         return jsonify(error="请选择文件"), 400
 
     ext = Path(f.filename).suffix.lower()
-    allowed = {".jpg", ".jpeg", ".png", ".pdf", ".bmp", ".gif", ".webp"}
+    allowed = {".jpg", ".jpeg", ".png", ".pdf"}
     if ext not in allowed:
         return jsonify(error=f"不支持的文件格式：{ext}"), 400
+
+    max_file_size = 20 * 1024 * 1024
+    f.stream.seek(0, os.SEEK_END)
+    file_size = f.stream.tell()
+    f.stream.seek(0)
+    if file_size > max_file_size:
+        return jsonify(error="文件大小不能超过 20MB"), 413
 
     # 保存到 uploads 目录
     upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
@@ -1739,3 +1746,9 @@ def export_details():
     except Exception as e:
         current_app.logger.exception("export-details failed")
         return jsonify(error=f"导出失败：{str(e)}"), 500
+
+
+# Normalized PRD-compliant manager APIs and template-faithful .xls exports.
+from .manager import register_routes as _register_manager_routes
+
+_register_manager_routes(tool_bp)
