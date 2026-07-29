@@ -86,13 +86,13 @@
       <p>发票归档、双月周期、费用分类与财务模板导出</p>
     </div>
     <div class="rb-nav" id="rbNav">
-      <button class="active" data-view="dashboard"><i class="bi bi-grid me-1"></i>仪表盘</button>
-      <button data-view="invoices"><i class="bi bi-receipt me-1"></i>发票管理</button>
-      <button data-view="periods"><i class="bi bi-calendar3 me-1"></i>周期管理</button>
-      <button data-view="offices"><i class="bi bi-geo-alt me-1"></i>办事处管理</button>
-      <button data-view="products"><i class="bi bi-diagram-3 me-1"></i>产品线管理</button>
-      <button data-view="categories"><i class="bi bi-tags me-1"></i>类别管理</button>
-      <button data-view="export"><i class="bi bi-cloud-download me-1"></i>汇总导出</button>
+      <button type="button" class="active" data-view="dashboard" onclick="RB.showView('dashboard')"><i class="bi bi-grid me-1"></i>仪表盘</button>
+      <button type="button" data-view="invoices" onclick="RB.showView('invoices')"><i class="bi bi-receipt me-1"></i>发票管理</button>
+      <button type="button" data-view="periods" onclick="RB.showView('periods')"><i class="bi bi-calendar3 me-1"></i>周期管理</button>
+      <button type="button" data-view="offices" onclick="RB.showView('offices')"><i class="bi bi-geo-alt me-1"></i>办事处管理</button>
+      <button type="button" data-view="products" onclick="RB.showView('products')"><i class="bi bi-diagram-3 me-1"></i>产品线管理</button>
+      <button type="button" data-view="categories" onclick="RB.showView('categories')"><i class="bi bi-tags me-1"></i>类别管理</button>
+      <button type="button" data-view="export" onclick="RB.showView('export')"><i class="bi bi-cloud-download me-1"></i>汇总导出</button>
     </div>
 
     <div class="rb-main">
@@ -279,7 +279,8 @@ const RB = {
   esc(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML},
   status(v){return `<span class="rb-badge rb-status-${v.status}">${this.esc(v.status_label||v.status)}</span>`},
   async init(){
-    document.querySelectorAll('#rbNav button').forEach(b=>b.addEventListener('click',()=>this.showView(b.dataset.view)));
+    if(this.state.initialized)return;
+    this.state.initialized=true;
     document.querySelectorAll('.rb-aux-tabs button').forEach(b=>b.addEventListener('click',()=>this.showAux(b.dataset.aux)));
     document.getElementById('rbInvoiceFile').addEventListener('change',e=>this.uploadFile(e.target.files[0]));
     document.getElementById('rbInvAmount').addEventListener('input',()=>this.calcTotal());
@@ -295,10 +296,16 @@ const RB = {
     this.renderDashboard();this.fillSelectors();this.renderPeriods();this.renderCategories();this.renderProductLines();this.renderOffices();
   },
   showView(name){
+    const viewIds={dashboard:'rbViewDashboard',invoices:'rbViewInvoices',periods:'rbViewPeriods',offices:'rbViewOffices',products:'rbViewProducts',categories:'rbViewCategories',export:'rbViewExport'};
+    const target=document.getElementById(viewIds[name]);
+    if(!target){this.toast('模块加载失败，请刷新页面后重试',true);return}
     document.querySelectorAll('#rbNav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
     document.querySelectorAll('.rb-view').forEach(v=>v.classList.remove('active'));
-    document.getElementById('rbView'+name[0].toUpperCase()+name.slice(1)).classList.add('active');
-    if(name==='invoices')this.loadInvoices(1); if(name==='products')this.renderProductLines(); if(name==='offices')this.renderOffices(); if(name==='export')this.loadSummary();
+    target.classList.add('active');
+    if(name==='invoices')this.loadInvoices(1);
+    if(name==='products')this.renderProductLines();
+    if(name==='offices')this.renderOffices();
+    if(name==='export')this.loadSummary();
   },
   renderDashboard(){
     const s=this.state.stats||{}; document.getElementById('rbStatCount').textContent=s.invoice_count||0;document.getElementById('rbStatAmount').textContent=this.money(s.total_amount);document.getElementById('rbStatPending').textContent=s.pending_count||0;document.getElementById('rbStatPeriods').textContent=this.state.periods.length;
@@ -482,5 +489,6 @@ const RB = {
   async saveAux(){const id=+document.getElementById('rbExportPeriod').value;try{await this.api('/tools/reimbursement/api/aux/'+id,{method:'PUT',body:this.state.aux});this.toast('三张明细表已保存')}catch(e){this.toast(e.message,true)}},
   async exportFile(kind){const id=+document.getElementById('rbExportPeriod').value;if(!id){this.toast('请先选择周期',true);return}try{this.toast('正在生成 Excel 文件…');const response=await this.api(`/tools/reimbursement/api/export/${kind}/${id}`);const blob=await response.blob(),header=response.headers.get('content-disposition')||'',encoded=header.match(/filename\*=UTF-8''([^;]+)/i),plain=header.match(/filename="?([^";]+)"?/i);let filename=encoded?decodeURIComponent(encoded[1]):plain?.[1]||(kind==='cover'?'报销封面及费用分类表.xls':'应酬费、出差明细、派车单.xls');const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);this.toast('Excel 文件已生成并开始下载')}catch(e){this.toast(e.message,true)}}
 };
-document.addEventListener('DOMContentLoaded',()=>RB.init());
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>RB.init(),{once:true});
+else RB.init();
 </script>

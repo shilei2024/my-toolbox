@@ -488,6 +488,21 @@ class ReimbursementManagerTests(unittest.TestCase):
             }.issubset(formulas)
         )
 
+    def test_summary_export_view_has_independent_click_entry(self):
+        template = (
+            Path(__file__).parents[1]
+            / "templates"
+            / "tools"
+            / "reimbursement"
+            / "_body.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'data-view="export" onclick="RB.showView(\'export\')"',
+            template,
+        )
+        self.assertIn("export:'rbViewExport'", template)
+        self.assertIn("if(document.readyState==='loading')", template)
+
 
 if __name__ == "__main__":
     unittest.main()
