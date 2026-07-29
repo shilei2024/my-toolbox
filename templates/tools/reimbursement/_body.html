@@ -1,3 +1,4 @@
+{% raw %}
 <style>
   .rb-app { --ink:#172033; --muted:#697386; --line:#e6eaf0; --brand:#176b57; --brand-2:#e8f5f0; color:var(--ink); }
   .rb-shell { background:#f4f7f6; border:1px solid var(--line); border-radius:22px; overflow:hidden; min-height:760px; }
@@ -5,9 +6,10 @@
   .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); }
   .rb-topbar h2 { font-size:1.35rem; margin:0 0 5px; font-weight:700; letter-spacing:.02em; }
   .rb-topbar p { margin:0; color:rgba(255,255,255,.72); font-size:.86rem; }
-  .rb-nav { display:flex; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow:auto; scrollbar-width:none; }
-  .rb-nav::-webkit-scrollbar { display:none; }
-  .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; }
+  .rb-nav { display:flex; flex-wrap:wrap; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow-x:auto; overflow-y:visible; scrollbar-width:thin; }
+  .rb-nav::-webkit-scrollbar { height:4px; }
+  .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; cursor:pointer; flex-shrink:0; }
+  .rb-nav button:hover { color:var(--ink); }
   .rb-nav button.active { color:var(--brand); border-color:var(--brand); }
   .rb-main { padding:22px; }
   .rb-view { display:none; }
@@ -274,6 +276,7 @@ const RB = {
   modal(name){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(name)); },
   anonId(){ let id=localStorage.getItem('rb_anon_id'); if(!id){id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);localStorage.setItem('rb_anon_id',id)} return id; },
   async api(url,options={}){ options.headers={...options.headers,'X-RB-Anon-Id':this.anonId()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
+  async apiRaw(url,options={}){ options.headers={...options.headers,'X-RB-Anon-Id':this.anonId()}; const r=await fetch(url,options); if(!r.ok){let msg=`请求失败 (${r.status})`; try{const j=await r.clone().json();msg=j.error||msg}catch(_){} throw new Error(msg)} return r; },
   toast(message,error=false){ const el=document.getElementById('rbToast'); el.textContent=message; el.className='rb-toast show'+(error?' error':''); clearTimeout(this.toastTimer); this.toastTimer=setTimeout(()=>el.className='rb-toast',2800); },
   money(v){return '¥'+Number(v||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})},
   esc(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML},
@@ -487,8 +490,9 @@ const RB = {
   },
   addAux(kind){this.state.aux[kind].push({});this.renderAux()},removeAux(kind,row){this.state.aux[kind].splice(row,1);this.renderAux()},
   async saveAux(){const id=+document.getElementById('rbExportPeriod').value;try{await this.api('/tools/reimbursement/api/aux/'+id,{method:'PUT',body:this.state.aux});this.toast('三张明细表已保存')}catch(e){this.toast(e.message,true)}},
-  async exportFile(kind){const id=+document.getElementById('rbExportPeriod').value;if(!id){this.toast('请先选择周期',true);return}try{this.toast('正在生成 Excel 文件…');const response=await this.api(`/tools/reimbursement/api/export/${kind}/${id}`);const blob=await response.blob(),header=response.headers.get('content-disposition')||'',encoded=header.match(/filename\*=UTF-8''([^;]+)/i),plain=header.match(/filename="?([^";]+)"?/i);let filename=encoded?decodeURIComponent(encoded[1]):plain?.[1]||(kind==='cover'?'报销封面及费用分类表.xls':'应酬费、出差明细、派车单.xls');const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);this.toast('Excel 文件已生成并开始下载')}catch(e){this.toast(e.message,true)}}
+  async exportFile(kind){const id=+document.getElementById('rbExportPeriod').value;if(!id){this.toast('请先选择周期',true);return}try{this.toast('正在生成 Excel 文件…');const response=await this.apiRaw(`/tools/reimbursement/api/export/${kind}/${id}`);const blob=await response.blob(),header=response.headers.get('content-disposition')||'',encoded=header.match(/filename\*=UTF-8''([^;]+)/i),plain=header.match(/filename="?([^";]+)"?/i);let filename=encoded?decodeURIComponent(encoded[1]):plain?.[1]||(kind==='cover'?'报销封面及费用分类表.xls':'应酬费、出差明细、派车单.xls');const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);this.toast('Excel 文件已生成并开始下载')}catch(e){this.toast(e.message,true)}}
 };
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>RB.init(),{once:true});
 else RB.init();
 </script>
+{% endraw %}
