@@ -329,6 +329,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                 headers=headers,
                 json={
                     "name": "2026年9-10月",
+                    "employee_name": "张三",
                     "start_year": 2026,
                     "start_month": 9,
                     "end_year": 2026,
@@ -357,6 +358,32 @@ class ReimbursementManagerTests(unittest.TestCase):
             )
             self.assertEqual(invoice.status_code, 201)
             self.assertEqual(invoice.get_json()["invoice"]["office"], "测试办")
+
+            renamed = client.put(
+                f"/tools/reimbursement/api/periods/{period['id']}",
+                headers=headers,
+                json={"employee_name": "李四"},
+            )
+            self.assertEqual(renamed.status_code, 200)
+            summary = client.get(
+                f"/tools/reimbursement/api/summary/{period['id']}",
+                headers=headers,
+            ).get_json()["summary"]
+            self.assertEqual(summary["period"]["employee_name"], "李四")
+
+            cover_export = client.get(
+                f"/tools/reimbursement/api/export/cover/{period['id']}",
+                headers=headers,
+            )
+            detail_export = client.get(
+                f"/tools/reimbursement/api/export/details/{period['id']}",
+                headers=headers,
+            )
+            self.assertEqual((cover_export.status_code, detail_export.status_code), (200, 200))
+            cover_book = xlrd.open_workbook(file_contents=cover_export.data)
+            detail_book = xlrd.open_workbook(file_contents=detail_export.data)
+            self.assertEqual(cover_book.sheet_by_name("封面").cell_value(3, 2), "李四")
+            self.assertIn("李四", detail_book.sheet_by_name("应酬费明细表").cell_value(1, 0))
 
             updated = client.put(
                 f"/tools/reimbursement/api/offices/{test_office['id']}",

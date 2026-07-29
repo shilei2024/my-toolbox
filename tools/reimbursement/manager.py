@@ -979,7 +979,8 @@ def register_routes(bp: Blueprint) -> None:
     @csrf.exempt
     def create_period():
         owner_type, owner_id = _owner()
-        values, error = _validate_period(_payload())
+        data = _payload()
+        values, error = _validate_period(data)
         if error:
             return jsonify(error=error), 400
         duplicate = ReimbursementPeriod.query.filter_by(
@@ -997,7 +998,12 @@ def register_routes(bp: Blueprint) -> None:
         ).first()
         if exact:
             return jsonify(error="相同起止月份的周期已存在"), 409
-        period = ReimbursementPeriod(owner_type=owner_type, owner_id=owner_id, **values)
+        period = ReimbursementPeriod(
+            owner_type=owner_type,
+            owner_id=owner_id,
+            employee_name=str(data.get("employee_name") or "").strip(),
+            **values,
+        )
         if not ReimbursementPeriod.query.filter_by(owner_type=owner_type, owner_id=owner_id).first():
             period.is_active = True
         db.session.add(period)
@@ -1029,6 +1035,9 @@ def register_routes(bp: Blueprint) -> None:
             end_year=ey,
             end_month=em,
             is_active=not bool(latest),
+            employee_name=latest.employee_name if latest else "",
+            department=latest.department if latest else "",
+            office=latest.office if latest else "深圳办",
         )
         duplicate = ReimbursementPeriod.query.filter_by(
             owner_type=owner_type,
