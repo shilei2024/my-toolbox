@@ -7,19 +7,29 @@ import unittest
 from datetime import date
 
 import xlrd
-from flask import Flask
+from flask import Blueprint, Flask
 from xlrd.compdoc import CompDoc
 
-from extensions import db
-from models import ReimbursementAuxDetail, ReimbursementCategory, ReimbursementInvoice, ReimbursementPeriod
+from extensions import db, login_manager
+from models import (
+    ReimbursementAuxDetail,
+    ReimbursementCategory,
+    ReimbursementInvoice,
+    ReimbursementPeriod,
+    ReimbursementProductLine,
+)
+from tools.reimbursement import PRODUCT_LINES
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
     DETAIL_TEMPLATE,
     _build_cover_xls,
     _build_detail_xls,
+    _assign_invoice_product_line,
     _period_parts,
+    _seed_product_lines,
     _sync_invoice_aux,
+    register_routes,
 )
 
 
@@ -174,6 +184,110 @@ class ReimbursementManagerTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].kind, "travel")
             self.assertEqual(json.loads(rows[0].data_json)["location"], "上海")
+
+    def test_product_lines_seed_from_workbook_and_code_is_server_matched(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            rows = _seed_product_lines("anon", "product-test")
+            self.assertEqual(len(rows), len(PRODUCT_LINES))
+            diodes = ReimbursementProductLine.query.filter_by(
+                owner_type="anon", owner_id="product-test", name="DIODES"
+            ).one()
+            self.assertEqual(diodes.code, "01")
+            invoice = ReimbursementInvoice(
+                owner_type="anon",
+                owner_id="product-test",
+                period_id=1,
+                product_line="",
+                product_line_code="",
+            )
+            error = _assign_invoice_product_line(
+                invoice,
+                {
+                    "product_line_id": diodes.id,
+                    "product_line": "错误名称",
+                    "product_line_code": "9999",
+                },
+            )
+            self.assertIsNone(error)
+            self.assertEqual((invoice.product_line, invoice.product_line_code), ("DIODES", "01"))
+            self.assertEqual(
+                _assign_invoice_product_line(invoice, {"product_line_id": 999999}),
+                "请选择有效的产品线",
+            )
+
+    def test_product_line_crud_updates_and_migrates_linked_invoices(self):
+        app = Flask(__name__)
+        app.config.update(
+            SECRET_KEY="test",
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        login_manager.init_app(app)
+        login_manager.user_loader(lambda _user_id: None)
+        blueprint = Blueprint("rb_product_test", __name__, url_prefix="/tools/reimbursement")
+        register_routes(blueprint)
+        app.register_blueprint(blueprint)
+        with app.app_context():
+            db.create_all()
+        client = app.test_client()
+        headers = {"X-RB-Anon-Id": "crud-test"}
+        bootstrap = client.get("/tools/reimbursement/api/bootstrap", headers=headers).get_json()
+        by_name = {item["name"]: item for item in bootstrap["product_lines"]}
+        period = client.post(
+            "/tools/reimbursement/api/periods",
+            headers=headers,
+            json={
+                "name": "2026年7-8月",
+                "start_year": 2026,
+                "start_month": 7,
+                "end_year": 2026,
+                "end_month": 8,
+            },
+        ).get_json()["period"]
+        invoice_response = client.post(
+            "/tools/reimbursement/api/invoices",
+            headers=headers,
+            json={
+                "period_id": period["id"],
+                "product_line_id": by_name["DIODES"]["id"],
+                "product_line_code": "错误代码",
+                "invoice_number": "PL-1",
+                "total_amount": 88,
+            },
+        )
+        self.assertEqual(invoice_response.status_code, 201)
+        self.assertEqual(invoice_response.get_json()["invoice"]["product_line_code"], "01")
+
+        updated = client.put(
+            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}",
+            headers=headers,
+            json={"name": "DIODES-NEW", "code": "0100", "office": "深圳办"},
+        )
+        self.assertEqual(updated.status_code, 200)
+        invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
+        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("DIODES-NEW", "0100"))
+
+        blocked = client.delete(
+            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}",
+            headers=headers,
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertTrue(blocked.get_json()["needs_migration"])
+        migrated = client.delete(
+            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}?migrate_to={by_name['MSTAR']['id']}",
+            headers=headers,
+        )
+        self.assertEqual(migrated.status_code, 200)
+        invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
+        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("MSTAR", "02"))
 
     def test_cover_export_uses_original_workbook_layout(self):
         output = _build_cover_xls(self.cover_data)

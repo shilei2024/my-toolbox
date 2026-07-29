@@ -298,6 +298,27 @@ class ReimbursementCategory(db.Model):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class ReimbursementProductLine(db.Model):
+    """User-managed product-line directory seeded from the original workbook."""
+
+    __tablename__ = "reimbursement_product_lines"
+    __table_args__ = (
+        UniqueConstraint("owner_type", "owner_id", "name", name="uq_rb_product_line_owner_name"),
+        UniqueConstraint("owner_type", "owner_id", "code", name="uq_rb_product_line_owner_code"),
+        Index("ix_rb_product_line_owner_order", "owner_type", "owner_id", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    office: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class ReimbursementInvoice(db.Model):
     """Normalized invoice record; the uploaded file remains addressable by URL."""
 

@@ -19,6 +19,7 @@ from models import (
     ReimbursementCategory,
     ReimbursementInvoice,
     ReimbursementPeriod,
+    ReimbursementProductLine,
     ReimbursementRecord,
 )
 
@@ -108,6 +109,16 @@ def _category_dict(cat: ReimbursementCategory) -> dict[str, Any]:
     }
 
 
+def _product_line_dict(item: ReimbursementProductLine) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "code": item.code,
+        "office": item.office,
+        "sort_order": item.sort_order,
+    }
+
+
 def _period_dict(period: ReimbursementPeriod, with_stats: bool = True) -> dict[str, Any]:
     result = {
         "id": period.id,
@@ -135,6 +146,14 @@ def _period_dict(period: ReimbursementPeriod, with_stats: bool = True) -> dict[s
 def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory | None = None) -> dict[str, Any]:
     if category is None and invoice.category_id:
         category = db.session.get(ReimbursementCategory, invoice.category_id)
+    product_line = ReimbursementProductLine.query.filter(
+        ReimbursementProductLine.owner_type == invoice.owner_type,
+        ReimbursementProductLine.owner_id == invoice.owner_id,
+        or_(
+            ReimbursementProductLine.name == invoice.product_line,
+            ReimbursementProductLine.code == invoice.product_line_code,
+        ),
+    ).first()
     return {
         "id": invoice.id,
         "period_id": invoice.period_id,
@@ -154,6 +173,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "status_label": STATUS_LABELS.get(invoice.status, invoice.status),
         "product_line": invoice.product_line,
         "product_line_code": invoice.product_line_code,
+        "product_line_id": product_line.id if product_line else None,
         "office": invoice.office,
         "customer_level": invoice.customer_level,
         "remarks": invoice.remarks,
@@ -185,6 +205,35 @@ def _seed_categories(owner_type: str, owner_id: str) -> list[ReimbursementCatego
     return (
         ReimbursementCategory.query.filter_by(owner_type=owner_type, owner_id=owner_id)
         .order_by(ReimbursementCategory.sort_order)
+        .all()
+    )
+
+
+def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementProductLine]:
+    rows = (
+        ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+        .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
+        .all()
+    )
+    if rows:
+        return rows
+    from . import PRODUCT_LINES
+
+    for index, item in enumerate(PRODUCT_LINES):
+        db.session.add(
+            ReimbursementProductLine(
+                owner_type=owner_type,
+                owner_id=owner_id,
+                name=item["name"],
+                code=item["code"],
+                office=item.get("office", ""),
+                sort_order=(index + 1) * 10,
+            )
+        )
+    db.session.commit()
+    return (
+        ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+        .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
         .all()
     )
 
@@ -272,6 +321,25 @@ def _owned_category(category_id: int | None, owner_type: str, owner_id: str) -> 
     return ReimbursementCategory.query.filter_by(
         id=category_id, owner_type=owner_type, owner_id=owner_id
     ).first()
+
+
+def _owned_product_line(
+    product_line_id: int | None, owner_type: str, owner_id: str
+) -> ReimbursementProductLine | None:
+    if not product_line_id:
+        return None
+    return ReimbursementProductLine.query.filter_by(
+        id=product_line_id, owner_type=owner_type, owner_id=owner_id
+    ).first()
+
+
+def _replace_aux_product_line(owner_type: str, owner_id: str, old_name: str, new_name: str) -> None:
+    rows = ReimbursementAuxDetail.query.filter_by(owner_type=owner_type, owner_id=owner_id).all()
+    for row in rows:
+        value = json.loads(row.data_json or "{}")
+        if value.get("purpose") == old_name:
+            value["purpose"] = new_name
+            row.data_json = json.dumps(value, ensure_ascii=False)
 
 
 def _validate_period(data: dict[str, Any], current_id: int | None = None) -> tuple[dict[str, Any] | None, str | None]:
@@ -463,6 +531,25 @@ def _remove_invoice_aux(invoice: ReimbursementInvoice) -> None:
         value = json.loads(row.data_json or "{}")
         if value.get("invoice_id") == invoice.id:
             db.session.delete(row)
+
+
+def _assign_invoice_product_line(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | None:
+    product_line_id = data.get("product_line_id")
+    product_line = _owned_product_line(product_line_id, invoice.owner_type, invoice.owner_id)
+    if product_line_id and not product_line:
+        return "请选择有效的产品线"
+    product_line_name = str(data.get("product_line") or "").strip()
+    if not product_line and product_line_name:
+        product_line = ReimbursementProductLine.query.filter_by(
+            owner_type=invoice.owner_type,
+            owner_id=invoice.owner_id,
+            name=product_line_name,
+        ).first()
+        if not product_line:
+            return "请选择产品线清单中的有效选项"
+    invoice.product_line = product_line.name if product_line else ""
+    invoice.product_line_code = product_line.code if product_line else ""
+    return None
 
 
 def _number_to_chinese(amount: float) -> str:
@@ -697,6 +784,7 @@ def register_routes(bp: Blueprint) -> None:
     def bootstrap():
         owner_type, owner_id = _owner()
         _seed_categories(owner_type, owner_id)
+        _seed_product_lines(owner_type, owner_id)
         _migrate_legacy(owner_type, owner_id)
         periods = (
             ReimbursementPeriod.query.filter_by(owner_type=owner_type, owner_id=owner_id)
@@ -706,6 +794,11 @@ def register_routes(bp: Blueprint) -> None:
         categories = (
             ReimbursementCategory.query.filter_by(owner_type=owner_type, owner_id=owner_id)
             .order_by(ReimbursementCategory.sort_order, ReimbursementCategory.id)
+            .all()
+        )
+        product_lines = (
+            ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+            .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
             .all()
         )
         invoices = (
@@ -727,6 +820,7 @@ def register_routes(bp: Blueprint) -> None:
             success=True,
             periods=[_period_dict(item) for item in periods],
             categories=[_category_dict(item) for item in categories],
+            product_lines=[_product_line_dict(item) for item in product_lines],
             recent=[_invoice_dict(item) for item in invoices],
             stats={
                 "invoice_count": int(total_count),
@@ -909,6 +1003,133 @@ def register_routes(bp: Blueprint) -> None:
         db.session.commit()
         return jsonify(success=True)
 
+    @bp.get("/api/product-lines")
+    def list_product_lines():
+        owner_type, owner_id = _owner()
+        rows = _seed_product_lines(owner_type, owner_id)
+        return jsonify(product_lines=[_product_line_dict(item) for item in rows])
+
+    @bp.post("/api/product-lines")
+    @csrf.exempt
+    def create_product_line():
+        owner_type, owner_id = _owner()
+        _seed_product_lines(owner_type, owner_id)
+        data = _payload()
+        name = str(data.get("name") or "").strip()
+        code = str(data.get("code") or "").strip()
+        if not name or not code:
+            return jsonify(error="产品线名称和代码不能为空"), 400
+        if ReimbursementProductLine.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, name=name
+        ).first():
+            return jsonify(error="产品线名称已存在"), 409
+        if ReimbursementProductLine.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, code=code
+        ).first():
+            return jsonify(error="产品线代码已存在"), 409
+        max_order = (
+            db.session.query(func.max(ReimbursementProductLine.sort_order))
+            .filter_by(owner_type=owner_type, owner_id=owner_id)
+            .scalar()
+        )
+        item = ReimbursementProductLine(
+            owner_type=owner_type,
+            owner_id=owner_id,
+            name=name,
+            code=code,
+            office=str(data.get("office") or "").strip(),
+            sort_order=int(data.get("sort_order") or ((max_order or 0) + 10)),
+        )
+        db.session.add(item)
+        db.session.commit()
+        return jsonify(success=True, product_line=_product_line_dict(item)), 201
+
+    @bp.put("/api/product-lines/<int:product_line_id>")
+    @csrf.exempt
+    def update_product_line(product_line_id: int):
+        owner_type, owner_id = _owner()
+        item = _owned_product_line(product_line_id, owner_type, owner_id)
+        if not item:
+            return jsonify(error="产品线不存在"), 404
+        data = _payload()
+        name = str(data.get("name") or "").strip()
+        code = str(data.get("code") or "").strip()
+        if not name or not code:
+            return jsonify(error="产品线名称和代码不能为空"), 400
+        duplicate_name = ReimbursementProductLine.query.filter(
+            ReimbursementProductLine.owner_type == owner_type,
+            ReimbursementProductLine.owner_id == owner_id,
+            ReimbursementProductLine.name == name,
+            ReimbursementProductLine.id != item.id,
+        ).first()
+        if duplicate_name:
+            return jsonify(error="产品线名称已存在"), 409
+        duplicate_code = ReimbursementProductLine.query.filter(
+            ReimbursementProductLine.owner_type == owner_type,
+            ReimbursementProductLine.owner_id == owner_id,
+            ReimbursementProductLine.code == code,
+            ReimbursementProductLine.id != item.id,
+        ).first()
+        if duplicate_code:
+            return jsonify(error="产品线代码已存在"), 409
+        old_name, old_code = item.name, item.code
+        item.name = name
+        item.code = code
+        item.office = str(data.get("office") or "").strip()
+        if "sort_order" in data:
+            item.sort_order = int(data.get("sort_order") or 0)
+        ReimbursementInvoice.query.filter(
+            ReimbursementInvoice.owner_type == owner_type,
+            ReimbursementInvoice.owner_id == owner_id,
+            or_(
+                ReimbursementInvoice.product_line == old_name,
+                ReimbursementInvoice.product_line_code == old_code,
+            ),
+        ).update(
+            {"product_line": item.name, "product_line_code": item.code},
+            synchronize_session=False,
+        )
+        if old_name != item.name:
+            _replace_aux_product_line(owner_type, owner_id, old_name, item.name)
+        db.session.commit()
+        return jsonify(success=True, product_line=_product_line_dict(item))
+
+    @bp.delete("/api/product-lines/<int:product_line_id>")
+    @csrf.exempt
+    def remove_product_line(product_line_id: int):
+        owner_type, owner_id = _owner()
+        item = _owned_product_line(product_line_id, owner_type, owner_id)
+        if not item:
+            return jsonify(error="产品线不存在"), 404
+        invoices = ReimbursementInvoice.query.filter(
+            ReimbursementInvoice.owner_type == owner_type,
+            ReimbursementInvoice.owner_id == owner_id,
+            or_(
+                ReimbursementInvoice.product_line == item.name,
+                ReimbursementInvoice.product_line_code == item.code,
+            ),
+        )
+        count = invoices.count()
+        migrate_to = request.args.get("migrate_to", type=int)
+        if count and not migrate_to:
+            return jsonify(
+                error="该产品线仍有关联发票，请选择迁移目标产品线",
+                invoice_count=count,
+                needs_migration=True,
+            ), 409
+        if migrate_to:
+            target = _owned_product_line(migrate_to, owner_type, owner_id)
+            if not target or target.id == item.id:
+                return jsonify(error="迁移目标产品线无效"), 400
+            invoices.update(
+                {"product_line": target.name, "product_line_code": target.code},
+                synchronize_session=False,
+            )
+            _replace_aux_product_line(owner_type, owner_id, item.name, target.name)
+        db.session.delete(item)
+        db.session.commit()
+        return jsonify(success=True)
+
     @bp.get("/api/invoices")
     def list_invoices():
         owner_type, owner_id = _owner()
@@ -951,7 +1172,10 @@ def register_routes(bp: Blueprint) -> None:
         invoice.total_amount = _money(data.get("total_amount"))
         if invoice.total_amount == 0:
             invoice.total_amount = invoice.amount + invoice.tax_amount
-        for key in ("vendor", "description", "file_url", "file_name", "product_line", "product_line_code", "office", "customer_level", "remarks"):
+        product_line_error = _assign_invoice_product_line(invoice, data)
+        if product_line_error:
+            return product_line_error
+        for key in ("vendor", "description", "file_url", "file_name", "office", "customer_level", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
         invoice.status = data.get("status") if data.get("status") in STATUS_LABELS else "pending"
