@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -371,6 +372,26 @@ class ReimbursementInvoice(db.Model):
     upload_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ReimbursementAttachment(db.Model):
+    """Database-backed invoice original, retained across restarts and instances."""
+
+    __tablename__ = "reimbursement_attachments"
+    __table_args__ = (
+        Index("ix_rb_attachment_owner", "owner_type", "owner_id"),
+        UniqueConstraint("stored_name", name="uq_rb_attachment_stored_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_type: Mapped[str] = mapped_column(String(8), nullable=False, default="anon")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False, default="application/octet-stream")
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 class ReimbursementAuxDetail(db.Model):

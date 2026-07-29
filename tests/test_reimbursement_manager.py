@@ -12,15 +12,16 @@ import xlrd
 from flask import Blueprint, Flask
 from xlrd.compdoc import CompDoc
 
-from extensions import db, login_manager
+from extensions import csrf, db, limiter, login_manager
 from models import (
+    ReimbursementAttachment,
     ReimbursementAuxDetail,
     ReimbursementCategory,
     ReimbursementInvoice,
     ReimbursementPeriod,
     ReimbursementProductLine,
 )
-from tools.reimbursement import PRODUCT_LINES
+from tools.reimbursement import PRODUCT_LINES, tool_bp
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
@@ -502,6 +503,88 @@ class ReimbursementManagerTests(unittest.TestCase):
         )
         self.assertIn("export:'rbViewExport'", template)
         self.assertIn("if(document.readyState==='loading')", template)
+        self.assertIn("flex-wrap:nowrap", template)
+        self.assertIn("scrollbar-width:none", template)
+        self.assertIn("-webkit-overflow-scrolling:touch", template)
+        self.assertIn("?(end-start).toFixed(2):''", template)
+        self.assertIn("rbViewExport').addEventListener('input'", template)
+
+    def test_uploaded_invoice_survives_local_file_loss(self):
+        app = Flask(__name__)
+        with tempfile.TemporaryDirectory() as upload_root:
+            app.config.update(
+                SECRET_KEY="test",
+                SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+                SQLALCHEMY_TRACK_MODIFICATIONS=False,
+                UPLOAD_DIR=upload_root,
+                ANON_FREE_LIMIT=10,
+                DAILY_FREE_LIMIT=10,
+                RATELIMIT_ENABLED=False,
+                WTF_CSRF_ENABLED=False,
+            )
+            db.init_app(app)
+            login_manager.init_app(app)
+            login_manager.user_loader(lambda _user_id: None)
+            csrf.init_app(app)
+            limiter.init_app(app)
+            app.register_blueprint(tool_bp, url_prefix="/tools/reimbursement")
+            with app.app_context():
+                db.create_all()
+            client = app.test_client()
+            headers = {"X-RB-Anon-Id": "attachment-test"}
+            image = __import__("base64").b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII="
+            )
+            uploaded = client.post(
+                "/tools/reimbursement/upload",
+                headers=headers,
+                data={"file": (io.BytesIO(image), "发票.png")},
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(uploaded.status_code, 200)
+            upload_data = uploaded.get_json()
+            stored_name = upload_data["filename"]
+            bootstrap = client.get(
+                "/tools/reimbursement/api/bootstrap", headers=headers
+            ).get_json()
+            period = client.post(
+                "/tools/reimbursement/api/periods",
+                headers=headers,
+                json={
+                    "name": "附件持久化测试",
+                    "start_year": 2026,
+                    "start_month": 7,
+                    "end_year": 2026,
+                    "end_month": 8,
+                },
+            ).get_json()["period"]
+            invoice = client.post(
+                "/tools/reimbursement/api/invoices",
+                headers=headers,
+                json={
+                    "period_id": period["id"],
+                    "office_id": bootstrap["offices"][0]["id"],
+                    "invoice_number": "PERSIST-1",
+                    "file_url": upload_data["original_url"],
+                    "file_name": upload_data["original_name"],
+                    "file_size": upload_data["size"],
+                },
+            )
+            self.assertEqual(invoice.status_code, 201)
+            self.assertEqual(
+                invoice.get_json()["invoice"]["file_url"],
+                upload_data["original_url"],
+            )
+            with app.app_context():
+                attachment = ReimbursementAttachment.query.filter_by(
+                    stored_name=stored_name
+                ).one()
+                self.assertEqual(attachment.content, image)
+            stored_path = Path(upload_root) / "reimbursement" / stored_name
+            stored_path.unlink()
+            preview = client.get(f"/tools/reimbursement/preview/{stored_name}")
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(preview.data, image)
 
 
 if __name__ == "__main__":

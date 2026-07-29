@@ -6,8 +6,8 @@
   .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); }
   .rb-topbar h2 { font-size:1.35rem; margin:0 0 5px; font-weight:700; letter-spacing:.02em; }
   .rb-topbar p { margin:0; color:rgba(255,255,255,.72); font-size:.86rem; }
-  .rb-nav { display:flex; flex-wrap:wrap; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow-x:auto; overflow-y:visible; scrollbar-width:thin; }
-  .rb-nav::-webkit-scrollbar { height:4px; }
+  .rb-nav { display:flex; flex-wrap:nowrap; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -ms-overflow-style:none; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }
+  .rb-nav::-webkit-scrollbar { display:none; width:0; height:0; }
   .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; cursor:pointer; flex-shrink:0; }
   .rb-nav button:hover { color:var(--ink); }
   .rb-nav button.active { color:var(--brand); border-color:var(--brand); }
@@ -291,6 +291,10 @@ const RB = {
     document.getElementById('rbInvCategory').addEventListener('change',()=>this.renderLinkedDetail());
     ['rbInvDate','rbInvVendor','rbInvTotal','rbInvProduct'].forEach(id=>document.getElementById(id).addEventListener('change',()=>this.syncLinkedDefaults(true)));
     document.getElementById('rbSearch').addEventListener('keydown',e=>{if(e.key==='Enter')this.loadInvoices(1)});
+    document.getElementById('rbViewExport').addEventListener('input',e=>{
+      const match=e.target.id?.match(/^rbAux_(entertainment|vehicle|travel)_(\d+)_(.+)$/);
+      if(match)this.setAux(match[1],Number(match[2]),match[3],e.target.value);
+    });
     try{ this.state.reference=await this.api('/tools/reimbursement/reference'); await this.reload(); }catch(e){this.toast(e.message,true)}
   },
   async reload(){
@@ -305,6 +309,7 @@ const RB = {
     document.querySelectorAll('#rbNav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
     document.querySelectorAll('.rb-view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
+    document.querySelector(`#rbNav button[data-view="${name}"]`)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
     if(name==='invoices')this.loadInvoices(1);
     if(name==='products')this.renderProductLines();
     if(name==='offices')this.renderOffices();
@@ -372,7 +377,7 @@ const RB = {
   async uploadFile(file){
     if(!file)return;if(file.size>20*1024*1024){this.toast('单文件不能超过 20MB',true);return}
     const fd=new FormData();fd.append('file',file);document.getElementById('rbUploadedFile').textContent='正在上传并识别…';
-    try{const uploaded=await this.api('/tools/reimbursement/upload',{method:'POST',body:fd});document.getElementById('rbFileUrl').value=uploaded.original_url||uploaded.full_url||uploaded.preview_url;document.getElementById('rbFileName').value=uploaded.original_name;document.getElementById('rbFileSize').value=uploaded.size||file.size;document.getElementById('rbUploadedFile').textContent=`原件已上传并保留：${uploaded.original_name}`;this.renderFilePreview(uploaded.original_url||uploaded.full_url||uploaded.preview_url,uploaded.original_name,'rbInvoiceFilePreview');
+    try{const uploaded=await this.api('/tools/reimbursement/upload',{method:'POST',body:fd});document.getElementById('rbFileUrl').value=uploaded.original_url||uploaded.full_url||uploaded.preview_url;document.getElementById('rbFileName').value=uploaded.original_name;document.getElementById('rbFileSize').value=uploaded.size||file.size;document.getElementById('rbUploadedFile').textContent=`原件已持久保存：${uploaded.original_name}；请点击“保存发票”完成记录`;this.renderFilePreview(uploaded.original_url||uploaded.full_url||uploaded.preview_url,uploaded.original_name,'rbInvoiceFilePreview');
       const image_base64=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(file)});const ocr=await this.api('/tools/reimbursement/ocr',{method:'POST',body:{file_id:uploaded.file_id,image_base64}}).catch(()=>null);if(ocr?.success){const d=ocr.data||{};document.getElementById('rbInvNumber').value=d.invoice_number||'';document.getElementById('rbInvDate').value=d.invoice_date||'';document.getElementById('rbInvVendor').value=d.seller_name||'';document.getElementById('rbInvAmount').value=d.amount_excluding_tax||'';document.getElementById('rbInvTax').value=d.tax_amount||'';document.getElementById('rbInvTotal').value=d.total_amount||'';document.getElementById('rbInvDescription').value=d.description||'';this.syncLinkedDefaults(true);this.toast('上传完成，已回填发票及关联明细')}else this.toast('上传完成，请核对并补充发票信息');
     }catch(e){document.getElementById('rbUploadedFile').textContent='上传失败';this.toast(e.message,true)}
   },
@@ -470,7 +475,7 @@ const RB = {
   };Object.entries(schemas).forEach(([kind,fields])=>{
     const rows=this.state.aux[kind]||[],sum=key=>rows.reduce((total,row)=>total+(parseFloat(row[key])||0),0).toFixed(2);
     const totalKeys=kind==='entertainment'?{amount:sum('amount')}:kind==='vehicle'?{km_total:sum('km_total'),toll_fee:sum('toll_fee'),parking_fee:sum('parking_fee')}:{amount:sum('amount')};
-    const body=rows.map((r,ri)=>`<tr>${fields.map(f=>{const key=f[0],readonly=kind==='vehicle'&&key==='km_total';return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(r[key]??'')}" ${readonly?'readonly title="公里数由止减起自动计算"':''} oninput="RB.setAux('${kind}',${ri},'${key}',this.value)"></td>`}).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('');
+    const body=rows.map((r,ri)=>`<tr>${fields.map(f=>{const key=f[0],readonly=kind==='vehicle'&&key==='km_total';return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(r[key]??'')}" ${readonly?'readonly title="公里数由止减起自动计算"':''}></td>`}).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('');
     const footer=`<tr>${fields.map((f,index)=>`<th>${index===0?'合计':(totalKeys[f[0]]??'')}</th>`).join('')}<th></th></tr>`;
     document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).innerHTML=`<div class="rb-table-wrap"><table class="rb-table rb-aux-table"><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody>${body}</tbody><tfoot>${footer}</tfoot></table></div><button class="rb-btn rb-btn-light mt-2" onclick="RB.addAux('${kind}')"><i class="bi bi-plus"></i>添加一行</button>`;
   })},
@@ -478,7 +483,7 @@ const RB = {
     this.state.aux[kind][row][key]=value;
     if(kind==='vehicle'&&['km_start','km_end'].includes(key)){
       const item=this.state.aux[kind][row],start=parseFloat(item.km_start),end=parseFloat(item.km_end);
-      item.km_total=Number.isFinite(start)&&Number.isFinite(end)?Math.max(0,end-start).toFixed(2):'';
+      item.km_total=Number.isFinite(start)&&Number.isFinite(end)?(end-start).toFixed(2):'';
       const output=document.getElementById(`rbAux_vehicle_${row}_km_total`);if(output)output.value=item.km_total;
     }
     this.updateAuxFooter(kind);

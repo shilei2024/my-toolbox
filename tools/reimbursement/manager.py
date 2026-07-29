@@ -17,6 +17,7 @@ from sqlalchemy import case, func, or_
 
 from extensions import csrf, db
 from models import (
+    ReimbursementAttachment,
     ReimbursementAuxDetail,
     ReimbursementCategory,
     ReimbursementInvoice,
@@ -469,7 +470,7 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
             start = _money(value.get("km_start"))
             end = _money(value.get("km_end"))
             value["km_total"] = (
-                float(max(Decimal("0"), end - start))
+                float(end - start)
                 if value.get("km_start") not in (None, "") and value.get("km_end") not in (None, "")
                 else ""
             )
@@ -641,7 +642,28 @@ def _invoice_attachment_path(invoice: ReimbursementInvoice) -> Path | None:
         candidates.append(upload_dir / f"{file_id}{original_ext}")
     candidates.extend(upload_dir / f"{file_id}{ext}" for ext in (".pdf", ".png", ".jpg", ".jpeg"))
     candidates.append(direct)
-    return next((item for item in candidates if item.exists() and item.is_file()), None)
+    existing = next((item for item in candidates if item.exists() and item.is_file()), None)
+    if existing:
+        return existing
+    attachment = ReimbursementAttachment.query.filter(
+        ReimbursementAttachment.stored_name.like(f"{file_id}.%")
+    ).first()
+    if not attachment:
+        return None
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    restored = upload_dir / attachment.stored_name
+    restored.write_bytes(attachment.content)
+    return restored
+
+
+def _delete_invoice_attachment(invoice: ReimbursementInvoice) -> None:
+    if not invoice.file_url.startswith("/tools/reimbursement/preview/"):
+        return
+    filename = invoice.file_url.rsplit("/", 1)[-1]
+    file_id = re.sub(r"_(?:thumb|full)$", "", Path(filename).stem)
+    ReimbursementAttachment.query.filter(
+        ReimbursementAttachment.stored_name.like(f"{file_id}.%")
+    ).delete(synchronize_session=False)
 
 
 def _invoice_family_paths(invoice: ReimbursementInvoice) -> list[Path]:
@@ -885,7 +907,7 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
             item.get("contact", ""),
             item.get("km_start", ""),
             item.get("km_end", ""),
-            Formula(f'IF(OR(E{excel_row}="",F{excel_row}=""),"",MAX(0,F{excel_row}-E{excel_row}))'),
+            Formula(f'IF(OR(E{excel_row}="",F{excel_row}=""),"",F{excel_row}-E{excel_row})'),
             float(item.get("toll_fee") or 0),
             float(item.get("parking_fee") or 0),
             item.get("remarks", ""),
@@ -1091,6 +1113,7 @@ def register_routes(bp: Blueprint) -> None:
         for invoice in period_invoices:
             for path in set(_invoice_family_paths(invoice)):
                 path.unlink(missing_ok=True)
+            _delete_invoice_attachment(invoice)
         ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
         ReimbursementInvoice.query.filter_by(period_id=period.id).delete()
         db.session.delete(period)
@@ -1482,6 +1505,7 @@ def register_routes(bp: Blueprint) -> None:
             return jsonify(error="发票不存在"), 404
         for path in set(_invoice_family_paths(invoice)):
             path.unlink(missing_ok=True)
+        _delete_invoice_attachment(invoice)
         _remove_invoice_aux(invoice)
         db.session.delete(invoice)
         db.session.commit()
@@ -1560,7 +1584,7 @@ header span{{color:#5c6f68;text-align:right}}img{{display:block;max-width:100%;m
                     start = value.get("km_start")
                     end = value.get("km_end")
                     value["km_total"] = (
-                        float(max(Decimal("0"), _money(end) - _money(start)))
+                        float(_money(end) - _money(start))
                         if start not in (None, "") and end not in (None, "")
                         else ""
                     )

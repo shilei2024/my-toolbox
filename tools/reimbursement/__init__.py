@@ -15,7 +15,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request, ses
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import csrf, db, limiter
-from models import ReimbursementRecord
+from models import ReimbursementAttachment, ReimbursementRecord
 
 tool_bp = Blueprint("reimbursement", __name__)
 
@@ -280,6 +280,18 @@ def upload():
     safe_name = f"{file_id}{ext}"
     filepath = upload_dir / safe_name
     f.save(str(filepath))
+    owner_type, owner_id = _rb_owner()
+    attachment = ReimbursementAttachment(
+        owner_type=owner_type,
+        owner_id=owner_id,
+        stored_name=safe_name,
+        original_name=Path(f.filename).name,
+        mime_type=f.mimetype or "application/octet-stream",
+        file_size=filepath.stat().st_size,
+        content=filepath.read_bytes(),
+    )
+    db.session.add(attachment)
+    db.session.commit()
 
     # PDF → 生成缩略图 PNG + 高清预览图 + 返回 base64（Vercel 兼容）
     preview_filename = safe_name
@@ -360,7 +372,23 @@ def preview(filename):
         return jsonify(error="非法路径"), 400
 
     if not filepath.exists():
-        return jsonify(error="文件不存在"), 404
+        import io
+        import re
+
+        file_id = re.sub(r"_(?:thumb|full)$", "", Path(filename).stem)
+        attachment = ReimbursementAttachment.query.filter_by(stored_name=filename).first()
+        if not attachment:
+            attachment = ReimbursementAttachment.query.filter(
+                ReimbursementAttachment.stored_name.like(f"{file_id}.%")
+            ).first()
+        if not attachment:
+            return jsonify(error="文件不存在"), 404
+        return send_file(
+            io.BytesIO(attachment.content),
+            mimetype=attachment.mime_type,
+            download_name=attachment.original_name or attachment.stored_name,
+            max_age=3600,
+        )
 
     ext = filepath.suffix.lower()
     mimetypes = {
