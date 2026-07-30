@@ -6,6 +6,10 @@
   .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); pointer-events:none; }
   .rb-topbar h2 { font-size:1.35rem; margin:0 0 5px; font-weight:700; letter-spacing:.02em; }
   .rb-topbar p { margin:0; color:rgba(255,255,255,.72); font-size:.86rem; }
+  .rb-topbar-row { position:relative; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+  .rb-period-switcher { display:flex; align-items:center; gap:9px; flex:0 0 auto; }
+  .rb-period-switcher label { font-size:.78rem; color:rgba(255,255,255,.78); white-space:nowrap; }
+  .rb-period-switcher select { min-width:180px; border:1px solid rgba(255,255,255,.3); background:#fff; color:var(--ink); }
   .rb-nav-frame { position:relative; z-index:1; display:grid; grid-template-columns:38px minmax(0,1fr) 38px; align-items:stretch; background:#fff; border-bottom:1px solid var(--line); }
   .rb-nav-frame.is-static { grid-template-columns:minmax(0,1fr); }
   .rb-nav-frame.is-static .rb-nav-arrow { display:none; }
@@ -85,14 +89,16 @@
   .rb-toast.error { background:#9f2925; }
   @keyframes rbIn { from{transform:translateY(8px);opacity:0} to{transform:none;opacity:1} }
   @media(max-width:900px){ .rb-kpis{grid-template-columns:repeat(2,1fr)} .rb-grid-2{grid-template-columns:1fr} .rb-period-grid,.rb-category-grid,.rb-office-grid{grid-template-columns:repeat(2,1fr)} }
-  @media(max-width:600px){ .rb-main{padding:14px} .rb-kpis{grid-template-columns:1fr 1fr;gap:9px} .rb-kpi{padding:14px}.rb-period-grid,.rb-category-grid,.rb-office-grid{grid-template-columns:1fr}.rb-topbar{padding:19px}.rb-summary-grid{grid-template-columns:1fr} }
+  @media(max-width:600px){ .rb-main{padding:14px} .rb-kpis{grid-template-columns:1fr 1fr;gap:9px} .rb-kpi{padding:14px}.rb-period-grid,.rb-category-grid,.rb-office-grid{grid-template-columns:1fr}.rb-topbar{padding:19px}.rb-topbar-row{align-items:flex-start;flex-direction:column}.rb-period-switcher{width:100%}.rb-period-switcher select{min-width:0;flex:1}.rb-summary-grid{grid-template-columns:1fr} }
 </style>
 
 <div class="rb-app">
   <div class="rb-shell">
     <div class="rb-topbar">
-      <h2><i class="bi bi-receipt-cutoff me-2"></i>发票报销管理</h2>
-      <p>发票归档、双月周期、费用分类与财务模板导出</p>
+      <div class="rb-topbar-row">
+        <div><h2><i class="bi bi-receipt-cutoff me-2"></i>发票报销管理</h2><p>发票归档、双月周期、费用分类与财务模板导出</p></div>
+        <div class="rb-period-switcher"><label for="rbWorkspacePeriod">当前查看周期</label><select class="form-select form-select-sm" id="rbWorkspacePeriod" onchange="RB.activatePeriod(+this.value)"></select></div>
+      </div>
     </div>
     <div class="rb-nav-frame" id="rbNavFrame">
       <button type="button" class="rb-nav-arrow" id="rbNavPrev" aria-label="向左查看更多导航" title="向左查看更多" onclick="RB.scrollNav(-1)"><span aria-hidden="true">‹</span></button>
@@ -111,10 +117,10 @@
     <div class="rb-main">
       <section class="rb-view active" id="rbViewDashboard">
         <div class="rb-kpis">
-          <div class="rb-kpi"><div class="label">发票总数</div><div class="value" id="rbStatCount">0</div></div>
-          <div class="rb-kpi"><div class="label">累计价税合计</div><div class="value" id="rbStatAmount">¥0.00</div></div>
-          <div class="rb-kpi"><div class="label">待报销</div><div class="value" id="rbStatPending">0</div></div>
-          <div class="rb-kpi"><div class="label">报销周期</div><div class="value" id="rbStatPeriods">0</div></div>
+          <div class="rb-kpi"><div class="label">本期发票</div><div class="value" id="rbStatCount">0</div></div>
+          <div class="rb-kpi"><div class="label">本期价税合计</div><div class="value" id="rbStatAmount">¥0.00</div></div>
+          <div class="rb-kpi"><div class="label">本期待报销</div><div class="value" id="rbStatPending">0</div></div>
+          <div class="rb-kpi"><div class="label">周期数量</div><div class="value" id="rbStatPeriods">0</div></div>
         </div>
         <div class="rb-grid-2">
           <div class="rb-card">
@@ -131,7 +137,7 @@
       <section class="rb-view" id="rbViewInvoices">
         <div class="rb-toolbar">
           <input class="form-control" id="rbSearch" placeholder="搜索发票号码或开票单位">
-          <select class="form-select" id="rbFilterPeriod"></select>
+          <select class="form-select" id="rbFilterPeriod" onchange="this.value?RB.activatePeriod(+this.value):RB.loadInvoices(1)"></select>
           <select class="form-select" id="rbFilterCategory"></select>
           <select class="form-select" id="rbFilterStatus">
             <option value="">全部状态</option><option value="pending">待报销</option><option value="approved">已通过</option><option value="rejected">已驳回</option>
@@ -180,7 +186,7 @@
 
       <section class="rb-view" id="rbViewExport">
         <div class="rb-toolbar">
-          <select class="form-select" id="rbExportPeriod" onchange="RB.loadSummary()"></select>
+          <select class="form-select" id="rbExportPeriod" onchange="RB.activatePeriod(+this.value)"></select>
           <input class="form-control" id="rbExportEmployeeName" placeholder="报销人姓名" title="当前周期的报销人姓名">
           <button class="rb-btn rb-btn-light" onclick="RB.saveReimburser()"><i class="bi bi-person-check"></i>保存报销人</button>
           <button class="rb-btn rb-btn-light" onclick="RB.loadSummary()"><i class="bi bi-arrow-clockwise"></i>刷新汇总</button>
@@ -357,6 +363,7 @@ const RB = {
     Object.assign(this.state,data);
     this.renderDashboard();this.fillSelectors();this.renderPeriods();this.renderCategories();this.renderProductLines();this.renderOffices();
   },
+  activePeriod(){return this.state.periods.find(p=>p.is_active)||this.state.periods[0]||null},
   showView(name){
     const viewIds={dashboard:'rbViewDashboard',invoices:'rbViewInvoices',periods:'rbViewPeriods',offices:'rbViewOffices',products:'rbViewProducts',categories:'rbViewCategories',export:'rbViewExport'};
     const target=document.getElementById(viewIds[name]);
@@ -377,16 +384,20 @@ const RB = {
     document.getElementById('rbActivePeriod').innerHTML=p?`<div class="rb-active-period"><div class="rb-meta mb-1">正在使用</div><div class="name">${this.esc(p.name)}</div><div class="rb-meta mt-2">${p.start_year}.${p.start_month} — ${p.end_year}.${p.end_month}</div><hr><div class="d-flex justify-content-between"><span>${p.invoice_count} 张发票</span><strong>${this.money(p.total_amount)}</strong></div><button class="rb-btn rb-btn-light mt-3" onclick="RB.printPeriod(${p.id})"><i class="bi bi-printer"></i>打印本期全部发票</button></div>`:`<div class="rb-empty">尚未创建周期<br><button class="rb-btn rb-btn-primary mt-3" onclick="RB.showView('periods');RB.openPeriod()">创建第一个周期</button></div>`;
   },
   fillSelectors(){
-    const periodOptions='<option value="">全部周期</option>'+this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
+    const active=this.activePeriod(),activeId=active?String(active.id):'';
+    const workspaceOptions=this.state.periods.length?this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}${p.is_active?'（当前）':''}</option>`).join(''):'<option value="">暂无周期</option>';
+    document.getElementById('rbWorkspacePeriod').innerHTML=workspaceOptions;document.getElementById('rbWorkspacePeriod').value=activeId;
+    const periodOptions='<option value="">全部周期（跨期查看）</option>'+this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
     const categoryOptions='<option value="">全部类别</option>'+this.state.categories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
-    document.getElementById('rbFilterPeriod').innerHTML=periodOptions;document.getElementById('rbFilterCategory').innerHTML=categoryOptions;
+    document.getElementById('rbFilterPeriod').innerHTML=periodOptions;document.getElementById('rbFilterPeriod').value=activeId;document.getElementById('rbFilterCategory').innerHTML=categoryOptions;
     document.getElementById('rbInvPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
+    document.getElementById('rbInvPeriod').value=activeId;
     document.getElementById('rbInvCategory').innerHTML='<option value="">未分类</option>'+this.state.categories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
     const currentProduct=document.getElementById('rbInvProduct').value;
     document.getElementById('rbInvProduct').innerHTML='<option value="">请选择产品线</option>'+this.state.product_lines.map(p=>`<option value="${p.id}" ${String(p.id)===currentProduct?'selected':''}>${this.esc(p.code)} · ${this.esc(p.name)}</option>`).join('');
     const currentOffice=document.getElementById('rbInvOffice').value;
     document.getElementById('rbInvOffice').innerHTML='<option value="">请选择办事处</option>'+this.state.offices.map(o=>`<option value="${o.id}" ${String(o.id)===currentOffice?'selected':''}>${this.esc(o.name)}</option>`).join('');
-    const selected=document.getElementById('rbExportPeriod').value;document.getElementById('rbExportPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}" ${String(p.id)===selected?'selected':''}>${this.esc(p.name)}</option>`).join('');
+    document.getElementById('rbExportPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');document.getElementById('rbExportPeriod').value=activeId;
   },
   async loadInvoices(page=1){
     const q=new URLSearchParams({page,per_page:20});[['q','rbSearch'],['period_id','rbFilterPeriod'],['category_id','rbFilterCategory'],['status','rbFilterStatus']].forEach(([k,id])=>{const v=document.getElementById(id).value;if(v)q.set(k,v)});
@@ -456,11 +467,11 @@ const RB = {
   invoicePayload(){const val=id=>document.getElementById(id).value,p=this.selectedProductLine(),o=this.selectedOffice();return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line_id:p?.id||null,product_line:p?.name||'',product_line_code:p?.code||'',office_id:o?.id||null,office:o?.name||'',customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
   async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(this.state.activeLinkedKind?(id?'发票及关联明细已更新':'发票及关联明细已生成'):(id?'发票已更新':'发票已保存'));await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   async deleteInvoice(id){if(!confirm('确定删除这张发票记录及其本地附件吗？'))return;try{await this.api('/tools/reimbursement/api/invoices/'+id,{method:'DELETE'});this.toast('发票已删除');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
-  renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${!p.is_active?`<button class="rb-btn rb-btn-light" onclick="RB.activatePeriod(${p.id})">设为当前</button>`:''}<button class="rb-btn rb-btn-light" onclick="RB.printPeriod(${p.id})"><i class="bi bi-printer"></i>打印发票</button><button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
+  renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前查看周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${p.is_active?'<button class="rb-btn rb-btn-light" disabled>正在查看</button>':`<button class="rb-btn rb-btn-primary" onclick="RB.activatePeriod(${p.id})"><i class="bi bi-box-arrow-in-right"></i>进入本周期</button>`}<button class="rb-btn rb-btn-light" onclick="RB.printPeriod(${p.id})"><i class="bi bi-printer"></i>打印发票</button><button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
   openPeriod(id=null){const p=id?this.state.periods.find(x=>x.id===id):null;const now=new Date(),sm=now.getMonth()+1,em=sm%12+1,ey=now.getFullYear()+(sm===12?1:0);document.getElementById('rbPeriodId').value=p?.id||'';document.getElementById('rbPeriodName').value=p?.name||'';document.getElementById('rbPeriodEmployeeName').value=p?.employee_name||'';document.getElementById('rbStartYear').value=p?.start_year||now.getFullYear();document.getElementById('rbStartMonth').value=p?.start_month||sm;document.getElementById('rbEndYear').value=p?.end_year||ey;document.getElementById('rbEndMonth').value=p?.end_month||em;this.modal('rbPeriodModal').show()},
-  async savePeriod(){const id=document.getElementById('rbPeriodId').value,v=x=>document.getElementById(x).value,p={name:v('rbPeriodName'),employee_name:v('rbPeriodEmployeeName'),start_year:+v('rbStartYear'),start_month:+v('rbStartMonth'),end_year:+v('rbEndYear'),end_month:+v('rbEndMonth')};try{await this.api('/tools/reimbursement/api/periods'+(id?'/'+id:''),{method:id?'PUT':'POST',body:p});this.modal('rbPeriodModal').hide();this.toast('周期及报销人信息已保存');await this.reload()}catch(e){this.toast(e.message,true)}},
-  async createNextPeriod(){try{await this.api('/tools/reimbursement/api/periods/next',{method:'POST',body:{}});this.toast('下一周期已生成');await this.reload()}catch(e){this.toast(e.message,true)}},
-  async activatePeriod(id){const p=this.state.periods.find(x=>x.id===id);try{await this.api('/tools/reimbursement/api/periods/'+id,{method:'PUT',body:{start_year:p.start_year,start_month:p.start_month,end_year:p.end_year,end_month:p.end_month,name:p.name,is_active:true}});this.toast('当前周期已切换');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async savePeriod(){const id=document.getElementById('rbPeriodId').value,v=x=>document.getElementById(x).value,p={name:v('rbPeriodName'),employee_name:v('rbPeriodEmployeeName'),start_year:+v('rbStartYear'),start_month:+v('rbStartMonth'),end_year:+v('rbEndYear'),end_month:+v('rbEndMonth')};if(!id)p.is_active=true;try{await this.api('/tools/reimbursement/api/periods'+(id?'/'+id:''),{method:id?'PUT':'POST',body:p});this.modal('rbPeriodModal').hide();this.toast(id?'周期信息已保存':'新周期已创建，已进入空白周期');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async createNextPeriod(){try{await this.api('/tools/reimbursement/api/periods/next',{method:'POST',body:{}});this.toast('下一周期已生成，已进入空白周期');await this.reload()}catch(e){this.toast(e.message,true)}},
+  async activatePeriod(id){if(!id)return;const current=this.activePeriod(),view=document.querySelector('.rb-view.active')?.id;try{if(!current||current.id!==id)await this.api('/tools/reimbursement/api/periods/'+id+'/activate',{method:'POST',body:{}});await this.reload();if(view==='rbViewInvoices')await this.loadInvoices(1);if(view==='rbViewExport')await this.loadSummary();this.toast('已切换周期，资料按周期独立显示')}catch(e){this.toast(e.message,true)}},
   async deletePeriod(id){if(!confirm('确定删除这个周期吗？若含发票将再次确认。'))return;try{await this.api('/tools/reimbursement/api/periods/'+id,{method:'DELETE'});this.toast('周期已删除');await this.reload()}catch(e){if(e.data?.needs_confirmation&&confirm(`该周期有 ${e.data.invoice_count} 张发票，仍要全部删除吗？`)){await this.api('/tools/reimbursement/api/periods/'+id+'?force=1',{method:'DELETE'});this.toast('周期及发票已删除');await this.reload()}else if(!e.data?.needs_confirmation)this.toast(e.message,true)}},
   async printPeriod(id){if(!id){this.toast('请先选择报销周期',true);return}const output=window.open('about:blank','rb_invoice_print');if(!output){this.toast('浏览器阻止了打印窗口，请允许弹出窗口',true);return}output.document.write('<p style="font-family:sans-serif;padding:24px">正在准备当期发票…</p>');try{const response=await this.api(`/tools/reimbursement/api/periods/${id}/invoices/print`);const content=await response.text();output.document.open();output.document.write(content);output.document.close()}catch(e){output.close();this.toast(e.message,true)}},
   printCurrentPeriod(fromExport=false){const id=fromExport?+document.getElementById('rbExportPeriod').value:+document.getElementById('rbFilterPeriod').value||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id;this.printPeriod(id)},

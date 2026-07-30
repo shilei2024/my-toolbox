@@ -137,6 +137,127 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(_period_parts("2025年12月-2026年1月"), (2025, 12, 2026, 1))
         self.assertEqual(_period_parts("2026年7-8月"), (2026, 7, 2026, 8))
 
+    def test_period_switch_keeps_each_period_data_isolated(self):
+        app = Flask(__name__)
+        app.config.update(
+            SECRET_KEY="test",
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        login_manager.init_app(app)
+        login_manager.user_loader(lambda _user_id: None)
+        blueprint = Blueprint(
+            "rb_period_isolation_test",
+            __name__,
+            url_prefix="/tools/reimbursement",
+        )
+        register_routes(blueprint)
+        app.register_blueprint(blueprint)
+        with app.app_context():
+            db.create_all()
+        client = app.test_client()
+        headers = {"X-RB-Anon-Id": "period-isolation-test"}
+        bootstrap = client.get(
+            "/tools/reimbursement/api/bootstrap", headers=headers
+        ).get_json()
+        office_id = bootstrap["offices"][0]["id"]
+
+        july_august = client.post(
+            "/tools/reimbursement/api/periods",
+            headers=headers,
+            json={
+                "name": "2026年7-8月",
+                "employee_name": "七八月报销人",
+                "start_year": 2026,
+                "start_month": 7,
+                "end_year": 2026,
+                "end_month": 8,
+            },
+        ).get_json()["period"]
+        old_invoice = client.post(
+            "/tools/reimbursement/api/invoices",
+            headers=headers,
+            json={
+                "period_id": july_august["id"],
+                "office_id": office_id,
+                "invoice_number": "JUL-AUG-ONLY",
+                "total_amount": 128,
+            },
+        )
+        self.assertEqual(old_invoice.status_code, 201)
+        saved_aux = client.put(
+            f"/tools/reimbursement/api/aux/{july_august['id']}",
+            headers=headers,
+            json={
+                "entertainment": [
+                    {"date": "2026-07-15", "amount": 128, "purpose": "DIODES"}
+                ],
+                "vehicle": [],
+                "travel": [],
+            },
+        )
+        self.assertEqual(saved_aux.status_code, 200)
+
+        august_september = client.post(
+            "/tools/reimbursement/api/periods",
+            headers=headers,
+            json={
+                "name": "2026年8-9月",
+                "start_year": 2026,
+                "start_month": 8,
+                "end_year": 2026,
+                "end_month": 9,
+            },
+        )
+        self.assertEqual(august_september.status_code, 201)
+        august_september = august_september.get_json()["period"]
+        self.assertTrue(august_september["is_active"])
+
+        new_bootstrap = client.get(
+            "/tools/reimbursement/api/bootstrap", headers=headers
+        ).get_json()
+        self.assertEqual(new_bootstrap["stats"]["period_id"], august_september["id"])
+        self.assertEqual(new_bootstrap["stats"]["invoice_count"], 0)
+        self.assertEqual(new_bootstrap["recent"], [])
+        new_summary = client.get(
+            f"/tools/reimbursement/api/summary/{august_september['id']}",
+            headers=headers,
+        ).get_json()
+        self.assertEqual(new_summary["summary"]["invoice_count"], 0)
+        self.assertEqual(
+            new_summary["aux"],
+            {"entertainment": [], "vehicle": [], "travel": []},
+        )
+
+        old_summary = client.get(
+            f"/tools/reimbursement/api/summary/{july_august['id']}",
+            headers=headers,
+        ).get_json()
+        self.assertEqual(old_summary["summary"]["invoice_count"], 1)
+        self.assertEqual(len(old_summary["aux"]["entertainment"]), 1)
+        activated = client.post(
+            f"/tools/reimbursement/api/periods/{july_august['id']}/activate",
+            headers=headers,
+            json={},
+        )
+        self.assertEqual(activated.status_code, 200)
+        old_bootstrap = client.get(
+            "/tools/reimbursement/api/bootstrap", headers=headers
+        ).get_json()
+        self.assertEqual(old_bootstrap["stats"]["period_id"], july_august["id"])
+        self.assertEqual(old_bootstrap["stats"]["invoice_count"], 1)
+        self.assertEqual(old_bootstrap["recent"][0]["invoice_number"], "JUL-AUG-ONLY")
+
+        next_period = client.post(
+            "/tools/reimbursement/api/periods/next",
+            headers=headers,
+            json={},
+        )
+        self.assertEqual(next_period.status_code, 201)
+        self.assertEqual(next_period.get_json()["period"]["employee_name"], "")
+        self.assertTrue(next_period.get_json()["period"]["is_active"])
+
     def test_invoice_creates_and_updates_linked_detail(self):
         app = Flask(__name__)
         app.config.update(
@@ -665,6 +786,10 @@ class ReimbursementManagerTests(unittest.TestCase):
         )
         self.assertIn("请选择产品线", template)
         self.assertIn(">${this.esc(p.name)}</option>`).join('')", template)
+        self.assertIn('id="rbWorkspacePeriod"', template)
+        self.assertIn("进入本周期", template)
+        self.assertIn("/activate',{method:'POST'", template)
+        self.assertIn("新周期已创建，已进入空白周期", template)
 
     def test_uploaded_invoice_survives_local_file_loss(self):
         app = Flask(__name__)

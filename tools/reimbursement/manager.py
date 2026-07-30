@@ -1001,6 +1001,11 @@ def register_routes(bp: Blueprint) -> None:
             .order_by(ReimbursementPeriod.start_year.desc(), ReimbursementPeriod.start_month.desc())
             .all()
         )
+        active_period = next((item for item in periods if item.is_active), None)
+        if not active_period and periods:
+            active_period = periods[0]
+            _set_active(active_period)
+            db.session.commit()
         categories = (
             ReimbursementCategory.query.filter_by(owner_type=owner_type, owner_id=owner_id)
             .order_by(ReimbursementCategory.sort_order, ReimbursementCategory.id)
@@ -1016,19 +1021,31 @@ def register_routes(bp: Blueprint) -> None:
             .order_by(ReimbursementOffice.sort_order, ReimbursementOffice.id)
             .all()
         )
-        invoices = (
-            ReimbursementInvoice.query.filter_by(owner_type=owner_type, owner_id=owner_id)
-            .order_by(ReimbursementInvoice.created_at.desc())
-            .limit(5)
-            .all()
+        invoice_scope = ReimbursementInvoice.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id
         )
+        if active_period:
+            invoice_scope = invoice_scope.filter(
+                ReimbursementInvoice.period_id == active_period.id
+            )
+        else:
+            invoice_scope = invoice_scope.filter(ReimbursementInvoice.period_id == -1)
+        invoices = invoice_scope.order_by(
+            ReimbursementInvoice.created_at.desc()
+        ).limit(5).all()
         total_count, total_amount, pending_count = (
             db.session.query(
                 func.count(ReimbursementInvoice.id),
                 func.coalesce(func.sum(ReimbursementInvoice.total_amount), 0),
                 func.coalesce(func.sum(case((ReimbursementInvoice.status == "pending", 1), else_=0)), 0),
             )
-            .filter(ReimbursementInvoice.owner_type == owner_type, ReimbursementInvoice.owner_id == owner_id)
+            .filter(
+                ReimbursementInvoice.owner_type == owner_type,
+                ReimbursementInvoice.owner_id == owner_id,
+                ReimbursementInvoice.period_id == (
+                    active_period.id if active_period else -1
+                ),
+            )
             .one()
         )
         return jsonify(
@@ -1042,6 +1059,8 @@ def register_routes(bp: Blueprint) -> None:
                 "invoice_count": int(total_count),
                 "total_amount": float(total_amount or 0),
                 "pending_count": int(pending_count or 0),
+                "period_id": active_period.id if active_period else None,
+                "period_name": active_period.name if active_period else "",
             },
         )
 
@@ -1074,8 +1093,8 @@ def register_routes(bp: Blueprint) -> None:
             employee_name=str(data.get("employee_name") or "").strip(),
             **values,
         )
-        if not ReimbursementPeriod.query.filter_by(owner_type=owner_type, owner_id=owner_id).first():
-            period.is_active = True
+        if data.get("is_active", True):
+            _set_active(period)
         db.session.add(period)
         db.session.commit()
         return jsonify(success=True, period=_period_dict(period)), 201
@@ -1104,10 +1123,9 @@ def register_routes(bp: Blueprint) -> None:
             start_month=sm,
             end_year=ey,
             end_month=em,
-            is_active=not bool(latest),
-            employee_name=latest.employee_name if latest else "",
-            department=latest.department if latest else "",
-            office=latest.office if latest else "深圳办",
+            employee_name="",
+            department="",
+            office="深圳办",
         )
         duplicate = ReimbursementPeriod.query.filter_by(
             owner_type=owner_type,
@@ -1119,9 +1137,21 @@ def register_routes(bp: Blueprint) -> None:
         ).first()
         if duplicate:
             return jsonify(error="下一周期已存在", period=_period_dict(duplicate)), 409
+        _set_active(period)
         db.session.add(period)
         db.session.commit()
         return jsonify(success=True, period=_period_dict(period)), 201
+
+    @bp.post("/api/periods/<int:period_id>/activate")
+    @csrf.exempt
+    def activate_period(period_id: int):
+        owner_type, owner_id = _owner()
+        period = _owned_period(period_id, owner_type, owner_id)
+        if not period:
+            return jsonify(error="周期不存在"), 404
+        _set_active(period)
+        db.session.commit()
+        return jsonify(success=True, period=_period_dict(period))
 
     @bp.put("/api/periods/<int:period_id>")
     @csrf.exempt
