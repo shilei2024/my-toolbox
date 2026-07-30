@@ -1599,11 +1599,11 @@ def register_routes(bp: Blueprint) -> None:
         document = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>{period_name} 发票打印</title>
 <style>
-@page{{size:A4;margin:9mm}}*{{box-sizing:border-box}}body{{margin:0;font-family:"Microsoft YaHei",sans-serif;color:#17231f;background:#eef3f1}}
-.invoice-page{{width:210mm;min-height:297mm;margin:12px auto;background:#fff;padding:9mm;display:flex;flex-direction:column;break-after:page;page-break-after:always}}
+@page{{size:A5 landscape;margin:6mm}}*{{box-sizing:border-box}}body{{margin:0;font-family:"Microsoft YaHei",sans-serif;color:#17231f;background:#eef3f1}}
+.invoice-page{{width:210mm;min-height:148mm;margin:12px auto;background:#fff;padding:6mm;display:flex;flex-direction:column;break-after:page;page-break-after:always;overflow:hidden}}
 .invoice-page:last-child{{break-after:auto;page-break-after:auto}}header{{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #d8e1de;padding-bottom:5mm;margin-bottom:5mm;font-size:12px}}
-header span{{color:#5c6f68;text-align:right}}img{{display:block;max-width:100%;max-height:260mm;margin:auto;object-fit:contain}}.missing{{align-items:center;justify-content:center;text-align:center}}
-@media print{{body{{background:#fff}}.invoice-page{{margin:0;padding:0;width:auto;min-height:auto}}header{{margin-bottom:3mm}}img{{max-height:274mm}}}}
+header span{{color:#5c6f68;text-align:right}}img{{display:block;max-width:100%;max-height:116mm;margin:auto;object-fit:contain;min-height:0}}.missing{{align-items:center;justify-content:center;text-align:center}}
+@media print{{html,body{{width:198mm}}body{{background:#fff}}.invoice-page{{margin:0;padding:0;width:198mm;height:136mm;min-height:136mm}}header{{flex:0 0 auto;padding-bottom:2mm;margin-bottom:3mm}}img{{flex:1 1 auto;max-width:198mm;max-height:116mm}}}}
 </style></head><body>{body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>"""
         return document, 200, {"Content-Type": "text/html; charset=utf-8"}
 

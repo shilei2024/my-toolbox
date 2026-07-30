@@ -403,6 +403,14 @@ class ReimbursementManagerTests(unittest.TestCase):
             self.assertEqual(printed.status_code, 200)
             self.assertIn("window.print()", printed.get_data(as_text=True))
             self.assertIn("PRINT-1", printed.get_data(as_text=True))
+            self.assertIn(
+                "@page{size:A5 landscape;margin:6mm}",
+                printed.get_data(as_text=True),
+            )
+            self.assertIn(
+                "width:198mm;height:136mm;min-height:136mm",
+                printed.get_data(as_text=True),
+            )
 
             blocked = client.delete(
                 f"/tools/reimbursement/api/offices/{test_office['id']}",
@@ -647,6 +655,11 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("?(end-start).toFixed(2):''", template)
         self.assertIn("rbViewExport').addEventListener('input'", template)
         self.assertIn("['product_line','产品线','product-line']", template)
+        self.assertIn("['purpose','产品线','product-line']", template)
+        self.assertEqual(
+            template.count("['purpose','产品线','product-line']"),
+            2,
+        )
         self.assertIn("请选择产品线", template)
         self.assertIn(">${this.esc(p.name)}</option>`).join('')", template)
 
