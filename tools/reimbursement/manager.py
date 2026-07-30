@@ -392,6 +392,9 @@ def _replace_aux_product_line(owner_type: str, owner_id: str, old_name: str, new
         value = json.loads(row.data_json or "{}")
         if value.get("purpose") == old_name:
             value["purpose"] = new_name
+        if value.get("product_line") == old_name:
+            value["product_line"] = new_name
+        if value.get("purpose") == new_name or value.get("product_line") == new_name:
             row.data_json = json.dumps(value, ensure_ascii=False)
 
 
@@ -893,6 +896,7 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
 
     _write_cell(source, target, 1, 1, 0, f"员工姓名：{header['employee_name']}")
     _write_cell(source, target, 1, 1, 9, f" {header['period']}派车单")
+    _write_cell(source, target, 1, 2, 9, "产品线")
     for row in range(4, 15):
         for col in range(10):
             _write_cell(source, target, 1, row, col, "")
@@ -910,7 +914,7 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
             Formula(f'IF(OR(E{excel_row}="",F{excel_row}=""),"",F{excel_row}-E{excel_row})'),
             float(item.get("toll_fee") or 0),
             float(item.get("parking_fee") or 0),
-            item.get("remarks", ""),
+            item.get("product_line") or item.get("remarks", ""),
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 1, 4 + offset, col, value)

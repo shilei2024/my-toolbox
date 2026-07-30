@@ -452,6 +452,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "km_end": 135.5,
                         "toll_fee": 10,
                         "parking_fee": 5,
+                        "product_line": "DIODES",
                     }
                 ],
                 "travel": [
@@ -476,6 +477,9 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(detail.cell_value(3, 2), "测试餐厅")
         self.assertEqual(detail.cell_value(3, 5), 100.5)
         self.assertEqual(detail.cell_value(12, 0), "合计")
+        vehicle = generated.sheet_by_name("派车单")
+        self.assertEqual(vehicle.cell_value(2, 9), "产品线")
+        self.assertEqual(vehicle.cell_value(4, 9), "DIODES")
         self.assertEqual(generated.sheet_by_name("出差明细表").cell_value(20, 0), "合计")
         formulas = _formula_cells(output.getvalue())
         self.assertTrue(
@@ -514,6 +518,8 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("revealNavButton(button)", template)
         self.assertIn("?(end-start).toFixed(2):''", template)
         self.assertIn("rbViewExport').addEventListener('input'", template)
+        self.assertIn("['product_line','产品线','product-line']", template)
+        self.assertIn("请选择产品线", template)
 
     def test_uploaded_invoice_survives_local_file_loss(self):
         app = Flask(__name__)

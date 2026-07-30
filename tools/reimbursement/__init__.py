@@ -1232,7 +1232,7 @@ def cover_data():
                     "km_total": km,
                     "toll_fee": toll,
                     "parking_fee": parking,
-                    "remarks": veh.get("remarks", ""),
+                    "product_line": veh.get("product_line") or veh.get("remarks", ""),
                 })
     else:
         for inv in invoices:
@@ -1249,7 +1249,7 @@ def cover_data():
                     "km_total": km,
                     "toll_fee": toll,
                     "parking_fee": parking,
-                    "remarks": veh.get("remarks", ""),
+                    "product_line": veh.get("product_line") or veh.get("remarks", ""),
                 })
 
     # 出差明细——优先取顶层数组
@@ -1649,8 +1649,8 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
     ws2.merge_cells(start_row=3, start_column=4, end_row=3, end_column=5)
     ws2.cell(row=3, column=4).value = "行车路程"; ws2.cell(row=3, column=4).font = hfont; ws2.cell(row=3, column=4).fill = hfill; ws2.cell(row=3, column=4).alignment = s["center"]; ws2.cell(row=3, column=4).border = thin
 
-    # 列顺序: A=日期 B=出发地 C=目的地 D:E=行车路程 F=客户联系人 G=公里数 H=过桥费 I=停车费 J=备注
-    vh1 = ["日期", "出发地", "目的地", None, "客户联系人", "公里数", "过桥费", "停车费", "备注"]
+    # 列顺序: A=日期 B=出发地 C=目的地 D:E=行车路程 F=客户联系人 G=公里数 H=过桥费 I=停车费 J=产品线
+    vh1 = ["日期", "出发地", "目的地", None, "客户联系人", "公里数", "过桥费", "停车费", "产品线"]
     for ci, h in enumerate(vh1, 1):
         if h is None: continue  # 跳过 D:E 合并区域
         cell = ws2.cell(row=3, column=ci, value=h)
@@ -1668,7 +1668,7 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
         km = _safe_float(v.get("km_total")); toll = _safe_float(v.get("toll_fee")); park = _safe_float(v.get("parking_fee"))
         vals = [v.get("date", ""), v.get("from_location", ""), v.get("to_location", ""),
                 v.get("km_start", ""), v.get("km_end", ""), v.get("contact", ""),
-                km or "", toll or "", park or "", v.get("remarks", "")]
+                km or "", toll or "", park or "", v.get("product_line") or v.get("remarks", "")]
         for ci, val in enumerate(vals, 1):
             cell = ws2.cell(row=row, column=ci, value=val)
             cell.font = nfont; cell.border = thin
