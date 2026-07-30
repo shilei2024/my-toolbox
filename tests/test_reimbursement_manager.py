@@ -401,15 +401,18 @@ class ReimbursementManagerTests(unittest.TestCase):
                 headers=headers,
             )
             self.assertEqual(printed.status_code, 200)
-            self.assertIn("window.print()", printed.get_data(as_text=True))
-            self.assertIn("PRINT-1", printed.get_data(as_text=True))
+            print_html = printed.get_data(as_text=True)
+            self.assertIn("window.print()", print_html)
+            self.assertNotIn("<header>", print_html)
+            self.assertNotIn("PRINT-1", print_html)
+            self.assertIn('alt="发票原件"', print_html)
             self.assertIn(
                 "@page{size:A5 landscape;margin:6mm}",
-                printed.get_data(as_text=True),
+                print_html,
             )
             self.assertIn(
                 "width:198mm;height:136mm;min-height:136mm",
-                printed.get_data(as_text=True),
+                print_html,
             )
 
             blocked = client.delete(

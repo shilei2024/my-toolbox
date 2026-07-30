@@ -1583,14 +1583,10 @@ def register_routes(bp: Blueprint) -> None:
                     f'<p>第 {index} 张：{html.escape(invoice.invoice_number or invoice.file_name or "未命名发票")}</p></section>'
                 )
                 continue
-            for page_number, data_url in enumerate(pages, 1):
-                title = html.escape(invoice.invoice_number or invoice.file_name or f"第 {index} 张发票")
+            for data_url in pages:
                 rendered_pages.append(
                     '<section class="invoice-page">'
-                    f'<header><strong>{index}. {title}</strong>'
-                    f'<span>{html.escape(invoice.vendor or "")} · {html.escape(invoice.office or "")}'
-                    f' · 第 {page_number}/{len(pages)} 页</span></header>'
-                    f'<img src="{data_url}" alt="{title}"></section>'
+                    f'<img src="{data_url}" alt="发票原件"></section>'
                 )
         body = "\n".join(rendered_pages) or (
             '<section class="invoice-page missing"><h2>当前周期没有可打印的发票</h2></section>'
@@ -1601,9 +1597,8 @@ def register_routes(bp: Blueprint) -> None:
 <style>
 @page{{size:A5 landscape;margin:6mm}}*{{box-sizing:border-box}}body{{margin:0;font-family:"Microsoft YaHei",sans-serif;color:#17231f;background:#eef3f1}}
 .invoice-page{{width:210mm;min-height:148mm;margin:12px auto;background:#fff;padding:6mm;display:flex;flex-direction:column;break-after:page;page-break-after:always;overflow:hidden}}
-.invoice-page:last-child{{break-after:auto;page-break-after:auto}}header{{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #d8e1de;padding-bottom:5mm;margin-bottom:5mm;font-size:12px}}
-header span{{color:#5c6f68;text-align:right}}img{{display:block;max-width:100%;max-height:116mm;margin:auto;object-fit:contain;min-height:0}}.missing{{align-items:center;justify-content:center;text-align:center}}
-@media print{{html,body{{width:198mm}}body{{background:#fff}}.invoice-page{{margin:0;padding:0;width:198mm;height:136mm;min-height:136mm}}header{{flex:0 0 auto;padding-bottom:2mm;margin-bottom:3mm}}img{{flex:1 1 auto;max-width:198mm;max-height:116mm}}}}
+.invoice-page:last-child{{break-after:auto;page-break-after:auto}}img{{display:block;max-width:100%;max-height:136mm;margin:auto;object-fit:contain;min-height:0}}.missing{{align-items:center;justify-content:center;text-align:center}}
+@media print{{html,body{{width:198mm}}body{{background:#fff}}.invoice-page{{margin:0;padding:0;width:198mm;height:136mm;min-height:136mm}}img{{max-width:198mm;max-height:136mm}}}}
 </style></head><body>{body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>"""
         return document, 200, {"Content-Type": "text/html; charset=utf-8"}
 
