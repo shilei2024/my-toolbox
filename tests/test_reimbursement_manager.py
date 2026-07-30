@@ -30,6 +30,7 @@ from tools.reimbursement.manager import (
     _build_cover_xls,
     _build_detail_xls,
     _assign_invoice_product_line,
+    _cover_payload,
     _period_parts,
     _seed_product_lines,
     _sync_invoice_aux,
@@ -427,6 +428,133 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(cover.cell_value(6, 1), "DIODES")
         self.assertEqual(cover.cell_value(6, 5), 100.5)
         self.assertEqual(cover.cell_value(20, 7), 100.5)
+
+    def test_vehicle_details_replace_invoice_vehicle_fee_and_group_by_product_line(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            period = ReimbursementPeriod(
+                owner_type="anon",
+                owner_id="vehicle-cover",
+                name="2026年7-8月",
+                start_year=2026,
+                start_month=7,
+                end_year=2026,
+                end_month=8,
+                office="深圳办",
+            )
+            category = ReimbursementCategory(
+                owner_type="anon",
+                owner_id="vehicle-cover",
+                name="车辆费用",
+                export_key="vehicle",
+            )
+            product_line = ReimbursementProductLine(
+                owner_type="anon",
+                owner_id="vehicle-cover",
+                name="DIODES",
+                code="01",
+            )
+            second_product_line = ReimbursementProductLine(
+                owner_type="anon",
+                owner_id="vehicle-cover",
+                name="MSTAR",
+                code="02",
+            )
+            db.session.add_all(
+                [period, category, product_line, second_product_line]
+            )
+            db.session.flush()
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="vehicle-cover",
+                    period_id=period.id,
+                    category_id=category.id,
+                    total_amount=999,
+                    product_line="DIODES",
+                    product_line_code="01",
+                    office="深圳办",
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="vehicle-cover",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=0,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 100,
+                            "km_end": 135.5,
+                            "toll_fee": 10,
+                            "parking_fee": 5,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="vehicle-cover",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=1,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 200,
+                            "km_end": 220,
+                            "toll_fee": 2,
+                            "parking_fee": 3,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="vehicle-cover",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=2,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 300,
+                            "km_end": 310,
+                            "toll_fee": 1,
+                            "parking_fee": 1,
+                            "product_line": "MSTAR",
+                        }
+                    ),
+                )
+            )
+            db.session.commit()
+
+            payload = _cover_payload(period)
+            group = next(
+                item for item in payload["groups"] if item["product_line"] == "DIODES"
+            )
+            second_group = next(
+                item for item in payload["groups"] if item["product_line"] == "MSTAR"
+            )
+            self.assertEqual(group["totals"]["vehicle"], 75.5)
+            self.assertEqual(second_group["totals"]["vehicle"], 12)
+            self.assertEqual(payload["grand_totals"]["vehicle"], 87.5)
+            self.assertEqual(payload["total_all"], 87.5)
+            cover = xlrd.open_workbook(
+                file_contents=_build_cover_xls(payload).getvalue()
+            ).sheet_by_name("封面")
+            self.assertEqual(cover.cell_value(6, 9), 75.5)
+            self.assertEqual(cover.cell_value(7, 9), 12)
+            self.assertEqual(cover.cell_value(18, 9), 87.5)
 
     def test_detail_export_uses_original_workbook_layout(self):
         output = _build_detail_xls(

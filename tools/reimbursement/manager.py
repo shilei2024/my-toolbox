@@ -757,6 +757,50 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
         else:
             values["other"] += total
         values["total"] += total
+
+    # 派车单是封面“车辆费用”的明细来源。每条记录以
+    # 公里数 + 过桥费 + 停车费计费，再按产品线汇总。
+    vehicle_totals: dict[str, float] = {}
+    for row in _aux_rows(period.id)["vehicle"]:
+        product_line = str(row.get("product_line") or "").strip() or "未分类"
+        amount = sum(
+            float(_money(row.get(key)))
+            for key in ("km_total", "toll_fee", "parking_fee")
+        )
+        vehicle_totals[product_line] = vehicle_totals.get(product_line, 0.0) + amount
+
+    if vehicle_totals:
+        product_lines = {
+            item.name: item
+            for item in _seed_product_lines(period.owner_type, period.owner_id)
+        }
+        for product_line, amount in vehicle_totals.items():
+            group = next(
+                (item for item in groups.values() if item["product_line"] == product_line),
+                None,
+            )
+            if group is None:
+                reference = product_lines.get(product_line)
+                code = reference.code if reference else "-"
+                group = groups.setdefault(
+                    f"{code}|{product_line}",
+                    {
+                        "product_line": product_line,
+                        "code": code,
+                        "office": period.office,
+                        "totals": {
+                            export_key: 0.0
+                            for _, export_key, _ in DEFAULT_CATEGORIES
+                        },
+                        "remarks": [],
+                    },
+                )
+            # 同一产品线已有车辆类发票时，以派车单明细汇总为准，避免重复。
+            existing = float(group["totals"].get("vehicle", 0) or 0)
+            grand["vehicle"] -= existing
+            group["totals"]["vehicle"] = round(amount, 2)
+            grand["vehicle"] += round(amount, 2)
+
     total_all = round(sum(grand.values()), 2)
     return {
         "header": {
