@@ -13,6 +13,7 @@
           <th>状态</th>
           <th>注册时间（中国）</th>
           <th>最后登录（中国）</th>
+          <th style="min-width: 210px;">专有工具权限</th>
           <th>自定义上限</th>
           <th>操作</th>
         </tr>
@@ -31,6 +32,32 @@
             </td>
             <td><small>{{ u.created_at|china_time('%Y-%m-%d %H:%M') }}</small></td>
             <td><small>{{ u.last_login_at|china_time('%Y-%m-%d %H:%M') }}</small></td>
+            <td>
+              {% if u.is_admin %}
+                <span class="badge bg-primary"><i class="bi bi-shield-check"></i> 全部自动开放</span>
+              {% elif private_tools %}
+                <div class="d-flex flex-column gap-1">
+                  {% for tool in private_tools %}
+                    {% set granted = (u.id, tool.id) in tool_grants %}
+                    <form action="{{ url_for('admin.toggle_user_tool_access', user_id=u.id, tool_id=tool.id) }}" method="post"
+                          class="d-flex align-items-center justify-content-between gap-2">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                      <span class="small text-nowrap">
+                        <i class="bi {{ tool.icon }}" style="color: {{ tool.color }};"></i>
+                        {{ tool.name }}
+                      </span>
+                      <button class="btn btn-sm {{ 'btn-success' if granted else 'btn-outline-secondary' }}"
+                              title="{{ '点击取消授权' if granted else '点击开放权限' }}">
+                        <i class="bi {{ 'bi-check-circle' if granted else 'bi-lock' }}"></i>
+                        {{ '已开放' if granted else '未开放' }}
+                      </button>
+                    </form>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <span class="text-muted small">暂无专有工具</span>
+              {% endif %}
+            </td>
             <td>
               {% if u.custom_limits %}
                 <code class="small">{{ u.custom_limits }}</code>

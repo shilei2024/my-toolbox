@@ -11,7 +11,15 @@ from sqlalchemy import func
 
 from auth.decorators import admin_required
 from extensions import db
-from models import AnonUsage, Setting, Tool, UsageLog, User, UserUsage
+from models import (
+    AnonUsage,
+    Setting,
+    Tool,
+    UsageLog,
+    User,
+    UserToolGrant,
+    UserUsage,
+)
 from utils.helpers import (
     china_day_utc_bounds,
     china_now,
@@ -114,9 +122,30 @@ def users():
     q = db.session.query(User).order_by(User.created_at.desc())
     total = q.count()
     items = q.offset((page - 1) * per_page).limit(per_page).all()
+    private_tools = (
+        db.session.query(Tool)
+        .filter(Tool.required_plan == "private")
+        .order_by(Tool.order.asc(), Tool.name.asc())
+        .all()
+    )
+    user_ids = [user.id for user in items]
+    private_tool_ids = [tool.id for tool in private_tools]
+    grants = set()
+    if user_ids and private_tool_ids:
+        grants = {
+            (grant.user_id, grant.tool_id)
+            for grant in db.session.query(UserToolGrant)
+            .filter(
+                UserToolGrant.user_id.in_(user_ids),
+                UserToolGrant.tool_id.in_(private_tool_ids),
+            )
+            .all()
+        }
     return render_template(
         "admin/users.html",
         users=items,
+        private_tools=private_tools,
+        tool_grants=grants,
         page=page,
         per_page=per_page,
         total=total,
@@ -166,6 +195,41 @@ def set_user_limit(user_id: int):
                 return redirect(url_for("admin.users"))
     user.custom_limits = json.dumps(new_map) if new_map else None
     db.session.commit()
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route(
+    "/users/<int:user_id>/tools/<string:tool_id>/toggle-access",
+    methods=["POST"],
+)
+@login_required
+@admin_required
+def toggle_user_tool_access(user_id: int, tool_id: str):
+    user = db.session.get(User, user_id) or abort(404)
+    tool = db.session.get(Tool, tool_id) or abort(404)
+    if tool.required_plan != "private":
+        flash("该工具不是专有工具，不能设置用户级授权。", "danger")
+        return redirect(url_for("admin.users"))
+    if user.is_admin:
+        flash("管理员自动拥有全部专有工具权限，无需单独授权。", "info")
+        return redirect(url_for("admin.users"))
+
+    key = {"user_id": user.id, "tool_id": tool.id}
+    grant = db.session.get(UserToolGrant, key)
+    if grant is None:
+        db.session.add(
+            UserToolGrant(
+                user_id=user.id,
+                tool_id=tool.id,
+                granted_by_id=current_user.id,
+            )
+        )
+        message = f"已向 {user.email} 开放“{tool.name}”。"
+    else:
+        db.session.delete(grant)
+        message = f"已取消 {user.email} 的“{tool.name}”权限。"
+    db.session.commit()
+    flash(message, "success")
     return redirect(url_for("admin.users"))
 
 

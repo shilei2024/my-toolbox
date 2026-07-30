@@ -16,8 +16,10 @@ import pkgutil
 from typing import Any
 
 import yaml
-from flask import Flask
+from flask import Flask, has_request_context
+from flask_login import current_user
 
+from auth.tool_access import can_access_private_tool, register_private_tool_guards
 from extensions import db
 from models import Tool
 
@@ -57,6 +59,7 @@ def sync_tool_registry(app: Flask) -> None:
             tool.blueprint_module = entry.get("blueprint_module", f"tools.{tool.id}")
             tool.order = int(entry.get("order", 100))
             tool.category = entry.get("category", "other") or "other"
+            tool.required_plan = entry.get("required_plan", "free") or "free"
             if "enabled" in entry:
                 tool.enabled = bool(entry["enabled"])
         db.session.commit()
@@ -83,6 +86,12 @@ def register_tools(app: Flask) -> None:
         # don't actually import the tool yet — the YAML is the source of truth
 
     entries = _load_yaml_config(app)
+    private_routes = {
+        entry["id"]: entry.get("route", f"/tools/{entry['id']}")
+        for entry in entries
+        if entry.get("required_plan") == "private"
+    }
+    register_private_tool_guards(app, private_routes)
     registered: set[str] = set()
     failed: dict[str, str] = {}  # tid -> error message (for /diag)
 
@@ -141,12 +150,21 @@ def register_tools(app: Flask) -> None:
 
 
 def list_enabled_tools() -> list[Tool]:
-    return (
+    tools = (
         db.session.query(Tool)
         .filter_by(enabled=True)
         .order_by(Tool.order.asc(), Tool.name.asc())
         .all()
     )
+    if not has_request_context():
+        return tools
+    if current_user.is_authenticated and getattr(current_user, "is_admin", False):
+        return tools
+    return [
+        tool
+        for tool in tools
+        if tool.required_plan != "private" or can_access_private_tool(tool.id)
+    ]
 
 
 def list_all_tools() -> list[Tool]:

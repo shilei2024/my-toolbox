@@ -14,7 +14,7 @@ os.environ["SECRET_KEY"] = "runtime-settings-test-secret"
 
 from app import create_app  # noqa: E402
 from extensions import db  # noqa: E402
-from models import User  # noqa: E402
+from models import Tool, User, UserToolGrant  # noqa: E402
 from utils.settings import apply_runtime_settings  # noqa: E402
 
 
@@ -88,6 +88,94 @@ class RuntimeSettingsTests(unittest.TestCase):
             data={"direction": "dt2ts", "value": "2024-01-01 08:00:00"},
         )
         self.assertEqual(response.get_json()["result"]["seconds"], 1704067200)
+
+    def test_private_tools_require_per_user_admin_grant(self) -> None:
+        self.app.config["ENFORCE_PRIVATE_TOOL_ACCESS_IN_TESTS"] = True
+        private_ids = ("fcst_merge", "reimbursement")
+
+        self.client.get("/logout")
+        self.assertEqual(self.client.get("/tools/json-formatter/").status_code, 200)
+        for tool_id, route in (
+            ("fcst_merge", "/tools/fcst-merge/"),
+            ("reimbursement", "/tools/reimbursement/"),
+        ):
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 302, tool_id)
+            api_response = self.client.post(route + "api/probe")
+            self.assertEqual(api_response.status_code, 403, tool_id)
+
+        with self.app.app_context():
+            user = User(
+                email="private-user@test.com",
+                is_admin=False,
+                is_active_user=True,
+            )
+            user.set_password("User123456")
+            db.session.add(user)
+            for tool_id in private_ids:
+                db.session.get(Tool, tool_id).enabled = True
+            db.session.commit()
+            user_id = user.id
+
+        self.client.post(
+            "/login",
+            data={"email": "private-user@test.com", "password": "User123456"},
+        )
+        homepage = self.client.get("/")
+        self.assertNotIn(b'href="/tools/fcst-merge"', homepage.data)
+        self.assertNotIn(b'href="/tools/reimbursement"', homepage.data)
+        self.assertEqual(self.client.get("/tools/fcst-merge/").status_code, 403)
+        self.client.get("/logout")
+
+        self.client.post(
+            "/login",
+            data={"email": "admin@test.com", "password": "Admin123456"},
+        )
+        for tool_id in private_ids:
+            response = self.client.post(
+                f"/admin/users/{user_id}/tools/{tool_id}/toggle-access",
+            )
+            self.assertEqual(response.status_code, 302)
+        users_page = self.client.get("/admin/users")
+        self.assertIn("专有工具权限".encode(), users_page.data)
+        self.assertIn("FCST 预测合并".encode(), users_page.data)
+        self.assertIn("报销助手".encode(), users_page.data)
+
+        with self.app.app_context():
+            grants = db.session.query(UserToolGrant).filter_by(user_id=user_id).all()
+            self.assertEqual({grant.tool_id for grant in grants}, set(private_ids))
+
+        self.client.get("/logout")
+        self.client.post(
+            "/login",
+            data={"email": "private-user@test.com", "password": "User123456"},
+        )
+        homepage = self.client.get("/")
+        self.assertIn(b'href="/tools/fcst-merge"', homepage.data)
+        self.assertIn(b'href="/tools/reimbursement"', homepage.data)
+        # A missing optional dependency may leave the route itself unregistered
+        # in this focused environment, but the access guard must no longer deny it.
+        self.assertNotEqual(self.client.get("/tools/fcst-merge/").status_code, 403)
+        self.assertNotEqual(self.client.get("/tools/reimbursement/").status_code, 403)
+
+        # Revoking one grant removes it from the homepage and blocks direct access.
+        self.client.get("/logout")
+        self.client.post(
+            "/login",
+            data={"email": "admin@test.com", "password": "Admin123456"},
+        )
+        self.client.post(
+            f"/admin/users/{user_id}/tools/fcst_merge/toggle-access",
+        )
+        self.client.get("/logout")
+        self.client.post(
+            "/login",
+            data={"email": "private-user@test.com", "password": "User123456"},
+        )
+        homepage = self.client.get("/")
+        self.assertNotIn(b'href="/tools/fcst-merge"', homepage.data)
+        self.assertIn(b'href="/tools/reimbursement"', homepage.data)
+        self.assertEqual(self.client.get("/tools/fcst-merge/").status_code, 403)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
           <th>路由</th>
           <th>蓝图</th>
           <th>状态</th>
+          <th>访问范围</th>
           <th>排序</th>
           <th>操作</th>
         </tr>
@@ -25,6 +26,13 @@
             <td><small class="text-muted">{{ t.blueprint_module }}</small></td>
             <td>
               {% if t.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
+            </td>
+            <td>
+              {% if t.required_plan == 'private' %}
+                <span class="badge bg-warning text-dark"><i class="bi bi-lock"></i> 指定用户</span>
+              {% else %}
+                <span class="badge bg-light text-dark">公开</span>
+              {% endif %}
             </td>
             <td>{{ t.order }}</td>
             <td>

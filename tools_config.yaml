@@ -95,6 +95,7 @@ tools:
     route: /tools/fcst-merge
     blueprint_module: tools.fcst_merge
     category: business
+    required_plan: private
     enabled: true
     order: 60
 
@@ -317,6 +318,7 @@ tools:
     route: /tools/reimbursement
     blueprint_module: tools.reimbursement
     category: business
+    required_plan: private
     enabled: true
     order: 65
 

@@ -115,6 +115,33 @@ class Tool(db.Model):
 
 
 # -----------------------------------------------------------------------------
+# Private tool grants
+# -----------------------------------------------------------------------------
+class UserToolGrant(db.Model):
+    """Explicit access granted to one user for one private tool."""
+
+    __tablename__ = "user_tool_grants"
+
+    user_id: Mapped[int] = mapped_column(
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tool_id: Mapped[str] = mapped_column(
+        db.ForeignKey("tools.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        nullable=False,
+    )
+    granted_by_id: Mapped[Optional[int]] = mapped_column(
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+# -----------------------------------------------------------------------------
 # Usage tracking
 # -----------------------------------------------------------------------------
 class AnonUsage(db.Model):

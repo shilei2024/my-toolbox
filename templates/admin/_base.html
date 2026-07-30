@@ -7,7 +7,7 @@
       <a href="{{ url_for('admin.dashboard') }}" class="list-group-item list-group-item-action {% if request.endpoint == 'admin.dashboard' %}active{% endif %}">
         <i class="bi bi-speedometer2"></i> 仪表盘
       </a>
-      <a href="{{ url_for('admin.users') }}" class="list-group-item list-group-item-action {% if request.endpoint in ['admin.users', 'admin.toggle_user', 'admin.set_user_limit'] %}active{% endif %}">
+      <a href="{{ url_for('admin.users') }}" class="list-group-item list-group-item-action {% if request.endpoint in ['admin.users', 'admin.toggle_user', 'admin.set_user_limit', 'admin.toggle_user_tool_access'] %}active{% endif %}">
         <i class="bi bi-people"></i> 用户
       </a>
       <a href="{{ url_for('admin.tools') }}" class="list-group-item list-group-item-action {% if request.endpoint in ['admin.tools', 'admin.toggle_tool'] %}active{% endif %}">
