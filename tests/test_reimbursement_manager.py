@@ -520,6 +520,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("rbViewExport').addEventListener('input'", template)
         self.assertIn("['product_line','产品线','product-line']", template)
         self.assertIn("请选择产品线", template)
+        self.assertIn(">${this.esc(p.name)}</option>`).join('')", template)
 
     def test_uploaded_invoice_survives_local_file_loss(self):
         app = Flask(__name__)

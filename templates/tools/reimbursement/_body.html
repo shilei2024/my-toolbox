@@ -536,7 +536,7 @@ const RB = {
         const known=this.state.product_lines.some(p=>p.name===value);
         const options='<option value="">请选择产品线</option>'
           +(!known&&value?`<option value="${this.esc(value)}" selected>${this.esc(value)}（历史数据）</option>`:'')
-          +this.state.product_lines.map(p=>`<option value="${this.esc(p.name)}" ${p.name===value?'selected':''}>${this.esc(p.code)} · ${this.esc(p.name)}</option>`).join('');
+          +this.state.product_lines.map(p=>`<option value="${this.esc(p.name)}" ${p.name===value?'selected':''}>${this.esc(p.name)}</option>`).join('');
         return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
       }
       return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(value)}" ${readonly?'readonly title="公里数由止减起自动计算"':''}></td>`;
