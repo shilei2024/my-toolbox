@@ -498,14 +498,20 @@ class ReimbursementManagerTests(unittest.TestCase):
             / "_body.html"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'data-view="export" onclick="RB.showView(\'export\')"',
+            'data-view="export"',
             template,
         )
+        self.assertIn("button=e.target.closest('button[data-view]')", template)
         self.assertIn("export:'rbViewExport'", template)
         self.assertIn("if(document.readyState==='loading')", template)
         self.assertIn("flex-wrap:nowrap", template)
         self.assertIn("scrollbar-width:none", template)
         self.assertIn("-webkit-overflow-scrolling:touch", template)
+        self.assertIn("pointer-events:none", template)
+        self.assertIn(".rb-nav-frame { position:relative; z-index:1;", template)
+        self.assertIn('id="rbNavNext"', template)
+        self.assertIn("scrollNav(direction)", template)
+        self.assertIn("revealNavButton(button)", template)
         self.assertIn("?(end-start).toFixed(2):''", template)
         self.assertIn("rbViewExport').addEventListener('input'", template)
 

@@ -3,14 +3,21 @@
   .rb-app { --ink:#172033; --muted:#697386; --line:#e6eaf0; --brand:#176b57; --brand-2:#e8f5f0; color:var(--ink); }
   .rb-shell { background:#f4f7f6; border:1px solid var(--line); border-radius:22px; overflow:hidden; min-height:760px; }
   .rb-topbar { padding:22px 26px; color:#fff; background:linear-gradient(125deg,#123f36,#176b57 58%,#25836d); position:relative; }
-  .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); }
+  .rb-topbar:after { content:""; position:absolute; right:-60px; top:-90px; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.07); pointer-events:none; }
   .rb-topbar h2 { font-size:1.35rem; margin:0 0 5px; font-weight:700; letter-spacing:.02em; }
   .rb-topbar p { margin:0; color:rgba(255,255,255,.72); font-size:.86rem; }
-  .rb-nav { display:flex; flex-wrap:nowrap; gap:6px; padding:0 20px; background:#fff; border-bottom:1px solid var(--line); overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -ms-overflow-style:none; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }
+  .rb-nav-frame { position:relative; z-index:1; display:grid; grid-template-columns:38px minmax(0,1fr) 38px; align-items:stretch; background:#fff; border-bottom:1px solid var(--line); }
+  .rb-nav-frame.is-static { grid-template-columns:minmax(0,1fr); }
+  .rb-nav-frame.is-static .rb-nav-arrow { display:none; }
+  .rb-nav { min-width:0; display:flex; flex-wrap:nowrap; gap:6px; padding:0 8px; background:#fff; overflow:auto hidden; scrollbar-width:none; -ms-overflow-style:none; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; scroll-behavior:smooth; scroll-snap-type:x proximity; }
   .rb-nav::-webkit-scrollbar { display:none; width:0; height:0; }
-  .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; cursor:pointer; flex-shrink:0; }
+  .rb-nav button { border:0; background:transparent; padding:15px 15px 12px; color:var(--muted); white-space:nowrap; border-bottom:3px solid transparent; font-weight:600; font-size:.86rem; cursor:pointer; flex:0 0 auto; scroll-snap-align:start; }
   .rb-nav button:hover { color:var(--ink); }
   .rb-nav button.active { color:var(--brand); border-color:var(--brand); }
+  .rb-nav-arrow { position:relative; z-index:2; border:0; background:#fff; color:var(--brand); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 12px rgba(19,38,31,.1); }
+  .rb-nav-arrow span { font-size:26px; line-height:1; transform:translateY(-1px); }
+  .rb-nav-arrow:hover:not(:disabled) { background:var(--brand-2); }
+  .rb-nav-arrow:disabled { color:#b8c0cb; cursor:default; box-shadow:none; }
   .rb-main { padding:22px; }
   .rb-view { display:none; }
   .rb-view.active { display:block; }
@@ -87,14 +94,18 @@
       <h2><i class="bi bi-receipt-cutoff me-2"></i>发票报销管理</h2>
       <p>发票归档、双月周期、费用分类与财务模板导出</p>
     </div>
-    <div class="rb-nav" id="rbNav">
-      <button type="button" class="active" data-view="dashboard" onclick="RB.showView('dashboard')"><i class="bi bi-grid me-1"></i>仪表盘</button>
-      <button type="button" data-view="invoices" onclick="RB.showView('invoices')"><i class="bi bi-receipt me-1"></i>发票管理</button>
-      <button type="button" data-view="periods" onclick="RB.showView('periods')"><i class="bi bi-calendar3 me-1"></i>周期管理</button>
-      <button type="button" data-view="offices" onclick="RB.showView('offices')"><i class="bi bi-geo-alt me-1"></i>办事处管理</button>
-      <button type="button" data-view="products" onclick="RB.showView('products')"><i class="bi bi-diagram-3 me-1"></i>产品线管理</button>
-      <button type="button" data-view="categories" onclick="RB.showView('categories')"><i class="bi bi-tags me-1"></i>类别管理</button>
-      <button type="button" data-view="export" onclick="RB.showView('export')"><i class="bi bi-cloud-download me-1"></i>汇总导出</button>
+    <div class="rb-nav-frame" id="rbNavFrame">
+      <button type="button" class="rb-nav-arrow" id="rbNavPrev" aria-label="向左查看更多导航" title="向左查看更多" onclick="RB.scrollNav(-1)"><span aria-hidden="true">‹</span></button>
+      <div class="rb-nav" id="rbNav" role="navigation" aria-label="报销助手功能导航" tabindex="0">
+        <button type="button" class="active" data-view="dashboard"><i class="bi bi-grid me-1"></i>仪表盘</button>
+        <button type="button" data-view="invoices"><i class="bi bi-receipt me-1"></i>发票管理</button>
+        <button type="button" data-view="periods"><i class="bi bi-calendar3 me-1"></i>周期管理</button>
+        <button type="button" data-view="offices"><i class="bi bi-geo-alt me-1"></i>办事处管理</button>
+        <button type="button" data-view="products"><i class="bi bi-diagram-3 me-1"></i>产品线管理</button>
+        <button type="button" data-view="categories"><i class="bi bi-tags me-1"></i>类别管理</button>
+        <button type="button" data-view="export"><i class="bi bi-cloud-download me-1"></i>汇总导出</button>
+      </div>
+      <button type="button" class="rb-nav-arrow" id="rbNavNext" aria-label="向右查看更多导航" title="向右查看更多" onclick="RB.scrollNav(1)"><span aria-hidden="true">›</span></button>
     </div>
 
     <div class="rb-main">
@@ -284,6 +295,7 @@ const RB = {
   async init(){
     if(this.state.initialized)return;
     this.state.initialized=true;
+    this.setupNav();
     document.querySelectorAll('.rb-aux-tabs button').forEach(b=>b.addEventListener('click',()=>this.showAux(b.dataset.aux)));
     document.getElementById('rbInvoiceFile').addEventListener('change',e=>this.uploadFile(e.target.files[0]));
     document.getElementById('rbInvAmount').addEventListener('input',()=>this.calcTotal());
@@ -297,6 +309,47 @@ const RB = {
     });
     try{ this.state.reference=await this.api('/tools/reimbursement/reference'); await this.reload(); }catch(e){this.toast(e.message,true)}
   },
+  setupNav(){
+    const nav=document.getElementById('rbNav');
+    if(!nav)return;
+    const update=()=>this.updateNavControls();
+    nav.addEventListener('click',e=>{
+      const button=e.target.closest('button[data-view]');
+      if(button&&nav.contains(button))this.showView(button.dataset.view);
+    });
+    nav.addEventListener('scroll',update,{passive:true});
+    nav.addEventListener('keydown',e=>{
+      if(e.key==='ArrowRight'){e.preventDefault();this.scrollNav(1)}
+      if(e.key==='ArrowLeft'){e.preventDefault();this.scrollNav(-1)}
+      if(e.key==='Home'){e.preventDefault();nav.scrollTo({left:0,behavior:'smooth'})}
+      if(e.key==='End'){e.preventDefault();nav.scrollTo({left:nav.scrollWidth,behavior:'smooth'})}
+    });
+    if(window.ResizeObserver)this.navResizeObserver=new ResizeObserver(update),this.navResizeObserver.observe(nav);
+    else window.addEventListener('resize',update,{passive:true});
+    requestAnimationFrame(update);
+  },
+  updateNavControls(){
+    const nav=document.getElementById('rbNav'),frame=document.getElementById('rbNavFrame');
+    if(!nav||!frame)return;
+    const max=Math.max(0,nav.scrollWidth-nav.clientWidth),overflowing=max>2;
+    frame.classList.toggle('is-static',!overflowing);
+    document.getElementById('rbNavPrev').disabled=!overflowing||nav.scrollLeft<=2;
+    document.getElementById('rbNavNext').disabled=!overflowing||nav.scrollLeft>=max-2;
+  },
+  scrollNav(direction){
+    const nav=document.getElementById('rbNav');
+    if(!nav)return;
+    nav.scrollBy({left:direction*Math.max(160,nav.clientWidth*.78),behavior:'smooth'});
+    setTimeout(()=>this.updateNavControls(),260);
+  },
+  revealNavButton(button){
+    const nav=document.getElementById('rbNav');
+    if(!nav||!button)return;
+    const left=button.offsetLeft,right=left+button.offsetWidth;
+    if(left<nav.scrollLeft)nav.scrollTo({left:Math.max(0,left-8),behavior:'smooth'});
+    else if(right>nav.scrollLeft+nav.clientWidth)nav.scrollTo({left:right-nav.clientWidth+8,behavior:'smooth'});
+    setTimeout(()=>this.updateNavControls(),260);
+  },
   async reload(){
     const data=await this.api('/tools/reimbursement/api/bootstrap');
     Object.assign(this.state,data);
@@ -309,7 +362,7 @@ const RB = {
     document.querySelectorAll('#rbNav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
     document.querySelectorAll('.rb-view').forEach(v=>v.classList.remove('active'));
     target.classList.add('active');
-    document.querySelector(`#rbNav button[data-view="${name}"]`)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+    this.revealNavButton(document.querySelector(`#rbNav button[data-view="${name}"]`));
     if(name==='invoices')this.loadInvoices(1);
     if(name==='products')this.renderProductLines();
     if(name==='offices')this.renderOffices();
