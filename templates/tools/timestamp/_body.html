@@ -26,7 +26,8 @@
 <div class="card bg-light">
   <div class="card-body d-none" id="resultCard">
     <table class="table table-sm mb-0">
-      <tr><td class="text-muted" style="width:120px;">UTC 时间</td><td><code id="resUtc">—</code></td></tr>
+      <tr><td class="text-muted" style="width:140px;">中国标准时间</td><td><code id="resChina">—</code></td></tr>
+      <tr><td class="text-muted">UTC 时间</td><td><code id="resUtc">—</code></td></tr>
       <tr><td class="text-muted">ISO 8601</td><td><code id="resIso">—</code></td></tr>
       <tr><td class="text-muted">Unix 秒</td><td><code id="resSec">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-id="resSec"><i class="bi bi-clipboard"></i></button></td></tr>
       <tr><td class="text-muted">Unix 毫秒</td><td><code id="resMs">—</code> <button class="btn btn-sm btn-outline-secondary copyBtn" data-id="resMs"><i class="bi bi-clipboard"></i></button></td></tr>
@@ -62,6 +63,7 @@
       const r = await fetch('{{ url_for("timestamp.process") }}', { method: 'POST', body: fd });
       const d = await r.json();
       if (d.ok) {
+        document.getElementById('resChina').textContent = d.result.china;
         document.getElementById('resUtc').textContent = d.result.utc;
         document.getElementById('resIso').textContent = d.result.iso;
         document.getElementById('resSec').textContent = d.result.seconds;
@@ -69,7 +71,10 @@
         document.getElementById('resNow').textContent = d.result.current_ts;
         document.getElementById('resultCard').classList.remove('d-none');
 
-        document.getElementById('nowBtn').innerHTML = '<i class="bi bi-clock"></i> 实时 ' + new Date(d.result.current_ts * 1000).toLocaleTimeString();
+        const chinaNow = new Date(d.result.current_ts * 1000).toLocaleTimeString(
+          'zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }
+        );
+        document.getElementById('nowBtn').innerHTML = '<i class="bi bi-clock"></i> 中国时间 ' + chinaNow;
       } else {
         document.getElementById('errorBox').textContent = d.error;
         document.getElementById('errorBox').classList.remove('d-none');

@@ -12,7 +12,13 @@ from sqlalchemy import func
 from auth.decorators import admin_required
 from extensions import db
 from models import AnonUsage, Setting, Tool, UsageLog, User, UserUsage
-from utils.helpers import utc_today_str
+from utils.helpers import (
+    china_day_utc_bounds,
+    china_now,
+    china_today_str,
+    to_china_time,
+)
+from utils.settings import apply_runtime_settings, validate_site_settings
 
 from . import admin_bp
 
@@ -24,10 +30,10 @@ from . import admin_bp
 @login_required
 @admin_required
 def dashboard():
-    today = utc_today_str()
-    seven_days_ago = (
-        datetime.now(timezone.utc) - timedelta(days=7)
-    ).strftime("%Y-%m-%d %H:%M:%S")
+    today = china_today_str()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    seven_days_ago = now_utc - timedelta(days=7)
+    today_start_utc, tomorrow_start_utc = china_day_utc_bounds(today)
 
     total_users = db.session.query(func.count(User.id)).scalar() or 0
     today_active_users = (
@@ -53,25 +59,38 @@ def dashboard():
     # today per tool
     today_rows = (
         db.session.query(UsageLog.tool_id, func.count(UsageLog.id))
-        .filter(UsageLog.ts >= today + " 00:00:00")
+        .filter(
+            UsageLog.ts >= today_start_utc,
+            UsageLog.ts < tomorrow_start_utc,
+        )
         .group_by(UsageLog.tool_id)
         .all()
     )
     today_by_tool = {tool_id: count for tool_id, count in today_rows}
 
     # last 14 days daily volume
-    fourteen_days_ago = (
-        datetime.now(timezone.utc) - timedelta(days=14)
-    ).strftime("%Y-%m-%d %H:%M:%S")
-    raw_daily = (
-        db.session.query(func.date(UsageLog.ts).label("day"), func.count(UsageLog.id))
-        .filter(UsageLog.ts >= fourteen_days_ago)
-        .group_by(func.date(UsageLog.ts))
+    first_day = china_now().date() - timedelta(days=13)
+    first_day_utc, _ = china_day_utc_bounds(first_day)
+    raw_timestamps = (
+        db.session.query(UsageLog.ts)
+        .filter(
+            UsageLog.ts >= first_day_utc,
+            UsageLog.ts < tomorrow_start_utc,
+        )
         .all()
     )
-    daily_series = sorted(
-        (str(day), count) for day, count in raw_daily if day
+    counts = Counter(
+        local.strftime("%Y-%m-%d")
+        for (ts,) in raw_timestamps
+        if (local := to_china_time(ts)) is not None
     )
+    daily_series = [
+        (
+            (first_day + timedelta(days=offset)).isoformat(),
+            counts[(first_day + timedelta(days=offset)).isoformat()],
+        )
+        for offset in range(14)
+    ]
 
     return render_template(
         "admin/dashboard.html",
@@ -196,9 +215,17 @@ def logs():
     if status_filter:
         q = q.filter(UsageLog.status == status_filter)
     if date_from:
-        q = q.filter(UsageLog.ts >= date_from + " 00:00:00")
+        try:
+            start_utc, _ = china_day_utc_bounds(date_from)
+            q = q.filter(UsageLog.ts >= start_utc)
+        except ValueError:
+            date_from = ""
     if date_to:
-        q = q.filter(UsageLog.ts <= date_to + " 23:59:59")
+        try:
+            _, end_utc = china_day_utc_bounds(date_to)
+            q = q.filter(UsageLog.ts < end_utc)
+        except ValueError:
+            date_to = ""
 
     total = q.count()
     items = q.order_by(UsageLog.ts.desc()).offset((page - 1) * per_page).limit(per_page).all()
@@ -230,7 +257,7 @@ def logs():
 @login_required
 @admin_required
 def settings():
-    AI_KEYS = (
+    SETTING_KEYS = (
         "site_name",
         "site_tagline",
         "daily_free_limit",
@@ -247,8 +274,18 @@ def settings():
         "AI_API_KEY": "",
     }
     if request.method == "POST":
-        for key in AI_KEYS:
-            value = request.form.get(key, "").strip()
+        submitted = {
+            key: request.form.get(key, "").strip()
+            for key in SETTING_KEYS
+        }
+        try:
+            site_settings = validate_site_settings(submitted)
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return redirect(url_for("admin.settings"))
+
+        for key in SETTING_KEYS:
+            value = str(site_settings[key]) if key in site_settings else submitted[key]
             # For AI keys, empty string means "use env default" → delete the row.
             if key.startswith("AI_") and value == "":
                 row = db.session.get(Setting, key)
@@ -262,11 +299,12 @@ def settings():
             else:
                 row.value = value
         db.session.commit()
+        apply_runtime_settings(current_app)
         flash("设置已保存。", "success")
         return redirect(url_for("admin.settings"))
 
     stored = {}
-    for key in AI_KEYS:
+    for key in SETTING_KEYS:
         row = db.session.get(Setting, key)
         if row:
             stored[key] = row.value

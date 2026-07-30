@@ -11,8 +11,8 @@
           <th>邮箱</th>
           <th>角色</th>
           <th>状态</th>
-          <th>注册时间</th>
-          <th>最后登录</th>
+          <th>注册时间（中国）</th>
+          <th>最后登录（中国）</th>
           <th>自定义上限</th>
           <th>操作</th>
         </tr>
@@ -29,8 +29,8 @@
             <td>
               {% if u.is_active_user %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
             </td>
-            <td><small>{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '—' }}</small></td>
-            <td><small>{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '—' }}</small></td>
+            <td><small>{{ u.created_at|china_time('%Y-%m-%d %H:%M') }}</small></td>
+            <td><small>{{ u.last_login_at|china_time('%Y-%m-%d %H:%M') }}</small></td>
             <td>
               {% if u.custom_limits %}
                 <code class="small">{{ u.custom_limits }}</code>

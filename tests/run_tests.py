@@ -586,9 +586,9 @@ try:
     r = post_tool("timestamp", data)
     ok, msg = _assert_json_ok(r, ["result"])
     if ok:
-        ok = "2023" in r.get_json()["result"]["utc"]
-        msg = r.get_json()["result"]["utc"]
-    record("功能", "timestamp 秒戳→日期", ok, msg)
+        ok = r.get_json()["result"]["china"] == "2023-11-15 06:13:20 UTC+08:00"
+        msg = r.get_json()["result"]["china"]
+    record("功能", "timestamp 秒戳→中国时间", ok, msg)
 except Exception as exc:  # noqa: BLE001
     record("功能", "timestamp 秒戳→日期", False, str(exc).splitlines()[0], traceback.format_exc())
 
@@ -870,15 +870,23 @@ try:
     r = client.post("/admin/settings", data={
         "site_name": "测试工具箱",
         "site_tagline": "测试标语",
-        "daily_free_limit": "10",
-        "anon_free_limit": "3",
+        "daily_free_limit": "12",
+        "anon_free_limit": "4",
         "AI_PROVIDER": "mock",
         "AI_BASE_URL": "https://image.pollinations.ai",
         "AI_MODEL": "",
         "AI_API_KEY": "",
     }, follow_redirects=False)
-    ok = r.status_code in (301, 302)
-    record("后台", "保存设置", ok, f"status={r.status_code}")
+    home = client.get("/")
+    ok = (
+        r.status_code in (301, 302)
+        and app.config["SITE_NAME"] == "测试工具箱"
+        and app.config["DAILY_FREE_LIMIT"] == 12
+        and app.config["ANON_FREE_LIMIT"] == 4
+        and "测试工具箱".encode() in home.data
+        and "测试标语".encode() in home.data
+    )
+    record("后台", "保存设置并同步前台与限额", ok, f"status={r.status_code}")
 except Exception as exc:  # noqa: BLE001
     record("后台", "保存设置", False, str(exc).splitlines()[0], traceback.format_exc())
 
@@ -1064,25 +1072,31 @@ try:
 except Exception as exc:  # noqa: BLE001
     record("功能", "fcst_merge PN 统计", False, str(exc).splitlines()[0])
 
-# 匿名配额耗尽：新客户端连续调用同一工具，第 4 次应被拦截
+# 匿名配额耗尽：新客户端在当前动态限额用完后应被拦截
 try:
     c2 = app.test_client()
     last_status = None
     blocked_correctly = False
-    for i in range(4):
+    anon_limit = app.config["ANON_FREE_LIMIT"]
+    for i in range(anon_limit + 1):
         rr = c2.post("/tools/json-formatter/process",
                      data={"text": '{"x":1}', "action": "format"},
                      content_type="multipart/form-data", headers=AJ)
         last_status = rr.status_code
         jj = rr.get_json(silent=True) or {}
-        if i < 3:
+        if i < anon_limit:
             if not jj.get("ok"):
                 blocked_correctly = False
                 break
         else:
-            # 第 4 次应被拦截（429 或非 ok）
+            # 超过当前动态限额时应被拦截（429 或非 ok）
             blocked_correctly = (rr.status_code == 429 or not jj.get("ok"))
-    record("配额", "匿名配额耗尽拦截", blocked_correctly, f"第4次 status={last_status}")
+    record(
+        "配额",
+        "匿名配额耗尽拦截",
+        blocked_correctly,
+        f"限额={anon_limit}, 超额请求 status={last_status}",
+    )
 except Exception as exc:  # noqa: BLE001
     record("配额", "匿名配额耗尽拦截", False, str(exc).splitlines()[0], traceback.format_exc())
 

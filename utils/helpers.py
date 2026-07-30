@@ -5,7 +5,7 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -13,6 +13,7 @@ from flask import current_app
 from werkzeug.utils import secure_filename
 
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+CHINA_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 def safe_filename(original: str) -> str:
@@ -28,6 +29,36 @@ def sha256_of(data: bytes) -> str:
 
 def utc_today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def china_now() -> datetime:
+    """Return the current time in China Standard Time (UTC+8)."""
+    return datetime.now(CHINA_TIMEZONE)
+
+
+def china_today_str() -> str:
+    """Return today's calendar date in China, used by daily quotas."""
+    return china_now().strftime("%Y-%m-%d")
+
+
+def to_china_time(value: Optional[datetime]) -> Optional[datetime]:
+    """Convert a DB datetime to China time; naive DB values are treated as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(CHINA_TIMEZONE)
+
+
+def china_day_utc_bounds(day: str | date) -> tuple[datetime, datetime]:
+    """Return the half-open UTC range for one China calendar day."""
+    parsed = date.fromisoformat(day) if isinstance(day, str) else day
+    start_china = datetime.combine(parsed, time.min, tzinfo=CHINA_TIMEZONE)
+    end_china = start_china + timedelta(days=1)
+    return (
+        start_china.astimezone(timezone.utc).replace(tzinfo=None),
+        end_china.astimezone(timezone.utc).replace(tzinfo=None),
+    )
 
 
 def get_client_ip() -> str:
@@ -132,7 +163,8 @@ def parse_page_ranges(spec: str, total_pages: int) -> list[int]:
 def format_dt(dt: Optional[datetime]) -> str:
     if dt is None:
         return "—"
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    local = to_china_time(dt)
+    return local.strftime("%Y-%m-%d %H:%M:%S") if local else "—"
 
 
 def get_or_create_setting(key: str, default: str = "") -> str:

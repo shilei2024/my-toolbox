@@ -85,6 +85,7 @@
           </div>
 
           <button class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存设置</button>
+          <div class="form-text mt-2">保存后立即同步到首页、页面标题和免费次数校验，无需重启服务。</div>
         </form>
       </div>
     </div>
@@ -95,6 +96,9 @@
       <div class="card-body">
         <h6 class="text-muted text-uppercase small">当前生效配置</h6>
         <table class="table table-sm mb-0">
+          <tr><td>网站名称</td><td><code>{{ config.SITE_NAME }}</code></td></tr>
+          <tr><td>注册用户限额</td><td><code>{{ config.DAILY_FREE_LIMIT }}</code></td></tr>
+          <tr><td>匿名用户限额</td><td><code>{{ config.ANON_FREE_LIMIT }}</code></td></tr>
           <tr><td>Provider</td><td><code>{{ stored.AI_PROVIDER_EFFECTIVE }}</code></td></tr>
           <tr><td>Base URL</td><td><code class="text-truncate d-inline-block" style="max-width:200px;">{{ stored.AI_BASE_URL_EFFECTIVE }}</code></td></tr>
           <tr><td>Model</td><td><code>{{ stored.AI_MODEL_EFFECTIVE or '(默认)' }}</code></td></tr>

@@ -29,7 +29,7 @@
     <table class="table table-sm align-middle mb-0">
       <thead class="table-light">
         <tr>
-          <th>时间</th>
+          <th>时间（中国标准时间）</th>
           <th>用户</th>
           <th>工具</th>
           <th>状态</th>
@@ -40,7 +40,7 @@
       <tbody>
         {% for log in logs %}
           <tr>
-            <td><small>{{ log.ts.strftime('%Y-%m-%d %H:%M:%S') if log.ts else '—' }}</small></td>
+            <td><small>{{ log.ts|china_time }}</small></td>
             <td>
               {% if log.email %}<small>{{ log.email }}</small>{% elif log.anon_id %}<small class="text-muted">anon:<code>{{ log.anon_id[:8] }}</code></small>{% else %}<span class="text-muted">—</span>{% endif %}
             </td>

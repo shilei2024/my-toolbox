@@ -22,7 +22,6 @@ import tempfile
 import time
 import traceback
 from pathlib import Path
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import (
     Flask,
@@ -43,7 +42,8 @@ from config import get_config
 from extensions import csrf, db, limiter, login_manager
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
-from utils.helpers import get_client_ip, utc_today_str
+from utils.helpers import china_now, get_client_ip, to_china_time, utc_today_str
+from utils.settings import apply_runtime_settings
 
 _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
 _is_readonly_fs = False  # set True at runtime if mkdir fails (e.g. Vercel)
@@ -328,6 +328,7 @@ def _init_extensions(app: Flask) -> None:
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        apply_runtime_settings(app)
 
     login_manager.init_app(app)
 
@@ -346,6 +347,8 @@ def _init_extensions(app: Flask) -> None:
     def _ensure_anon_id():  # noqa: ANN202
         from auth.decorators import ensure_anon_id
 
+        # Keep all workers in sync with settings saved from the admin panel.
+        apply_runtime_settings(app)
         g.anon_id = ensure_anon_id()
 
 
@@ -395,32 +398,25 @@ def _register_error_handlers(app: Flask) -> None:
 
 
 def _register_context(app: Flask) -> None:
-    tz_name = app.config.get("DISPLAY_TIMEZONE", "Asia/Shanghai")
+    @app.template_filter("china_time")
+    def china_time_filter(value, fmt: str = "%Y-%m-%d %H:%M:%S"):  # noqa: ANN001
+        local = to_china_time(value)
+        return local.strftime(fmt) if local else "—"
 
     @app.context_processor
     def inject_globals():  # noqa: ANN202
         from auth.decorators import remaining_for
-        from datetime import datetime
-
-        try:
-            tz = ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError:
-            tz = ZoneInfo("UTC")
 
         def _remaining_for(tool_id: str) -> int:
             return remaining_for(tool_id)
-
-        def _now() -> datetime:
-            return datetime.now(tz)
 
         return {
             "site_name": app.config["SITE_NAME"],
             "site_tagline": app.config["SITE_TAGLINE"],
             "current_user": current_user,
             "is_admin": current_user.is_authenticated and getattr(current_user, "is_admin", False),
-            "tz": tz,
             "remaining_for": _remaining_for,
-            "now": _now,
+            "now": china_now,
         }
 
 

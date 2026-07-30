@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, render_template, request
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
+from utils.helpers import CHINA_TIMEZONE
 
 tool_bp = Blueprint("timestamp", __name__)
 
@@ -34,20 +35,20 @@ def process():
     try:
         if direction == "ts2dt":
             ts = float(raw)
-            if raw.find(".") == -1 and len(raw) >= 13:
+            if raw.find(".") == -1 and abs(ts) >= 100_000_000_000_000:
+                ts = ts / 1_000_000.0  # microseconds
+            elif raw.find(".") == -1 and abs(ts) >= 100_000_000_000:
                 ts = ts / 1000.0  # milliseconds
-            elif raw.find(".") == -1 and len(raw) == 10:
-                ts = ts  # seconds
-            elif len(raw) >= 16:
-                ts = ts / 1000000.0  # microseconds
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            dt_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
+            dt_china = dt_utc.astimezone(CHINA_TIMEZONE)
             current_ts = int(datetime.now(timezone.utc).timestamp())
             commit_usage("timestamp", success=True)
             return jsonify(
                 ok=True,
                 result={
-                    "utc": dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                    "iso": dt.isoformat(),
+                    "china": dt_china.strftime("%Y-%m-%d %H:%M:%S UTC+08:00"),
+                    "utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    "iso": dt_china.isoformat(),
                     "seconds": int(ts),
                     "milliseconds": int(ts * 1000),
                     "current_ts": current_ts,
@@ -56,14 +57,18 @@ def process():
         else:
             dt = datetime.fromisoformat(raw)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                # A date entered without an offset is interpreted as China time.
+                dt = dt.replace(tzinfo=CHINA_TIMEZONE)
             ts = int(dt.timestamp())
+            dt_china = dt.astimezone(CHINA_TIMEZONE)
+            dt_utc = dt.astimezone(timezone.utc)
             commit_usage("timestamp", success=True)
             return jsonify(
                 ok=True,
                 result={
-                    "utc": dt.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                    "iso": dt.isoformat(),
+                    "china": dt_china.strftime("%Y-%m-%d %H:%M:%S UTC+08:00"),
+                    "utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    "iso": dt_china.isoformat(),
                     "seconds": ts,
                     "milliseconds": ts * 1000,
                     "current_ts": int(datetime.now(timezone.utc).timestamp()),

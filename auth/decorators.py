@@ -15,7 +15,7 @@ from flask_login import current_user
 
 from extensions import db
 from models import AnonUsage, UsageLog, UserUsage, new_anon_id
-from utils.helpers import get_client_ip, utc_today_str
+from utils.helpers import china_today_str, get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +128,11 @@ def remaining_for(tool_id: str) -> int:
         if getattr(current_user, "is_admin", False):
             return 10**9
         limit = current_user.limit_for(tool_id, current_app.config["DAILY_FREE_LIMIT"])
-        used = _user_count(current_user.id, tool_id, utc_today_str())
+        used = _user_count(current_user.id, tool_id, china_today_str())
         return max(0, limit - used)
 
     aid = ensure_anon_id()
-    used = _anon_count(aid, tool_id, utc_today_str())
+    used = _anon_count(aid, tool_id, china_today_str())
     return max(0, current_app.config["ANON_FREE_LIMIT"] - used)
 
 
@@ -163,7 +163,7 @@ def require_usage(tool_id: str) -> Callable:
                 limit = current_user.limit_for(
                     tool_id, current_app.config["DAILY_FREE_LIMIT"]
                 )
-                used = _user_count(current_user.id, tool_id, utc_today_str())
+                used = _user_count(current_user.id, tool_id, china_today_str())
                 if used >= limit:
                     return _quota_exceeded(
                         "今日免费次数已用完，请明天再试或升级会员。",
@@ -174,7 +174,7 @@ def require_usage(tool_id: str) -> Callable:
                     )
             else:
                 aid = ensure_anon_id()
-                used = _anon_count(aid, tool_id, utc_today_str())
+                used = _anon_count(aid, tool_id, china_today_str())
                 if used >= current_app.config["ANON_FREE_LIMIT"]:
                     return _quota_exceeded(
                         "试用次数已用完，请注册或登录后继续使用。",
@@ -193,7 +193,7 @@ def require_usage(tool_id: str) -> Callable:
 def commit_usage(tool_id: str, *, success: bool = True, message: str | None = None) -> None:
     """Atomically bump the counter and write an audit log entry."""
     ip = get_client_ip()
-    day = utc_today_str()
+    day = china_today_str()
 
     if current_user.is_authenticated:
         user_id = current_user.id
