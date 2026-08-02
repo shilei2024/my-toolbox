@@ -3,6 +3,7 @@
 ## 工程治理
 
 - [永久工程原则与 Golden Rule](engineering-principles.md)
+- [Mavis Gallery 品牌规范](brand-spec.md)
 
 ## Phase 架构文档
 
