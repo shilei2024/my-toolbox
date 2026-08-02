@@ -91,6 +91,10 @@ class Config:
         "SITE_TAGLINE", "把常用的小工具放在一个干净的网页里，随时用，随时走。"
     )
 
+    # --- Gallery BFF bridge ---
+    # Shared only between Flask and the Next.js server. Never expose to browsers.
+    GALLERY_INTROSPECTION_SECRET: str = os.environ.get("GALLERY_INTROSPECTION_SECRET", "")
+
     # --- Paths ---
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     INSTANCE_DIR: Path = BASE_DIR / "instance"

@@ -1,9 +1,10 @@
 """Auth routes: register, login, logout."""
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timezone
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from extensions import db
@@ -75,3 +76,31 @@ def logout():
     logout_user()
     flash("已退出登录。", "info")
     return redirect(url_for("home"))
+
+
+@auth_bp.get("/internal/gallery/session")
+def gallery_session():
+    """Return only the identity fields required by the Gallery BFF.
+
+    The Next.js server forwards the existing Flask session cookie and proves
+    its own identity with a separate shared secret. Browser-supplied user IDs
+    are never trusted.
+    """
+    expected = str(current_app.config.get("GALLERY_INTROSPECTION_SECRET", ""))
+    supplied = request.headers.get("X-Mavis-Introspection-Secret", "")
+    if len(expected.encode("utf-8")) < 32 or not hmac.compare_digest(expected, supplied):
+        response = jsonify(error={"code": "not_found", "message": "Not found"})
+        response.status_code = 404
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    if not current_user.is_authenticated:
+        response = jsonify(role="guest")
+    else:
+        response = jsonify(
+            role="admin" if bool(getattr(current_user, "is_admin", False)) else "user",
+            userId=int(current_user.get_id()),
+        )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie"
+    return response
