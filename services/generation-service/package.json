@@ -1,0 +1,38 @@
+{
+  "name": "@mindfulpenpal/generation-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Provider-agnostic image generation service core",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/provider-contract.test.ts test/phase4-comfyui.test.ts test/phase5-queue.test.ts test/phase6-gallery.test.ts test/phase7-seo.test.ts test/phase8-admin.test.ts test/phase9-multi-provider.test.ts test/phase10-billing.test.ts",
+    "test:phase6:pg": "node --experimental-strip-types --test test/phase6-gallery.pg.integration.ts",
+    "test:phase7:pg": "node --experimental-strip-types --test test/phase7-seo.pg.integration.ts",
+    "test:phase8:pg": "node --experimental-strip-types --test test/phase8-admin.pg.integration.ts",
+    "test:phase9:pg": "node --experimental-strip-types --test test/phase9-multi-provider.pg.integration.ts",
+    "test:phase10:pg": "node --experimental-strip-types --test test/phase10-billing.pg.integration.ts",
+    "gallery:start": "node --experimental-strip-types src/gallery/gallery-api-main.ts",
+    "billing:webhook": "node --experimental-strip-types src/billing/billing-webhook-main.ts",
+    "gallery:deletion-worker": "node --experimental-strip-types src/gallery/gallery-deletion-main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.18 <25"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.20.3",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^11.2.0",
+    "ajv": "^8.20.0",
+    "bullmq": "^6.0.5",
+    "cos-nodejs-sdk-v5": "^3.0.0",
+    "fastify": "^5.11.0",
+    "image-size": "^2.0.2",
+    "ioredis": "^6.0.0",
+    "pg": "^8.22.0",
+    "stripe": "22.4.0"
+  }
+}
