@@ -6,6 +6,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.tmp/
 
 # Distribution / packaging
 .Python
@@ -58,8 +59,12 @@ htmlcov/
 .env.*.local
 *.env.local
 .env.production
+.env.development
+.env.staging
+.env.test
 secrets.json
 secrets.yaml
+.vercel/
 
 # =============================================================================
 # Database & user-uploaded content
@@ -116,6 +121,9 @@ Desktop.ini
 # =============================================================================
 *.spec
 site-packages/
+node_modules/
+dist/
+coverage/
 
 # test reports (generated)
 tests/test_report.json

@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels: [dependencies, python]
+
+  - package-ecosystem: npm
+    directory: /services/generation-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels: [dependencies, generation-service]
+
+  - package-ecosystem: npm
+    directory: /apps/gallery-web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels: [dependencies, gallery-web]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels: [dependencies, ci]
