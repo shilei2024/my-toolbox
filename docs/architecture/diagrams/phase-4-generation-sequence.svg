@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1600" viewBox="0 0 1800 1600" role="img" aria-labelledby="title desc">
+  <title id="title">Phase 4 Production Image Generation Sequence</title>
+  <desc id="desc">Provider-agnostic generation flow from user request through ComfyUI and Tencent COS, including polling, persistence, cleanup, cancellation and safe error mapping.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#101b31"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".3"/></filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#80caff"/></marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#78e6b0"/></marker>
+    <style>
+      .title{font:700 38px Inter,Segoe UI,sans-serif;fill:#f4f8ff}.subtitle{font:400 18px Inter,Segoe UI,sans-serif;fill:#aebed8}.actor{rx:12;filter:url(#shadow);stroke-width:1.5}.actorText{font:650 16px Inter,Segoe UI,sans-serif;fill:#f8fbff;text-anchor:middle}.life{stroke:#536781;stroke-width:1.5;stroke-dasharray:7 8}.section{fill:#101f35;stroke:#2b4665;stroke-width:1;rx:14}.sectionAlt{fill:#132038;stroke:#3b416c;stroke-width:1;rx:14}.sectionLabel{font:700 15px Inter,Segoe UI,sans-serif;fill:#8fb8e8;letter-spacing:.08em}.msg{stroke:#80caff;stroke-width:2;marker-end:url(#arrow)}.return{stroke:#78e6b0;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#arrowGreen)}.label{font:500 14px Inter,Segoe UI,sans-serif;fill:#dce9fb;text-anchor:middle}.small{font:500 12px Inter,Segoe UI,sans-serif;fill:#9eb2cf;text-anchor:middle}.note{fill:#182b43;stroke:#547da6;stroke-width:1;rx:8}.noteText{font:500 13px Inter,Segoe UI,sans-serif;fill:#d9e9fb}.danger{fill:#30213a;stroke:#b572b9;stroke-width:1;rx:10}.dangerText{font:500 13px Inter,Segoe UI,sans-serif;fill:#f1c8ef}.footer{font:500 13px Inter,Segoe UI,sans-serif;fill:#8298b8}.dot{fill:#78e6b0}
+    </style>
+  </defs>
+  <rect width="1800" height="1600" fill="url(#bg)"/>
+  <text class="title" x="54" y="58">Phase 4 · First Production Provider</text>
+  <text class="subtitle" x="54" y="91">Provider-agnostic orchestration · ComfyUI execution · Tencent COS persistence</text>
+
+  <g>
+    <rect class="actor" x="40" y="122" width="220" height="58" fill="#17466b" stroke="#49a8e8"/><text class="actorText" x="150" y="157">User / Frontend</text>
+    <rect class="actor" x="280" y="122" width="220" height="58" fill="#17466b" stroke="#49a8e8"/><text class="actorText" x="390" y="147">Generation</text><text class="actorText" x="390" y="168">Service</text>
+    <rect class="actor" x="520" y="122" width="220" height="58" fill="#21415d" stroke="#6d9abd"/><text class="actorText" x="630" y="147">Registry +</text><text class="actorText" x="630" y="168">Selection Policy</text>
+    <rect class="actor" x="760" y="122" width="220" height="58" fill="#3f326b" stroke="#9a7fe0"/><text class="actorText" x="870" y="147">ComfyUI</text><text class="actorText" x="870" y="168">Provider</text>
+    <rect class="actor" x="1000" y="122" width="220" height="58" fill="#55345e" stroke="#c17ec5"/><text class="actorText" x="1110" y="157">ComfyUI</text>
+    <rect class="actor" x="1240" y="122" width="220" height="58" fill="#245548" stroke="#69c6a4"/><text class="actorText" x="1350" y="147">Persistence +</text><text class="actorText" x="1350" y="168">Storage Abstraction</text>
+    <rect class="actor" x="1480" y="122" width="220" height="58" fill="#275340" stroke="#78e6b0"/><text class="actorText" x="1590" y="147">Tencent Cloud</text><text class="actorText" x="1590" y="168">COS</text>
+  </g>
+
+  <g>
+    <line class="life" x1="150" y1="180" x2="150" y2="1512"/><line class="life" x1="390" y1="180" x2="390" y2="1512"/><line class="life" x1="630" y1="180" x2="630" y2="1512"/><line class="life" x1="870" y1="180" x2="870" y2="1512"/><line class="life" x1="1110" y1="180" x2="1110" y2="1512"/><line class="life" x1="1350" y1="180" x2="1350" y2="1512"/><line class="life" x1="1590" y1="180" x2="1590" y2="1512"/>
+  </g>
+
+  <rect class="section" x="26" y="206" width="1748" height="262"/><text class="sectionLabel" x="48" y="235">1 · ROUTE AND SUBMIT</text>
+  <line class="msg" x1="150" y1="273" x2="390" y2="273"/><text class="label" x="270" y="261">POST /generations</text><text class="small" x="270" y="294">workflow + prompt + parameters</text>
+  <line class="msg" x1="390" y1="333" x2="630" y2="333"/><text class="label" x="510" y="321">select(request, bindings)</text>
+  <line class="return" x1="630" y1="380" x2="390" y2="380"/><text class="label" x="510" y="368">provider + binding</text>
+  <line class="msg" x1="390" y1="429" x2="870" y2="429"/><text class="label" x="630" y="417">generate(request, binding)</text>
+
+  <rect class="sectionAlt" x="26" y="486" width="1748" height="402"/><text class="sectionLabel" x="48" y="515">2 · VERSIONED WORKFLOW AND GPU EXECUTION</text>
+  <rect class="note" x="760" y="542" width="220" height="68"/><text class="noteText" x="776" y="565">Load name-vN.json</text><text class="noteText" x="776" y="585">validate · cache · SHA-256</text><text class="noteText" x="776" y="602">inject typed placeholders</text>
+  <line class="msg" x1="870" y1="647" x2="1110" y2="647"/><text class="label" x="990" y="635">POST /prompt</text><text class="small" x="990" y="668">API workflow only</text>
+  <line class="return" x1="1110" y1="698" x2="870" y2="698"/><text class="label" x="990" y="686">prompt_id</text>
+  <rect x="828" y="724" width="84" height="118" fill="none" stroke="#7188a6" stroke-dasharray="5 5" rx="8"/><text class="small" x="870" y="744">poll loop</text>
+  <line class="msg" x1="870" y1="775" x2="1110" y2="775"/><text class="label" x="990" y="763">GET /history/{id}</text>
+  <line class="return" x1="1110" y1="817" x2="870" y2="817"/><text class="label" x="990" y="805">queued / running</text>
+  <line class="return" x1="1110" y1="862" x2="870" y2="862"/><text class="label" x="990" y="850">completed + image refs</text>
+
+  <rect class="section" x="26" y="906" width="1748" height="382"/><text class="sectionLabel" x="48" y="935">3 · DOWNLOAD, VERIFY, AND PERSIST</text>
+  <line class="msg" x1="870" y1="978" x2="1110" y2="978"/><text class="label" x="990" y="966">GET /view</text>
+  <line class="return" x1="1110" y1="1026" x2="870" y2="1026"/><text class="label" x="990" y="1014">image stream</text>
+  <rect class="note" x="768" y="1051" width="204" height="53"/><text class="noteText" x="784" y="1074">Controlled temp path</text><text class="noteText" x="784" y="1093">verify actual dimensions</text>
+  <line class="return" x1="870" y1="1142" x2="390" y2="1142"/><text class="label" x="630" y="1130">succeeded + temporary outputs</text>
+  <line class="msg" x1="390" y1="1187" x2="1350" y2="1187"/><text class="label" x="870" y="1175">persist(jobId, outputs)</text>
+  <line class="msg" x1="1350" y1="1232" x2="1590" y2="1232"/><text class="label" x="1470" y="1220">PUT object</text>
+  <line class="return" x1="1590" y1="1270" x2="1350" y2="1270"/><text class="label" x="1470" y="1258">COS / CDN URL</text>
+
+  <rect class="sectionAlt" x="26" y="1306" width="1748" height="190"/><text class="sectionLabel" x="48" y="1335">4 · CLEANUP AND SAFE RESPONSE</text>
+  <path d="M1350 1373 h72 v48 h-72" fill="none" stroke="#78e6b0" stroke-width="2" marker-end="url(#arrowGreen)"/><text class="label" x="1458" y="1391">delete temp file</text><text class="small" x="1458" y="1411">always, including failure</text>
+  <line class="return" x1="1350" y1="1450" x2="390" y2="1450"/><text class="label" x="870" y="1438">stored assets + metadata</text>
+  <line class="return" x1="390" y1="1482" x2="150" y2="1482"/><text class="label" x="270" y="1470">COS/CDN URL only</text>
+
+  <rect class="danger" x="54" y="1522" width="1160" height="50"/><circle class="dot" cx="78" cy="1547" r="5"/><text class="dangerText" x="96" y="1552">Cancel: targeted /queue deletion; global /interrupt is disabled by default. Failure: safe ProviderError + uploaded-object compensation.</text>
+  <text class="footer" x="1746" y="1553" text-anchor="end">Phase 4 · ADR-0004</text>
+</svg>

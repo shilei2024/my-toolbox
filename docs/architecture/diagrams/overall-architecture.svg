@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1060">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap');
+    text { font-family:'JetBrains Mono','Noto Sans SC','PingFang SC',sans-serif; }
+    .title { fill:#f8fafc;font-size:22px;font-weight:700 }
+    .subtitle { fill:#94a3b8;font-size:11px }
+    .region-label { fill:#fbbf24;font-size:11px;font-weight:600 }
+    .name { fill:#f8fafc;font-size:12px;font-weight:600;text-anchor:middle }
+    .desc { fill:#94a3b8;font-size:9px;text-anchor:middle }
+    .label { fill:#cbd5e1;font-size:9px;text-anchor:middle }
+    .small { fill:#94a3b8;font-size:8px }
+  </style>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
+    <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb923c"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#34d399"/></marker>
+    <marker id="arrow-open" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polyline points="0 0,10 3.5,0 7" fill="none" stroke="#94a3b8" stroke-width="1.5"/></marker>
+  </defs>
+
+  <rect width="1500" height="1060" fill="#0f172a"/><rect width="1500" height="1060" fill="url(#grid)"/>
+  <text x="36" y="42" class="title">AI Image Community — Target Architecture</text>
+  <text x="36" y="63" class="subtitle">Phase 1 · provider-agnostic · low-cost incremental migration from the existing Flask site</text>
+
+  <!-- Regions -->
+  <rect x="30" y="90" width="1440" height="130" rx="12" fill="none" stroke="#22d3ee" stroke-width="1" stroke-dasharray="8,4"/>
+  <text x="45" y="110" fill="#22d3ee" font-size="11" font-weight="600">PUBLIC EDGE / WEB EXPERIENCE</text>
+  <rect x="30" y="245" width="1440" height="460" rx="12" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+  <text x="45" y="265" class="region-label">PRIVATE APPLICATION NETWORK</text>
+  <rect x="30" y="730" width="1440" height="250" rx="12" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+  <text x="45" y="750" class="region-label">DATA, STORAGE &amp; PROVIDER INFRASTRUCTURE</text>
+
+  <!-- Connectors behind boxes -->
+  <path d="M220 155H330" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrow-cyan)"/>
+  <path d="M510 155H615" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrow-cyan)"/>
+  <path d="M710 195V235H412V300" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrow-cyan)"/>
+  <path d="M525 355H620" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrow-cyan)"/>
+  <path d="M990 155H1085" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+
+  <path d="M890 370H980" fill="none" stroke="#fb923c" stroke-width="2" marker-end="url(#arrow-orange)"/>
+  <path d="M1135 420V480" fill="none" stroke="#fb923c" stroke-width="2" marker-end="url(#arrow-orange)"/>
+  <path d="M980 545H890" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <path d="M710 610V790" fill="none" stroke="#a78bfa" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <path d="M800 570V790H1010" fill="none" stroke="#a78bfa" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <path d="M1135 610V815H1230" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <path d="M1135 610V915H1230" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+  <path d="M620 520H525" fill="none" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+  <path d="M435 410V790H350" fill="none" stroke="#a78bfa" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Public boxes -->
+  <rect x="60" y="125" width="160" height="60" rx="7" fill="#0f172a"/><rect x="60" y="125" width="160" height="60" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="140" y="150" class="name">Browser</text><text x="140" y="168" class="desc">Guest · User · Admin</text>
+  <rect x="330" y="125" width="180" height="60" rx="7" fill="#0f172a"/><rect x="330" y="125" width="180" height="60" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="420" y="150" class="name">CDN / Reverse Proxy</text><text x="420" y="168" class="desc">TLS · cache · rate limit</text>
+  <rect x="615" y="115" width="190" height="80" rx="7" fill="#0f172a"/><rect x="615" y="115" width="190" height="80" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="710" y="143" class="name">Existing Flask Web / BFF</text><text x="710" y="161" class="desc">session auth · CSRF · tools shell</text><text x="710" y="178" class="desc">signed internal user context</text>
+  <rect x="850" y="125" width="140" height="60" rx="7" fill="#0f172a"/><rect x="850" y="125" width="140" height="60" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="920" y="150" class="name">Next.js (later)</text><text x="920" y="168" class="desc">Gallery / SEO option</text>
+  <rect x="1085" y="125" width="180" height="60" rx="7" fill="#0f172a"/><rect x="1085" y="125" width="180" height="60" rx="7" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1175" y="150" class="name">Search / Social Crawlers</text><text x="1175" y="168" class="desc">approved public pages only</text>
+
+  <!-- Private application boxes -->
+  <rect x="300" y="300" width="225" height="110" rx="8" fill="#0f172a"/><rect x="300" y="300" width="225" height="110" rx="8" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="412" y="328" class="name">Auth Context Gateway</text><text x="412" y="350" class="desc">verify service token</text><text x="412" y="368" class="desc">user · role · request ID</text><text x="412" y="386" class="desc">never trusts browser identity</text>
+
+  <rect x="620" y="290" width="270" height="320" rx="10" fill="#0f172a"/><rect x="620" y="290" width="270" height="320" rx="10" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.8"/>
+  <text x="755" y="320" class="name">Generation Service · NestJS</text>
+  <line x1="642" y1="337" x2="868" y2="337" stroke="#34d399" stroke-opacity=".45"/>
+  <text x="657" y="362" fill="#d1fae5" font-size="10">Generation / Job State Machine</text>
+  <text x="657" y="389" fill="#d1fae5" font-size="10">Routing Policy / Provider Registry</text>
+  <text x="657" y="416" fill="#d1fae5" font-size="10">Workflow Catalog / Asset</text>
+  <text x="657" y="443" fill="#d1fae5" font-size="10">Gallery / Privacy / Moderation</text>
+  <text x="657" y="470" fill="#d1fae5" font-size="10">Entitlement / Billing / Audit</text>
+  <line x1="642" y1="490" x2="868" y2="490" stroke="#34d399" stroke-opacity=".45"/>
+  <text x="755" y="516" class="desc">the only image-generation business entry</text>
+  <text x="755" y="537" class="desc">provider choice is server-side policy</text>
+  <text x="755" y="558" class="desc">PostgreSQL holds durable truth</text>
+
+  <rect x="980" y="330" width="310" height="90" rx="8" fill="#0f172a"/><rect x="980" y="330" width="310" height="90" rx="8" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.7"/>
+  <text x="1135" y="358" class="name">Redis / BullMQ</text><text x="1135" y="379" class="desc">queue · retry delay · priority · progress</text><text x="1135" y="398" class="desc">not the source of truth</text>
+
+  <rect x="980" y="480" width="310" height="130" rx="8" fill="#0f172a"/><rect x="980" y="480" width="310" height="130" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.7"/>
+  <text x="1135" y="508" class="name">Generation Worker Pool</text><text x="1135" y="532" class="desc">lease · heartbeat · cancellation</text><text x="1135" y="551" class="desc">Provider Adapter contract</text><text x="1135" y="570" class="desc">output validation · storage upload</text><text x="1135" y="589" class="desc">horizontal scaling by capability</text>
+
+  <rect x="300" y="490" width="225" height="100" rx="8" fill="#0f172a"/><rect x="300" y="490" width="225" height="100" rx="8" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="412" y="520" class="name">Moderation Pipeline</text><text x="412" y="543" class="desc">prompt pre-check</text><text x="412" y="561" class="desc">image review · manual review</text><text x="412" y="579" class="desc">public publishing gate</text>
+
+  <!-- Infrastructure -->
+  <g transform="translate(290,790)">
+    <rect x="0" y="10" width="180" height="70" fill="#0f172a"/><ellipse cx="90" cy="10" rx="90" ry="14" fill="#0f172a"/><ellipse cx="90" cy="80" rx="90" ry="14" fill="#0f172a"/>
+    <rect x="0" y="10" width="180" height="70" fill="rgba(76,29,149,.4)"/><ellipse cx="90" cy="10" rx="90" ry="14" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><ellipse cx="90" cy="80" rx="90" ry="14" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><line x1="0" y1="10" x2="0" y2="80" stroke="#a78bfa" stroke-width="1.5"/><line x1="180" y1="10" x2="180" y2="80" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="90" y="43" class="name">PostgreSQL</text><text x="90" y="62" class="desc">durable business truth</text>
+  </g>
+
+  <rect x="620" y="790" width="210" height="90" rx="8" fill="#0f172a"/><rect x="620" y="790" width="210" height="90" rx="8" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="725" y="820" class="name">Object Storage + CDN</text><text x="725" y="843" class="desc">Tencent COS first · adapter-based</text><text x="725" y="862" class="desc">originals · thumbnails · derivatives</text>
+
+  <rect x="1010" y="790" width="185" height="90" rx="8" fill="#0f172a"/><rect x="1010" y="790" width="185" height="90" rx="8" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1102" y="820" class="name">Provider Adapters</text><text x="1102" y="843" class="desc">normalized request/result/error</text><text x="1102" y="862" class="desc">no business decisions</text>
+
+  <rect x="1230" y="780" width="200" height="100" rx="8" fill="#0f172a"/><rect x="1230" y="780" width="200" height="100" rx="8" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1330" y="810" class="name">ComfyUI GPU Pool</text><text x="1330" y="834" class="desc">RunPod · Vast · cloud GPU</text><text x="1330" y="853" class="desc">versioned workflows</text><text x="1330" y="869" class="desc">autosuspend when idle</text>
+
+  <rect x="1230" y="905" width="200" height="60" rx="8" fill="#0f172a"/><rect x="1230" y="905" width="200" height="60" rx="8" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1330" y="931" class="name">Future API Providers</text><text x="1330" y="949" class="desc">OpenAI · Gemini · Jimeng · …</text>
+
+  <!-- Arrow labels -->
+  <text x="273" y="146" class="label">HTTPS</text><text x="560" y="146" class="label">same domain</text><text x="560" y="226" class="label">signed internal identity</text>
+  <text x="935" y="357" class="label">enqueue</text><text x="1135" y="455" class="label">async job</text><text x="935" y="530" class="label">result / events</text>
+
+  <!-- Legend and invariant -->
+  <rect x="55" y="995" width="1390" height="42" rx="8" fill="rgba(8,51,68,.35)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="750" y="1021" fill="#e0f2fe" font-size="12" font-weight="600" text-anchor="middle">INVARIANT: Frontend → Unified Generation API → Policy Router → Provider Adapter. Frontend never selects or calls a provider.</text>
+</svg>

@@ -1,5 +1,7 @@
 # 开发与扩展指南
 
+> 开始任何功能前，必须先阅读 [`AGENTS.md`](AGENTS.md) 和 [`docs/architecture/engineering-principles.md`](docs/architecture/engineering-principles.md)，完成生产影响、跨模块复用、运维成本、小白部署和长期架构五项检查。
+
 本文档面向"想加新工具"或"想改逻辑"的开发者。先把 `README.md` 看完，那是面向运维/部署的。
 
 ## 1. 目录约定
