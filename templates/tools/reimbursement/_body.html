@@ -538,11 +538,11 @@ const RB = {
     entertainment:[['date','日期','date'],['category','费用类别','text'],['place','用餐地点/名称','text'],['customer','客户名称','text'],['participants','参与人','text'],['amount','金额','number'],['purpose','产品线','product-line']],
     vehicle:[['date','日期','date'],['from_location','出发地','text'],['to_location','目的地','text'],['contact','联系人','text'],['km_start','起','number'],['km_end','止','number'],['km_total','公里','number'],['toll_fee','过桥费','number'],['parking_fee','停车费','number'],['product_line','产品线','product-line']],
     travel:[['date','日期','date'],['location','出差地','text'],['customer','客户名称','text'],['expense_type','费用类型','text'],['amount','金额','number'],['purpose','产品线','product-line']]
-  };Object.entries(schemas).forEach(([kind,fields])=>{
+  };this.normalizeVehicleRows();Object.entries(schemas).forEach(([kind,fields])=>{
     const rows=this.state.aux[kind]||[],sum=key=>rows.reduce((total,row)=>total+(parseFloat(row[key])||0),0).toFixed(2);
     const totalKeys=kind==='entertainment'?{amount:sum('amount')}:kind==='vehicle'?{km_total:sum('km_total'),toll_fee:sum('toll_fee'),parking_fee:sum('parking_fee')}:{amount:sum('amount')};
     const body=rows.map((r,ri)=>`<tr>${fields.map(f=>{
-      const key=f[0],readonly=kind==='vehicle'&&key==='km_total',value=r[key]??(key==='product_line'?r.remarks:'')??'';
+      const key=f[0],readonly=kind==='vehicle'&&(key==='km_end'||(key==='km_start'&&ri>0)),value=r[key]??(key==='product_line'?r.remarks:'')??'';
       if(f[2]==='product-line'){
         const known=this.state.product_lines.some(p=>p.name===value);
         const options='<option value="">请选择产品线</option>'
@@ -550,17 +550,27 @@ const RB = {
           +this.state.product_lines.map(p=>`<option value="${this.esc(p.name)}" ${p.name===value?'selected':''}>${this.esc(p.name)}</option>`).join('');
         return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
       }
-      return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(value)}" ${readonly?'readonly title="公里数由止减起自动计算"':''}></td>`;
+      const readonlyTitle=key==='km_start'?'起始公里数承接上一行的止':'止由起加公里自动计算';
+      return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(value)}" ${readonly?`readonly title="${readonlyTitle}"`:''}></td>`;
     }).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('');
     const footer=`<tr>${fields.map((f,index)=>`<th>${index===0?'合计':(totalKeys[f[0]]??'')}</th>`).join('')}<th></th></tr>`;
     document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).innerHTML=`<div class="rb-table-wrap"><table class="rb-table rb-aux-table"><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th></th></tr></thead><tbody>${body}</tbody><tfoot>${footer}</tfoot></table></div><button class="rb-btn rb-btn-light mt-2" onclick="RB.addAux('${kind}')"><i class="bi bi-plus"></i>添加一行</button>`;
   })},
+  normalizeVehicleRows(){
+    const rows=this.state.aux.vehicle||[];let previousEnd='';
+    rows.forEach((item,index)=>{
+      if(index>0)item.km_start=previousEnd;
+      const start=item.km_start===''||item.km_start==null?NaN:parseFloat(item.km_start);
+      const km=item.km_total===''||item.km_total==null?NaN:parseFloat(item.km_total);
+      item.km_end=Number.isFinite(start)&&Number.isFinite(km)?String(Math.round((start+km)*100)/100):'';
+      previousEnd=item.km_end;
+    });
+  },
   setAux(kind,row,key,value){
     this.state.aux[kind][row][key]=value;
-    if(kind==='vehicle'&&['km_start','km_end'].includes(key)){
-      const item=this.state.aux[kind][row],start=parseFloat(item.km_start),end=parseFloat(item.km_end);
-      item.km_total=Number.isFinite(start)&&Number.isFinite(end)?(end-start).toFixed(2):'';
-      const output=document.getElementById(`rbAux_vehicle_${row}_km_total`);if(output)output.value=item.km_total;
+    if(kind==='vehicle'&&['km_start','km_total'].includes(key)){
+      this.normalizeVehicleRows();
+      this.state.aux.vehicle.forEach((item,index)=>['km_start','km_end'].forEach(field=>{const output=document.getElementById(`rbAux_vehicle_${index}_${field}`);if(output)output.value=item[field]??''}));
     }
     this.updateAuxFooter(kind);
   },

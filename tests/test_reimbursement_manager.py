@@ -31,6 +31,7 @@ from tools.reimbursement.manager import (
     _build_detail_xls,
     _assign_invoice_product_line,
     _cover_payload,
+    _normalize_vehicle_rows,
     _period_parts,
     _seed_product_lines,
     _sync_invoice_aux,
@@ -108,6 +109,37 @@ class ReimbursementManagerTests(unittest.TestCase):
             "total_all": 100.5,
             "total_cn": "壹佰元伍角",
         }
+
+    def test_vehicle_odometer_rows_use_entered_km_and_chain_start_end(self):
+        rows = _normalize_vehicle_rows(
+            [
+                {"km_start": "100", "km_end": "999", "km_total": "12.5"},
+                {"km_start": "888", "km_end": "999", "km_total": "7.25"},
+                {"km_start": "777", "km_end": "999", "km_total": "3"},
+            ]
+        )
+
+        self.assertEqual(rows[0]["km_start"], 100.0)
+        self.assertEqual(rows[0]["km_end"], 112.5)
+        self.assertEqual(rows[1]["km_start"], 112.5)
+        self.assertEqual(rows[1]["km_end"], 119.75)
+        self.assertEqual(rows[2]["km_start"], 119.75)
+        self.assertEqual(rows[2]["km_end"], 122.75)
+        self.assertEqual([row["km_total"] for row in rows], ["12.5", "7.25", "3"])
+
+    def test_vehicle_odometer_rows_convert_legacy_start_end_to_km(self):
+        rows = _normalize_vehicle_rows(
+            [
+                {"km_start": 100, "km_end": 110},
+                {"km_start": 200, "km_end": 220},
+            ],
+            legacy_km_from_end=True,
+        )
+
+        self.assertEqual(rows[0]["km_total"], 10.0)
+        self.assertEqual(rows[1]["km_total"], 20.0)
+        self.assertEqual(rows[1]["km_start"], 110.0)
+        self.assertEqual(rows[1]["km_end"], 130.0)
 
     def assert_template_layout_preserved(self, template, output, style_cells):
         source = xlrd.open_workbook(str(template), formatting_info=True)
@@ -745,7 +777,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertTrue(
             {
                 (0, 12, 5),
-                (1, 4, 6),
+                (1, 4, 5),
                 (1, 15, 6),
                 (1, 15, 7),
                 (1, 15, 8),
@@ -776,7 +808,9 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn('id="rbNavNext"', template)
         self.assertIn("scrollNav(direction)", template)
         self.assertIn("revealNavButton(button)", template)
-        self.assertIn("?(end-start).toFixed(2):''", template)
+        self.assertIn("normalizeVehicleRows()", template)
+        self.assertIn("(start+km)*100", template)
+        self.assertIn("key==='km_start'&&ri>0", template)
         self.assertIn("rbViewExport').addEventListener('input'", template)
         self.assertIn("['product_line','产品线','product-line']", template)
         self.assertIn("['purpose','产品线','product-line']", template)

@@ -78,6 +78,38 @@ def _money(value: Any) -> Decimal:
         return Decimal("0.00")
 
 
+def _normalize_vehicle_rows(
+    rows: list[dict[str, Any]], *, legacy_km_from_end: bool = False
+) -> list[dict[str, Any]]:
+    """Apply the odometer chain while keeping kilometres as the entered value."""
+    normalized: list[dict[str, Any]] = []
+    previous_end: Decimal | None = None
+    for index, source in enumerate(rows):
+        value = dict(source)
+        original_start = value.get("km_start")
+        original_end = value.get("km_end")
+        km = value.get("km_total")
+        if (
+            legacy_km_from_end
+            and km in (None, "")
+            and original_start not in (None, "")
+            and original_end not in (None, "")
+        ):
+            km = float(_money(original_end) - _money(original_start))
+        value["km_total"] = km if km not in (None, "") else ""
+
+        start = _money(original_start) if index == 0 and original_start not in (None, "") else previous_end
+        value["km_start"] = float(start) if start is not None else ""
+        if start is not None and km not in (None, ""):
+            previous_end = start + _money(km)
+            value["km_end"] = float(previous_end)
+        else:
+            previous_end = None
+            value["km_end"] = ""
+        normalized.append(value)
+    return normalized
+
+
 def _month_index(year: int, month: int) -> int:
     return year * 12 + month - 1
 
@@ -467,18 +499,18 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
         .order_by(ReimbursementAuxDetail.kind, ReimbursementAuxDetail.sort_order)
         .all()
     )
+    vehicle_rows = []
     for row in rows:
         value = json.loads(row.data_json or "{}")
         if row.kind == "vehicle":
-            start = _money(value.get("km_start"))
-            end = _money(value.get("km_end"))
-            value["km_total"] = (
-                float(end - start)
-                if value.get("km_start") not in (None, "") and value.get("km_end") not in (None, "")
-                else ""
-            )
+            value["id"] = row.id
+            vehicle_rows.append(value)
+            continue
         value["id"] = row.id
         result.setdefault(row.kind, []).append(value)
+    result["vehicle"] = _normalize_vehicle_rows(
+        vehicle_rows, legacy_km_from_end=True
+    )
     return result
 
 
@@ -907,7 +939,8 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
 def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]) -> io.BytesIO:
     from xlwt import Formula
 
-    entertainment, vehicles, travels = aux["entertainment"], aux["vehicle"], aux["travel"]
+    entertainment, travels = aux["entertainment"], aux["travel"]
+    vehicles = _normalize_vehicle_rows(aux["vehicle"], legacy_km_from_end=True)
     if len(entertainment) > 9:
         raise ValueError("应酬费母版最多容纳 9 条明细")
     if len(vehicles) > 11:
@@ -948,14 +981,15 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         date_value = _date(item.get("date"))
         compact_date = int(date_value.strftime("%Y%m%d")) if date_value else ""
         excel_row = 5 + offset
+        km_value = item.get("km_total")
         values = [
             compact_date,
             item.get("from_location", ""),
             item.get("to_location", ""),
             item.get("contact", ""),
-            item.get("km_start", ""),
-            item.get("km_end", ""),
-            Formula(f'IF(OR(E{excel_row}="",F{excel_row}=""),"",F{excel_row}-E{excel_row})'),
+            item.get("km_start", "") if offset == 0 else Formula(f'IF(F{excel_row - 1}="","",F{excel_row - 1})'),
+            Formula(f'IF(OR(E{excel_row}="",G{excel_row}=""),"",E{excel_row}+G{excel_row})'),
+            float(_money(km_value)) if km_value not in (None, "") else "",
             float(item.get("toll_fee") or 0),
             float(item.get("parking_fee") or 0),
             item.get("product_line") or item.get("remarks", ""),
@@ -1650,17 +1684,12 @@ def register_routes(bp: Blueprint) -> None:
         data = _payload()
         ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
         for kind in ("entertainment", "vehicle", "travel"):
-            for index, row in enumerate(data.get(kind) or []):
+            incoming_rows = [dict(row) for row in (data.get(kind) or [])]
+            if kind == "vehicle":
+                incoming_rows = _normalize_vehicle_rows(incoming_rows)
+            for index, row in enumerate(incoming_rows):
                 value = dict(row)
                 value.pop("id", None)
-                if kind == "vehicle":
-                    start = value.get("km_start")
-                    end = value.get("km_end")
-                    value["km_total"] = (
-                        float(_money(end) - _money(start))
-                        if start not in (None, "") and end not in (None, "")
-                        else ""
-                    )
                 db.session.add(
                     ReimbursementAuxDetail(
                         owner_type=owner_type,
