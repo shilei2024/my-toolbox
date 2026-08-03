@@ -1,5 +1,6 @@
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../providers/types.ts";
 import type { ProductionGenerationResult } from "../pipeline/production-generation-pipeline.ts";
+import type { ProviderAttemptEvent } from "../providers/multi-provider-executor.ts";
 
 export const GENERATION_QUEUE_JOB_NAME = "generate" as const;
 export const QUEUE_SCHEMA_VERSION = 1 as const;
@@ -53,6 +54,7 @@ export interface SafeQueueFailure {
 
 export interface GenerationJobRepository {
   claim(jobId: string, descriptor: QueueAttemptDescriptor): Promise<GenerationJobClaim>;
+  markProviderAttempt(jobId: string, baseAttemptId: string, event: ProviderAttemptEvent): Promise<string>;
   markCompleted(jobId: string, attemptId: string, result: ProductionGenerationResult): Promise<void>;
   markFailed(jobId: string, attemptId: string, failure: SafeQueueFailure, willRetry: boolean): Promise<void>;
   markCancelled(jobId: string, attemptId: string, reason: string): Promise<void>;

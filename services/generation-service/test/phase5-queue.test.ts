@@ -116,7 +116,7 @@ test("queue observability reports bounded operational counts without job payload
 test("worker processor atomically claims, selects and completes a generation", async () => {
   const repository = new FakeRepository({ kind: "execute", plan: { request, bindings: [binding], context: callContext } });
   const selection = selectionPolicy();
-  const pipelineResult = { externalRequestId: "external-1", assets: [{ storageProvider: "tencent_cos", bucket: "bucket", region: "ap-shanghai", objectKey: "images/jobs/job-queue-1/0.png", url: "https://cos.example/image.png" }], providerCode: "mock", providerMetadata: {}, generationDurationMs: 50, storageDurationMs: 10 };
+  const pipelineResult = { externalRequestId: "external-1", assets: [{ storageProvider: "tencent_cos", bucket: "bucket", region: "ap-shanghai", objectKey: "images/jobs/job-queue-1/0.png", url: "https://cos.example/image.png", mimeType: "image/png", byteSize: 68, width: 1024, height: 1024, sha256: "a".repeat(64) }], providerCode: "mock", providerMetadata: {}, generationDurationMs: 50, storageDurationMs: 10 };
   const pipeline = { async execute() { return pipelineResult; } };
   const logs: unknown[] = [];
   const processor = new GenerationQueueProcessor(repository, selection, pipeline, { info() { return undefined; }, error(event, fields) { logs.push({ event, fields }); } });
@@ -169,6 +169,7 @@ class FakeRepository implements GenerationJobRepository {
   readonly #claim: GenerationJobClaim;
   constructor(claim: GenerationJobClaim) { this.#claim = claim; }
   async claim(): Promise<GenerationJobClaim> { return this.#claim; }
+  async markProviderAttempt(_jobId: string, baseAttemptId: string): Promise<string> { return baseAttemptId; }
   async markCompleted(...args: unknown[]): Promise<void> { this.completed.push(args); }
   async markFailed(_jobId: string, _attemptId: string, failure: SafeQueueFailure, willRetry: boolean): Promise<void> { this.failures.push({ failure, willRetry }); }
   async markCancelled(...args: unknown[]): Promise<void> { this.cancelled.push(args); }

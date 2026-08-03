@@ -17,7 +17,7 @@
 | [adr](adr/README.md) | 不可变的架构决策记录 | 全体成员 |
 | [roadmap](roadmap/README.md) | 平台原则、里程碑、依赖和上线顺序 | 产品、技术负责人 |
 | [troubleshooting](troubleshooting/README.md) | 常见故障的定位、恢复和升级路径 | 开发、运维、客服 |
-| [changelog](changelog/README.md) | Phase 1–10 每阶段交付与验证记录 | 全体成员 |
+| [changelog](changelog/README.md) | Phase 1–10 与后续里程碑的交付和验证记录 | 全体成员 |
 
 ## 文档治理规则
 

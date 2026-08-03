@@ -1,12 +1,11 @@
 import { ProviderError } from "../providers/errors.ts";
 import type { ImageProvider } from "../providers/image-provider.ts";
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../providers/types.ts";
-import type { StoredAsset } from "../storage/storage-provider.ts";
-import type { ImagePersistenceService } from "./image-persistence.ts";
+import type { ImagePersistenceService, PersistedImageAsset } from "./image-persistence.ts";
 import type { PollingService } from "./polling-service.ts";
 import type { StructuredLogger } from "./structured-logger.ts";
 
-export interface ProductionGenerationResult { readonly externalRequestId: string; readonly assets: readonly StoredAsset[]; readonly providerCode: string; readonly providerMetadata: Readonly<Record<string, unknown>>; readonly generationDurationMs: number; readonly storageDurationMs: number }
+export interface ProductionGenerationResult { readonly externalRequestId: string; readonly assets: readonly PersistedImageAsset[]; readonly providerCode: string; readonly providerMetadata: Readonly<Record<string, unknown>>; readonly actualCost?: number; readonly generationDurationMs: number; readonly storageDurationMs: number }
 
 export class ProductionGenerationPipeline {
   readonly #polling: PollingService;
@@ -37,7 +36,7 @@ export class ProductionGenerationPipeline {
       const assets = await this.#persistence.persist(request.jobId, status.outputs);
       const finished = Date.now();
       this.#logger.info("generation.completed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: finished - started, uploadDurationMs: finished - generatedAt, outputCount: assets.length });
-      return { externalRequestId: status.externalRequestId, assets, providerCode: provider.descriptor.code, providerMetadata: status.providerMetadata, generationDurationMs: generatedAt - started, storageDurationMs: finished - generatedAt };
+      return { externalRequestId: status.externalRequestId, assets, providerCode: provider.descriptor.code, providerMetadata: status.providerMetadata, ...(status.actualCost === undefined ? {} : { actualCost: status.actualCost }), generationDurationMs: generatedAt - started, storageDurationMs: finished - generatedAt };
     } catch (error) {
       this.#logger.error("generation.failed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: Date.now() - started, failureReason: error instanceof ProviderError ? error.code : "internal_error" });
       throw error;

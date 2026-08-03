@@ -7,7 +7,11 @@ import { loadBillingConfig } from "../billing/config.ts";
 import { PaymentProviderRegistry } from "../billing/payment-provider.ts";
 import { PostgresBillingRepository } from "../billing/postgres-billing-repository.ts";
 import { StripePaymentProvider } from "../billing/stripe-provider.ts";
+import { GenerationService } from "../generation/generation-service.ts";
+import { PostgresGenerationRepository } from "../generation/postgres-generation-repository.ts";
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
+import { loadGenerationQueueConfig } from "../queue/config.ts";
+import { createGenerationQueue, GenerationQueueService } from "../queue/generation-queue-service.ts";
 import { TencentCosGalleryAssetUrlResolver } from "./asset-url.ts";
 import { NoopGalleryCache } from "./cache.ts";
 import { loadGalleryConfig } from "./config.ts";
@@ -38,13 +42,22 @@ const admin = new AdminService({ repository: new PostgresAdminRepository(pool, a
 const paymentProviders = new PaymentProviderRegistry();
 if (billingConfig.stripe) paymentProviders.register(new StripePaymentProvider(billingConfig.stripe.webhookSecret, billingConfig.stripe.secretKey));
 const billing = new BillingService({ repository: new PostgresBillingRepository(pool), providers: paymentProviders, logger, publicBaseUrl: billingConfig.publicBaseUrl });
-const app = await createGalleryHttpServer({ service, admin, billing, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
+const configuredGenerationCreditCost = process.env.GENERATION_DEFAULT_CREDIT_COST?.trim();
+const generationQueue = config.redisUrl ? (() => {
+  const queueConfig = loadGenerationQueueConfig();
+  const producer = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-producer", maxRetriesPerRequest: 1, enableOfflineQueue: false });
+  const publisher = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-cancel", maxRetriesPerRequest: 1, enableOfflineQueue: false });
+  return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
+})() : undefined;
+const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}) });
+const app = await createGalleryHttpServer({ service, admin, billing, generation, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
 
 await app.listen({ host: config.host, port: config.port });
 logger.info("gallery.api_started", { host: config.host, port: config.port });
 
 const shutdown = async (): Promise<void> => {
   await app.close();
+  if (generationQueue) await generationQueue.close();
   await pool.end();
   if (redis) await redis.quit();
 };

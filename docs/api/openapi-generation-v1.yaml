@@ -1,0 +1,143 @@
+openapi: 3.1.0
+info:
+  title: MindfulPenPal Generation API
+  version: 1.0.0
+  description: Internal API consumed only by the signed Next.js BFF.
+security:
+  - viewerContext: []
+paths:
+  /v1/generation/workflows:
+    get:
+      operationId: listGenerationWorkflows
+      responses:
+        "200":
+          description: Enabled workflows with an eligible provider binding.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Workflow" } }
+  /v1/generations:
+    post:
+      operationId: createGeneration
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGeneration" }
+      responses:
+        "202":
+          description: Durable task, credit reservation, outbox and audit were created atomically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Generation" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/generations/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, maxLength: 128 }
+    get:
+      operationId: getGeneration
+      responses:
+        "200":
+          description: Owner/admin scoped task state from PostgreSQL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Generation" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: cancelGeneration
+      responses:
+        "200":
+          description: Idempotent cooperative cancellation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generation, accepted]
+                properties:
+                  generation: { $ref: "#/components/schemas/Generation" }
+                  accepted: { type: boolean }
+components:
+  securitySchemes:
+    viewerContext: { type: apiKey, in: header, name: X-Mavis-User-Context }
+  responses:
+    Error:
+      description: Sanitized error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties: { code: { type: string }, message: { type: string } }
+  schemas:
+    Workflow:
+      type: object
+      required: [slug, name, description, category, defaults, creditCost]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        defaults:
+          type: object
+          required: [width, height, count, visibility]
+          properties:
+            width: { type: integer }
+            height: { type: integer }
+            count: { type: integer }
+            visibility: { enum: [public, private] }
+        creditCost: { type: string, pattern: "^\\d+\\.\\d{4}$" }
+    CreateGeneration:
+      type: object
+      additionalProperties: false
+      required: [workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters]
+      properties:
+        workflowSlug: { type: string, maxLength: 128 }
+        prompt: { type: string, minLength: 1, maxLength: 8000 }
+        negativePrompt: { type: string, maxLength: 8000 }
+        width: { type: integer, minimum: 64, maximum: 8192 }
+        height: { type: integer, minimum: 64, maximum: 8192 }
+        count: { type: integer, minimum: 1, maximum: 8 }
+        visibility: { enum: [public, private] }
+        promptVisibility: { enum: [public, hidden] }
+        parameters: { type: object }
+    Generation:
+      type: object
+      required: [id, status, workflowSlug, workflowName, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images]
+      properties:
+        id: { type: string }
+        status: { enum: [pending, running, completed, failed, cancelled] }
+        workflowSlug: { type: string }
+        workflowName: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        count: { type: integer }
+        visibility: { enum: [public, private] }
+        promptVisibility: { enum: [public, hidden] }
+        creditsReserved: { type: string }
+        creditsCharged: { type: string }
+        cancelRequested: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        images:
+          type: array
+          items:
+            type: object
+            required: [id, slug]
+            properties: { id: { type: string }, slug: { type: string } }

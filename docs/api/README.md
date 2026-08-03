@@ -35,10 +35,12 @@
 | GET/POST | `/v1/billing/*` | Billing 摘要、Checkout、Portal |
 | GET/PATCH | `/v1/admin/*` | 管理控制面 |
 
+## Generation API
+
+浏览器端 BFF 为 `GET /api/generation/workflows`、`POST /api/generations`、`GET/DELETE /api/generations/:id`。内部对应 `/v1/generation/workflows` 与 `/v1/generations/*`，机器可读契约见 [openapi-generation-v1.yaml](openapi-generation-v1.yaml)。创建必须携带 `Idempotency-Key`，且只接受服务端签名的登录用户上下文。
+
 ## Webhook
 
 `POST /v1/billing/webhooks/:provider` 是唯一可按精确路径公开的 Billing 入站接口。必须使用原始 body 验签、限制 body 大小、幂等落库并快速返回；复杂处理不得阻塞 HTTP 响应。
 
-## 尚未完成
-
-Generation 创建、状态查询和取消的生产 HTTP 契约尚未完成，因此本文档不声明不存在的接口。完成后须新增 OpenAPI 或等价机器可读契约和契约测试。
+Generation API 已完成代码与契约测试；真实 Staging 数据库、队列、COS 与 Provider 集成验收仍按部署清单执行。

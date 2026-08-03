@@ -14,6 +14,7 @@ import importlib
 import logging
 import pkgutil
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from flask import Flask, has_request_context
@@ -57,7 +58,14 @@ def sync_tool_registry(app: Flask) -> None:
             tool.color = entry.get("color", "#0d6efd")
             tool.route = entry.get("route", f"/tools/{tool.id}")
             tool.blueprint_module = entry.get("blueprint_module", f"tools.{tool.id}")
-            tool.external_url = entry.get("external_url", "") or ""
+            configured_external_url = entry.get("external_url", "") or ""
+            if entry["id"] == "ai_image" and app.config.get("AI_IMAGE_EXTERNAL_URL"):
+                configured_external_url = str(app.config["AI_IMAGE_EXTERNAL_URL"]).strip()
+            parsed_external_url = urlparse(configured_external_url)
+            if configured_external_url and (parsed_external_url.scheme != "https" or not parsed_external_url.netloc):
+                logger.error("Tool %s external URL must be an absolute HTTPS URL; hiding entry", entry["id"])
+                configured_external_url = ""
+            tool.external_url = configured_external_url
             tool.order = int(entry.get("order", 100))
             tool.category = entry.get("category", "other") or "other"
             tool.required_plan = entry.get("required_plan", "free") or "free"

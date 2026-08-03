@@ -17,6 +17,7 @@
 8. [Phase 8：管理后台](phase-8-admin-console.md)
 9. [Phase 9：多 Provider](phase-9-multi-provider.md)
 10. [Phase 10：支付、积分与会员](phase-10-payments-credits-memberships.md)
+11. [M1：Generation 生产闭环](m1-generation-production-loop.md)
 
 ## 图表
 

@@ -4,6 +4,8 @@ import type { Redis } from "ioredis";
 import type { AdminService } from "../admin/admin-service.ts";
 import type { BillingService } from "../billing/billing-service.ts";
 import { BillingError } from "../billing/errors.ts";
+import type { GenerationService } from "../generation/generation-service.ts";
+import { GenerationError, normalizeGenerationError } from "../generation/errors.ts";
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
 import { GalleryError, normalizeGalleryError } from "./errors.ts";
 import type { GalleryService } from "./gallery-service.ts";
@@ -18,6 +20,7 @@ export async function createGalleryHttpServer(options: {
   readonly redis?: Redis;
   readonly admin?: AdminService;
   readonly billing?: BillingService;
+  readonly generation?: GenerationService;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: options.trustProxy ?? false, bodyLimit: 16 * 1024 });
   await app.register(rateLimit, {
@@ -39,6 +42,23 @@ export async function createGalleryHttpServer(options: {
   });
   app.get("/v1/me/images", async (request) => options.service.listMine(parsePageRequest(request.query), viewer(request, options.auth)));
   app.get("/v1/me/favorites", async (request) => options.service.listFavorites(parsePageRequest(request.query), viewer(request, options.auth)));
+
+  if (options.generation) {
+    app.get("/v1/generation/workflows", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+      viewer(request, options.auth);
+      return { items: await options.generation!.listWorkflows() };
+    });
+    app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+      const result = await options.generation!.create(request.body, scalarHeader(request.headers["idempotency-key"]), viewer(request, options.auth));
+      return reply.code(202).send(result);
+    });
+    app.get("/v1/generations/:id", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {
+      return options.generation!.get(pathParam(request.params, "id"), viewer(request, options.auth));
+    });
+    app.delete("/v1/generations/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
+      return options.generation!.cancel(pathParam(request.params, "id"), viewer(request, options.auth));
+    });
+  }
 
   if (options.billing) {
     app.get("/v1/billing/summary", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
@@ -79,11 +99,12 @@ export async function createGalleryHttpServer(options: {
 
   app.setErrorHandler((error, request, reply) => {
     const candidateStatus = error && typeof error === "object" && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
-    const normalized = error instanceof GalleryError || error instanceof BillingError
+    const generationRequest = request.url.startsWith("/v1/generation");
+    const normalized = error instanceof GalleryError || error instanceof BillingError || error instanceof GenerationError
       ? error
       : candidateStatus >= 400 && candidateStatus < 500
         ? new GalleryError("invalid_request", "The Gallery request is invalid", candidateStatus)
-        : normalizeGalleryError(error);
+        : generationRequest ? normalizeGenerationError(error) : normalizeGalleryError(error);
     options.logger.error("gallery.request_failed", { requestId: request.id, code: normalized.code, statusCode: normalized.statusCode });
     return reply.code(normalized.statusCode).send({ error: { code: normalized.code, message: normalized.message } });
   });

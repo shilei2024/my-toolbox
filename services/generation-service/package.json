@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Provider-agnostic image generation service core",
   "scripts": {
-    "test": "node --experimental-strip-types --test test/provider-contract.test.ts test/phase4-comfyui.test.ts test/phase5-queue.test.ts test/phase6-gallery.test.ts test/phase7-seo.test.ts test/phase8-admin.test.ts test/phase9-multi-provider.test.ts test/phase10-billing.test.ts",
+    "test": "node --experimental-strip-types --test test/provider-contract.test.ts test/phase4-comfyui.test.ts test/phase5-queue.test.ts test/phase6-gallery.test.ts test/phase7-seo.test.ts test/phase8-admin.test.ts test/phase9-multi-provider.test.ts test/phase10-billing.test.ts test/phase11-generation.test.ts",
     "test:phase6:pg": "node --experimental-strip-types --test test/phase6-gallery.pg.integration.ts",
     "test:phase7:pg": "node --experimental-strip-types --test test/phase7-seo.pg.integration.ts",
     "test:phase8:pg": "node --experimental-strip-types --test test/phase8-admin.pg.integration.ts",
     "test:phase9:pg": "node --experimental-strip-types --test test/phase9-multi-provider.pg.integration.ts",
     "test:phase10:pg": "node --experimental-strip-types --test test/phase10-billing.pg.integration.ts",
     "gallery:start": "node --experimental-strip-types src/gallery/gallery-api-main.ts",
+    "generation:dispatcher": "node --experimental-strip-types src/queue/generation-dispatcher-main.ts",
+    "generation:worker": "node --experimental-strip-types src/queue/generation-worker-main.ts",
     "billing:webhook": "node --experimental-strip-types src/billing/billing-webhook-main.ts",
     "gallery:deletion-worker": "node --experimental-strip-types src/gallery/gallery-deletion-main.ts",
     "typecheck": "tsc --noEmit"

@@ -3,6 +3,8 @@ export * from "./generation-queue-processor.ts";
 export * from "./generation-queue-service.ts";
 export * from "./generation-worker.ts";
 export * from "./outbox-dispatcher.ts";
+export * from "./postgres-outbox-repository.ts";
+export * from "./postgres-generation-job-repository.ts";
 export * from "./queue-observability.ts";
 export * from "./redis-connections.ts";
 export * from "./types.ts";
