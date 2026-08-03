@@ -26,7 +26,7 @@
 
 ### 当前状态
 
-仓库是 Flask 3 + SQLAlchemy + Flask-Login + Jinja/Bootstrap 的工具站。现有 AI 作图模块把 Provider 类、HTTP 调用、内存任务状态、本地文件保存和路由放在同一模块中。它适合原型，但不满足持久任务、对象存储、审计、横向扩容和 Provider 隔离要求。
+仓库是 Flask 3 + SQLAlchemy + Flask-Login + Jinja/Bootstrap 的工具站。旧 AI 作图模块曾把 Provider 类、HTTP 调用、内存任务状态、本地文件保存和路由放在同一模块中，适合原型，但不满足持久任务、对象存储、审计、横向扩容和 Provider 隔离要求——2026-08 已移除，AI 作图入口切换为可配置外部链接（`tools_config.yaml` 的 `ai_image.external_url`，指向独立部署的 Generation Service + Gallery Web）。
 
 ### 目标边界
 

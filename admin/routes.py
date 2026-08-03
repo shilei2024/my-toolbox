@@ -326,17 +326,7 @@ def settings():
         "site_tagline",
         "daily_free_limit",
         "anon_free_limit",
-        "AI_PROVIDER",
-        "AI_API_KEY",
-        "AI_BASE_URL",
-        "AI_MODEL",
     )
-    AI_DEFAULTS = {
-        "AI_PROVIDER": "pollinations",
-        "AI_BASE_URL": "https://image.pollinations.ai",
-        "AI_MODEL": "",
-        "AI_API_KEY": "",
-    }
     if request.method == "POST":
         submitted = {
             key: request.form.get(key, "").strip()
@@ -350,12 +340,6 @@ def settings():
 
         for key in SETTING_KEYS:
             value = str(site_settings[key]) if key in site_settings else submitted[key]
-            # For AI keys, empty string means "use env default" → delete the row.
-            if key.startswith("AI_") and value == "":
-                row = db.session.get(Setting, key)
-                if row:
-                    db.session.delete(row)
-                continue
             row = db.session.get(Setting, key)
             if row is None:
                 row = Setting(key=key, value=value)
@@ -372,16 +356,6 @@ def settings():
         row = db.session.get(Setting, key)
         if row:
             stored[key] = row.value
-        elif key in AI_DEFAULTS:
-            stored[key] = AI_DEFAULTS[key]
         else:
             stored[key] = None
-    # For display, show the effective value (DB override or env default).
-    stored["AI_PROVIDER_EFFECTIVE"] = stored.get("AI_PROVIDER") or current_app.config.get("AI_PROVIDER", "pollinations")
-    stored["AI_BASE_URL_EFFECTIVE"] = stored.get("AI_BASE_URL") or current_app.config.get("AI_BASE_URL", "https://image.pollinations.ai")
-    stored["AI_MODEL_EFFECTIVE"] = stored.get("AI_MODEL") or current_app.config.get("AI_MODEL", "")
-    stored["AI_API_KEY_EFFECTIVE"] = stored.get("AI_API_KEY") or current_app.config.get("AI_API_KEY", "")
-    # Don't send the full key to the template; mask it.
-    key_eff = stored["AI_API_KEY_EFFECTIVE"]
-    stored["AI_API_KEY_MASKED"] = (key_eff[:6] + "…" + key_eff[-4:]) if len(key_eff) > 12 else ("•" * len(key_eff) if key_eff else "")
     return render_template("admin/settings.html", stored=stored)

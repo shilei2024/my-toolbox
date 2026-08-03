@@ -307,6 +307,26 @@ def _setup_logging(app: Flask) -> None:
     )
 
 
+def _ensure_tool_external_url_column(app: Flask) -> None:
+    """Lightweight migration: `db.create_all()` never alters existing tables,
+    so add the `tools.external_url` column on databases created before the
+    AI 作图 external-entry change (SQLite only; idempotent)."""
+    from sqlalchemy import inspect as sa_inspect, text  # noqa: PLC0415
+
+    try:
+        insp = sa_inspect(db.engine)
+        if "tools" not in insp.get_table_names():
+            return
+        columns = {col["name"] for col in insp.get_columns("tools")}
+        if "external_url" in columns:
+            return
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tools ADD COLUMN external_url VARCHAR(255) NOT NULL DEFAULT ''"))
+        app.logger.info("Migrated tools table: added external_url column")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("tools.external_url migration skipped: %s", exc)
+
+
 def _init_extensions(app: Flask) -> None:
     # Resolve SQLite path to the app's instance_path if user didn't override.
     # Skip for in-memory DB (used on Vercel / read-only FS), absolute paths,
@@ -328,6 +348,7 @@ def _init_extensions(app: Flask) -> None:
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        _ensure_tool_external_url_column(app)
         apply_runtime_settings(app)
 
     login_manager.init_app(app)

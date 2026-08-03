@@ -18,6 +18,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# gallery-web 前端共享类型库（非 Python packaging lib/）
+!apps/gallery-web/src/lib/
 parts/
 sdist/
 var/

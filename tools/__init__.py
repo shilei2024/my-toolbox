@@ -57,6 +57,7 @@ def sync_tool_registry(app: Flask) -> None:
             tool.color = entry.get("color", "#0d6efd")
             tool.route = entry.get("route", f"/tools/{tool.id}")
             tool.blueprint_module = entry.get("blueprint_module", f"tools.{tool.id}")
+            tool.external_url = entry.get("external_url", "") or ""
             tool.order = int(entry.get("order", 100))
             tool.category = entry.get("category", "other") or "other"
             tool.required_plan = entry.get("required_plan", "free") or "free"
@@ -98,6 +99,12 @@ def register_tools(app: Flask) -> None:
     # Now register based on the YAML config.
     for entry in entries:
         tid = entry["id"]
+        # External-link tools (e.g. AI 作图 → 独立部署的 Gallery Web) have no
+        # internal blueprint; they are rendered as a link on the homepage and
+        # must NOT be imported or registered here.
+        if not (entry.get("blueprint_module") or "").strip():
+            registered.add(tid)
+            continue
         module_path = entry["blueprint_module"]
         try:
             mod = importlib.import_module(module_path)
@@ -156,6 +163,10 @@ def list_enabled_tools() -> list[Tool]:
         .order_by(Tool.order.asc(), Tool.name.asc())
         .all()
     )
+    # External-link tools without a configured URL are hidden until the
+    # target (e.g. the new AI 作图 / Gallery Web) is deployed and the URL is
+    # filled in via tools_config.yaml. Internal tools always render.
+    tools = [tool for tool in tools if tool.blueprint_module or tool.external_url]
     if not has_request_context():
         return tools
     if current_user.is_authenticated and getattr(current_user, "is_admin", False):

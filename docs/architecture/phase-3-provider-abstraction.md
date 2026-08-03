@@ -131,16 +131,20 @@ services/generation-service/
 
 ## 9. 与旧 Flask AI 作图模块的关系
 
-现有 `tools/ai_image/__init__.py` 仍保持运行，本阶段不切换线上入口。它当前包含 Provider、HTTP 路由、内存任务和本地文件保存，是后续渐进迁移对象。
+> 状态（2026-08）：旧 Flask `tools/ai_image` 已被移除，AI 作图入口切换为可配置的外部链接（指向独立部署的 Generation Service + Gallery Web）。本节保留历史说明。
 
-切换顺序：
+旧实现 `tools/ai_image/__init__.py` 曾包含 Provider、HTTP 路由、内存任务和本地文件保存，是渐进迁移对象。切换顺序：
 
 1. Phase 4 完成 ComfyUI Adapter。
 2. Phase 5 完成持久任务与 BullMQ。
 3. Flask 改为调用内部 Generation API。
 4. 验证新链路后删除旧 Provider 和 `_TASKS` 内存状态。
 
-这样不会在队列、持久化和真实 Provider 尚未完成时破坏现有 AI 作图功能。
+替换落地方式（2026-08 已执行）：
+
+- 删除 `tools/ai_image/`、`templates/tools/ai_image/` 及 `/tools/ai-image` 路由注册。
+- `tools_config.yaml` 中 `ai_image` 改为外部入口（`external_url` 字段）：为空时首页隐藏，填入新链路 Gallery 地址并重启后自动显示并跳转。
+- 工具注册机制（`tools/__init__.py` / `models.Tool.external_url`）支持任意外部链接工具，后续可复用。
 
 ## 10. Phase 3 验收标准
 

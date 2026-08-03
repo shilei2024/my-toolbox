@@ -70,14 +70,6 @@ class Config:
     MAX_CONTENT_LENGTH: int = int(os.environ.get("MAX_UPLOAD_MB", "25")) * 1024 * 1024
     TEMP_FILE_TTL_MINUTES: int = int(os.environ.get("TEMP_FILE_TTL_MINUTES", "30"))
 
-    # --- AI provider ---
-    # Default to "pollinations" — a free, no-API-key image generation service.
-    # Admin can switch to openai/siliconflow/mock from the settings page.
-    AI_PROVIDER: str = os.environ.get("AI_PROVIDER", "pollinations")
-    AI_API_KEY: str = os.environ.get("AI_API_KEY", "")
-    AI_BASE_URL: str = os.environ.get("AI_BASE_URL", "https://image.pollinations.ai")
-    AI_MODEL: str = os.environ.get("AI_MODEL", "")
-
     # --- Rate limit ---
     RATELIMIT_DEFAULT: str = os.environ.get("RATELIMIT_DEFAULT", "120/minute")
     RATELIMIT_TOOL: str = os.environ.get("RATELIMIT_TOOL", "20/minute")

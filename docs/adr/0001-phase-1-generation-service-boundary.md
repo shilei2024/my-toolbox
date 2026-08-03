@@ -33,3 +33,5 @@ Provider 密钥和内网端点不进入浏览器；服务间必须使用短时�
 
 在新链路上线前保留旧 Flask AI 作图入口。发生问题时由反向代理/功能开关切回旧入口，数据库新表保持只读待排查。
 
+> 更新（2026-08）：旧 Flask `tools/ai_image` 已彻底移除。AI 作图现为可配置的外部入口（`tools_config.yaml` 的 `ai_image.external_url`），回滚方式为：将 `external_url` 改回空并恢复旧工具代码（git 历史可恢复），或由反向代理把入口切回旧页面。
+
