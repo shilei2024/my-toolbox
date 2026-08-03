@@ -32,4 +32,4 @@
 
 任何教程缺少“为什么、命令、预期输出、验证、常见失败、恢复、回滚”之一，都视为未完成文档。
 
-M1 AI 生图上线测试见 [Vercel Preview 与 Generation Staging 验证](m1-vercel-preview-validation.md)。
+M1 AI 生图上线测试见 [Vercel Preview 与 Generation Staging 验证](m1-vercel-preview-validation.md) 和 [Generation Staging 服务器部署](m1-staging-server-deployment.md)。

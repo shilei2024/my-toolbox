@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log*
+.env
+.env.*
+test
+deploy/.env.staging
+deploy/backups
+

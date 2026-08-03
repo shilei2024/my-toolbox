@@ -18,3 +18,9 @@
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。
+
+## Staging 部署资产
+
+- 增加非 root Node 容器镜像、隔离 PostgreSQL/Redis、API/Dispatcher/Worker 三进程 Compose 与 Caddy HTTPS 入口。
+- 增加带迁移账本的单次迁移器、PostgreSQL 备份脚本和 4 CPU / 4 GB 低并发资源上限。
+- 增加不含真实凭据的 Staging 环境模板和初学者部署、验证、恢复与回滚手册。

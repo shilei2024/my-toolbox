@@ -1,0 +1,140 @@
+name: mindfulpenpal-generation-staging
+
+x-generation-environment: &generation-environment
+  APP_ENV: staging
+  DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
+  GALLERY_HOST: 0.0.0.0
+  GALLERY_PORT: "3101"
+  GALLERY_TRUST_PROXY: "true"
+
+x-generation-service: &generation-service
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: mindfulpenpal/generation-service:staging
+  restart: unless-stopped
+  env_file:
+    - ${GENERATION_ENV_FILE:-.env.staging}
+  environment: *generation-environment
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  networks:
+    - generation-internal
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - generation-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 768m
+    networks:
+      - generation-internal
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    volumes:
+      - generation-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    mem_limit: 256m
+    networks:
+      - generation-internal
+
+  migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - ../database/migrations:/migrations:ro
+      - ./migrate-staging.sh:/migrate-staging.sh:ro
+    command: ["sh", "/migrate-staging.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - generation-internal
+
+  api:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:start"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3101/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 512m
+
+  dispatcher:
+    <<: *generation-service
+    command: ["npm", "run", "generation:dispatcher"]
+    mem_limit: 256m
+
+  worker:
+    <<: *generation-service
+    command: ["npm", "run", "generation:worker"]
+    volumes:
+      - generation-worker-temp:/tmp/generation
+    stop_grace_period: 45s
+    mem_limit: 768m
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    env_file:
+      - ${GENERATION_ENV_FILE:-.env.staging}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - generation-caddy-data:/data
+      - generation-caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+    networks:
+      - generation-internal
+
+networks:
+  generation-internal:
+    driver: bridge
+
+volumes:
+  generation-postgres-data:
+  generation-redis-data:
+  generation-worker-temp:
+  generation-caddy-data:
+  generation-caddy-config:
