@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.1 · 即梦全链路优化 / 2026-08-05
+- **即梦多张生成**：Seedream 单次只返回一张，Adapter 对 `count>1` 逐张扇出调用，
+  用户 seed 依次递增（seed + index），平台 1–8 张契约全部可用；新增契约测试。
+- **队列未配置 fail-fast**：Generation API 在 Redis/BullMQ 未配置时创建请求直接返回
+  503，不再产生永远停留在 pending 的任务。
+- **创作页体验**：账单接口故障不再阻塞工作流加载；任务轮询增加指数退避（2s→10s）
+  并在瞬时失败后继续轮询；未登录时“开始生成”变为登录链接（`/login?next=/create`）。
+- **真实即梦冒烟**：新增 `npm run smoke:jimeng`（支持 `--health`），只输出安全字段，
+  不打印 API key；生产服务器可用其完成 Provider 级连通性与生成验证。
+- **统一后台并入主线**：上一分支的 `/admin/gallery` 统一后台随本次发布一起合入 main。
+
+## 0.5.0 · 统一管理后台 / 2026-08-05
+- **合并两个后台**：`mindfulpenpal.com/admin` 成为唯一管理入口，新增 AI 作图模块
+  （`/admin/gallery`），覆盖概览、内容审核、Provider、工作流、生成任务与审计记录；
+  `gallery.mindfulpenpal.com/admin` 配置 `MAVIS_ADMIN_URL` 后 307 重定向到主站，
+  Gallery 导航栏向管理员显示“后台”入口。
+- **Flask 签名直连**：新增 `utils/gallery_admin_client.py`，用与 Next.js BFF 相同的
+  60 秒 HMAC Admin Context 调用 Generation Service `/v1/admin/*`，服务端 RBAC、
+  乐观锁与审计不变；新增 `GALLERY_SERVICE_BASE_URL` / `GALLERY_INTERNAL_HMAC_SECRET`
+  配置与预检项。
+- **权限与降级**：非管理员访问统一后台返回 403；管理服务未配置/不可用时页面友好降级，
+  不泄露密钥与内网信息。
+- **测试与文档**：新增签名客户端与后台路由契约测试；更新 Phase 8 架构、部署、环境变量、
+  上线验收文档。
+
 ## 0.4.4 · 优化 / 2026-08-04
 - **回跳统一与加固**：注册、登录、退出共用 `_safe_next_url` 白名单，注册/登录页之间透传 `next`；
   拒绝控制字符、反斜杠、携带账号密码的绝对地址，防止开放重定向变体。

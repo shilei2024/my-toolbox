@@ -88,6 +88,19 @@ test("Jimeng adapter uses Seedream synchronous Base64 mode with seed and bounded
   assert.equal(body.watermark, false);
 });
 
+test("Jimeng adapter fans out count>1 into one API call per image with distinct seeds", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const provider = new JimengImageProvider(httpConfig("jimeng"), async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ model: "doubao-seedream-4-5-251128", data: [{ b64_json: PNG, size: "1024x1024" }] }, { headers: { "x-tt-logid": `jimeng-request-${calls.length}` } });
+  });
+  const result = await provider.generate({ ...request, count: 3, seed: 42 }, binding("jimeng", "doubao-seedream-4-5-251128"), context);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((call) => call.seed), [42, 43, 44]);
+  assert.equal(result.outputs.length, 3);
+  assert.equal(result.externalRequestId, "jimeng-request-3");
+});
+
 test("database routing state overrides static adapter priority and disabled providers are excluded", () => {
   const registry = new ProviderRegistry();
   registry.register(new MockImageProvider({ code: "first", priority: 1 }));

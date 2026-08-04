@@ -12,16 +12,21 @@ export class GenerationService {
   readonly #repository: GenerationRepository;
   readonly #defaultCreditCost: string;
   readonly #cancellation: GenerationCancellationPort | undefined;
+  readonly #ready: boolean;
 
-  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort }) {
+  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort; readonly ready?: boolean }) {
     this.#repository = options.repository;
     this.#defaultCreditCost = creditAmount(options.defaultCreditCost ?? "1.0000");
     this.#cancellation = options.cancellation;
+    this.#ready = options.ready ?? true;
   }
 
   listWorkflows() { return this.#repository.listWorkflows(this.#defaultCreditCost); }
 
   async create(body: unknown, idempotencyKey: string | undefined, viewer: ViewerContext): Promise<GenerationView> {
+    if (!this.#ready) {
+      throw new GenerationError("generation_queue_not_configured", "创作服务正在维护中，请稍后再试。", 503);
+    }
     const userId = requireUser(viewer);
     const input = record(body);
     const workflowSlug = token(input.workflowSlug, "workflowSlug", 128);

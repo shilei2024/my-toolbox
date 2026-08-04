@@ -12,3 +12,4 @@ admin_bp = Blueprint(
 
 # import routes so the views register on the blueprint
 from . import routes  # noqa: E402,F401
+from . import gallery_admin  # noqa: E402,F401

@@ -16,6 +16,7 @@
     "generation:worker": "node --experimental-strip-types src/queue/generation-worker-main.ts",
     "billing:webhook": "node --experimental-strip-types src/billing/billing-webhook-main.ts",
     "gallery:deletion-worker": "node --experimental-strip-types src/gallery/gallery-deletion-main.ts",
+    "smoke:jimeng": "node --experimental-strip-types scripts/live-jimeng-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

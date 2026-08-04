@@ -19,12 +19,16 @@ def gallery_integration_checks(app: Flask) -> list[IntegrationCheck]:
     toolbox = _url(str(app.config.get("APP_BASE_URL", "")))
     secret = str(app.config.get("GALLERY_INTROSPECTION_SECRET", ""))
     cookie_domain = str(app.config.get("SESSION_COOKIE_DOMAIN") or "").lstrip(".").lower()
+    service_url = _url(str(app.config.get("GALLERY_SERVICE_BASE_URL", "")))
+    hmac_secret = str(app.config.get("GALLERY_INTERNAL_HMAC_SECRET", ""))
     production_https = bool(gallery and gallery.scheme == "https")
 
     checks = [
         IntegrationCheck("gallery_url", bool(gallery and _safe_web_url(gallery)), "AI_IMAGE_EXTERNAL_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
         IntegrationCheck("app_base_url", bool(toolbox and _safe_web_url(toolbox)), "APP_BASE_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
         IntegrationCheck("introspection_secret", len(secret.encode("utf-8")) >= 32, "GALLERY_INTROSPECTION_SECRET must contain at least 32 UTF-8 bytes"),
+        IntegrationCheck("gallery_service_url", bool(service_url and _safe_web_url(service_url)), "GALLERY_SERVICE_BASE_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
+        IntegrationCheck("gallery_hmac_secret", len(hmac_secret.encode("utf-8")) >= 32, "GALLERY_INTERNAL_HMAC_SECRET must contain at least 32 UTF-8 bytes"),
         IntegrationCheck("secure_cookie", not production_https or bool(app.config.get("SESSION_COOKIE_SECURE")), "SESSION_COOKIE_SECURE must be true when Gallery uses HTTPS"),
         IntegrationCheck("cookie_domain", bool(cookie_domain), "SESSION_COOKIE_DOMAIN is required so both sites receive the Flask session cookie"),
     ]

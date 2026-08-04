@@ -58,6 +58,14 @@ describe("M1 generation API domain", () => {
     assert.throws(() => new GenerationService({ repository: new FakeRepository(), defaultCreditCost: "-1" }), /GENERATION_DEFAULT_CREDIT_COST/);
   });
 
+  it("fails fast with 503 when the generation queue is not configured", async () => {
+    const service = new GenerationService({ repository: new FakeRepository(), ready: false });
+    await assert.rejects(
+      service.create(validBody, "create-attempt-1", viewer),
+      (error) => error instanceof GenerationError && error.code === "generation_queue_not_configured" && error.statusCode === 503,
+    );
+  });
+
   it("parses the default moderation policy fail-closed", () => {
     assert.equal(parseDefaultModeration(undefined), "pending");
     assert.equal(parseDefaultModeration("approved"), "approved");

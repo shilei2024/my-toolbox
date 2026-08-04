@@ -1,0 +1,246 @@
+{% extends "admin/_base.html" %}
+{% block admin_content %}
+{% set status_class = {
+  "pending": "warning", "manual_review": "warning", "approved": "success",
+  "rejected": "danger", "active": "success", "disabled": "secondary",
+  "degraded": "danger", "enabled": "success", "running": "info",
+  "completed": "success", "failed": "danger", "cancelled": "secondary"
+} %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h4 mb-1">AI 作图管理</h2>
+    <p class="text-muted small mb-0">审核内容、控制 Provider 与工作流，所有变更都会写入审计记录。</p>
+  </div>
+  {% if dashboard %}
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.gallery') }}">刷新数据</a>
+  {% endif %}
+</div>
+
+{% if gallery_error %}
+<div class="alert alert-warning" role="alert">
+  <strong>暂时无法读取 Gallery 管理数据：</strong>{{ gallery_error }}
+  <div class="small mt-1">请确认 Flask 已配置 <code>GALLERY_SERVICE_BASE_URL</code> 与
+  <code>GALLERY_INTERNAL_HMAC_SECRET</code>，且 Generation Service 可访问。配置说明见部署文档。</div>
+</div>
+{% endif %}
+
+{% if dashboard %}
+<section class="row g-3 mb-4" aria-label="运行概览">
+  {% set stats = [
+    ("待审核", dashboard.overview.get("pendingModeration", 0), "需要人工决定", "warning"),
+    ("公开作品", dashboard.overview.get("publicImages", 0), "当前可被发现", "success"),
+    ("24h 任务", dashboard.overview.get("jobsLast24Hours", 0), "最近生成请求", "primary"),
+    ("24h 失败", dashboard.overview.get("failedJobsLast24Hours", 0), "需要观察", "danger"),
+    ("活跃 Provider", dashboard.overview.get("activeProviders", 0), "参与路由", "info"),
+    ("启用工作流", dashboard.overview.get("enabledWorkflows", 0), "可供选择", "secondary"),
+  ] %}
+  {% for label, value, note, tone in stats %}
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card h-100 shadow-sm border-{{ tone }}">
+      <div class="card-body py-3">
+        <div class="text-muted small">{{ label }}</div>
+        <div class="fs-4 fw-bold">{{ value }}</div>
+        <div class="text-muted small">{{ note }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<ul class="nav nav-tabs mb-3" id="galleryAdminTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-moderation" data-bs-toggle="tab" data-bs-target="#pane-moderation" type="button" role="tab" aria-controls="pane-moderation" aria-selected="true">
+      内容审核 <span class="badge bg-warning text-dark">{{ dashboard.overview.get("pendingModeration", 0) }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-providers" data-bs-toggle="tab" data-bs-target="#pane-providers" type="button" role="tab" aria-controls="pane-providers" aria-selected="false">Provider</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-workflows" data-bs-toggle="tab" data-bs-target="#pane-workflows" type="button" role="tab" aria-controls="pane-workflows" aria-selected="false">工作流</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-jobs" data-bs-toggle="tab" data-bs-target="#pane-jobs" type="button" role="tab" aria-controls="pane-jobs" aria-selected="false">生成任务</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-audit" data-bs-toggle="tab" data-bs-target="#pane-audit" type="button" role="tab" aria-controls="pane-audit" aria-selected="false">审计记录</button>
+  </li>
+</ul>
+
+<div class="tab-content" id="galleryAdminTabContent">
+  <div class="tab-pane fade show active" id="pane-moderation" role="tabpanel" aria-labelledby="tab-moderation">
+    {% if dashboard.moderationQueue %}
+      {% for item in dashboard.moderationQueue %}
+      <div class="card mb-3">
+        <div class="row g-0">
+          <div class="col-md-3">
+            {% if gallery_origin %}
+            <a href="{{ gallery_origin }}/gallery/{{ item.slug }}" target="_blank" rel="noreferrer">
+              <img src="{{ item.thumbnailUrl }}" class="img-fluid rounded-start moderation-thumb" alt="{{ item.title or '待审核 AI 作品' }}" loading="lazy" />
+            </a>
+            {% else %}
+            <img src="{{ item.thumbnailUrl }}" class="img-fluid rounded-start moderation-thumb" alt="{{ item.title or '待审核 AI 作品' }}" loading="lazy" />
+            {% endif %}
+          </div>
+          <div class="col-md-9">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  <h5 class="card-title mb-1">{{ item.title or "未命名作品" }}</h5>
+                  <span class="text-muted small">{{ item.workflowName }} · {{ item.createdAtLocal }}</span>
+                </div>
+                <span class="badge bg-{{ status_class.get(item.moderationStatus, 'secondary') }}">{{ item.moderationStatus }}</span>
+              </div>
+              <dl class="row small text-muted mt-2 mb-2">
+                <dt class="col-3">可见性</dt><dd class="col-9">{{ item.visibility }} / Prompt {{ item.promptVisibility }}</dd>
+                <dt class="col-3">Slug</dt><dd class="col-9"><code>{{ item.slug }}</code></dd>
+              </dl>
+              <form method="post" action="{{ url_for('admin.gallery_moderate', image_id=item.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="decision" value="approved" />
+                <input type="hidden" name="expected_updated_at" value="{{ item.updatedAt }}" />
+                <button class="btn btn-success btn-sm" type="submit">批准公开</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.gallery_moderate', image_id=item.id) }}" class="d-inline"
+                    onsubmit="return confirm('确认拒绝这件作品？它不会出现在公开 Gallery 与 SEO 中。');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="decision" value="rejected" />
+                <input type="hidden" name="expected_updated_at" value="{{ item.updatedAt }}" />
+                <button class="btn btn-outline-secondary btn-sm" type="submit">拒绝</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.gallery_delete', image_id=item.id) }}" class="d-inline"
+                    onsubmit="return confirm('确认删除这件作品？系统会先软删除，并按保留期清理 COS 对象。');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button class="btn btn-outline-danger btn-sm" type="submit">删除</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="text-center text-muted py-5">审核队列已清空，新的 pending / manual review 作品会出现在这里。</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane fade" id="pane-providers" role="tabpanel" aria-labelledby="tab-providers">
+    {% if dashboard.providers %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Provider</th><th>状态</th><th>优先级</th><th>凭证</th><th>健康</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for item in dashboard.providers %}
+          <tr>
+            <td><strong>{{ item.displayName }}</strong><br /><small class="text-muted">{{ item.code }} / {{ item.adapterType }}</small></td>
+            <td><span class="badge bg-{{ status_class.get(item.status, 'secondary') }}">{{ item.status }}</span></td>
+            <td>{{ item.priority }}</td>
+            <td><span class="badge bg-{{ 'success' if item.secretConfigured else 'secondary' }}">{{ "已配置" if item.secretConfigured else "未配置" }}</span></td>
+            <td><small>失败 {{ item.consecutiveFailures }} 次<br />{{ item.lastHealthAtLocal }}</small></td>
+            <td>
+              <form method="post" action="{{ url_for('admin.gallery_update_provider_route', provider_id=item.id) }}" class="d-flex gap-2 align-items-center">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="expected_updated_at" value="{{ item.updatedAt }}" />
+                <select name="status" class="form-select form-select-sm" aria-label="{{ item.displayName }} 状态">
+                  <option value="active" {% if item.status == "active" %}selected{% endif %}>active</option>
+                  <option value="disabled" {% if item.status == "disabled" %}selected{% endif %}>disabled</option>
+                </select>
+                <input name="priority" type="number" min="0" max="10000" value="{{ item.priority }}" class="form-control form-control-sm" style="width:90px" aria-label="优先级" />
+                <button class="btn btn-sm btn-outline-primary" type="submit">保存</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="text-center text-muted py-5">还没有 Provider，Provider 注册属于服务端部署流程。</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane fade" id="pane-workflows" role="tabpanel" aria-labelledby="tab-workflows">
+    {% if dashboard.workflows %}
+    <div class="row g-3">
+      {% for item in dashboard.workflows %}
+      <div class="col-md-6 col-xl-4">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <h6 class="mb-1">{{ item.name }}</h6>
+                <small class="text-muted">{{ item.slug }} · {{ item.category }}</small>
+              </div>
+              <span class="badge bg-{{ 'success' if item.isEnabled else 'secondary' }}">{{ "enabled" if item.isEnabled else "disabled" }}</span>
+            </div>
+            <div class="small text-muted mt-2">
+              Active version: <strong>{{ ("v" ~ item.activeVersion) if item.activeVersion else "未发布" }}</strong>
+              · {{ item.bindingCount }} 个可用 binding
+            </div>
+            <form method="post" action="{{ url_for('admin.gallery_update_workflow_route', workflow_id=item.id) }}" class="mt-3">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="expected_updated_at" value="{{ item.updatedAt }}" />
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" name="is_enabled" id="wf-{{ item.id }}" {% if item.isEnabled %}checked{% endif %} />
+                <label class="form-check-label small" for="wf-{{ item.id }}">允许用户选择</label>
+              </div>
+              <div class="d-flex gap-2 align-items-center">
+                <label class="small text-muted mb-0">排序</label>
+                <input name="sort_order" type="number" min="0" max="10000" value="{{ item.sortOrder }}" class="form-control form-control-sm" style="width:90px" />
+                <button class="btn btn-sm btn-outline-primary ms-auto" type="submit">保存工作流</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="text-center text-muted py-5">还没有工作流，先通过版本化发布流程创建。</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane fade" id="pane-jobs" role="tabpanel" aria-labelledby="tab-jobs">
+    {% if dashboard.recentJobs %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>任务</th><th>工作流</th><th>Provider</th><th>状态</th><th>实际成本</th><th>创建时间</th></tr></thead>
+        <tbody>
+          {% for item in dashboard.recentJobs %}
+          <tr>
+            <td><code>{{ item.id[:8] }}…</code></td>
+            <td>{{ item.workflowName }}</td>
+            <td>{{ item.providerCode or "尚未选择" }}</td>
+            <td><span class="badge bg-{{ status_class.get(item.status, 'secondary') }}">{{ item.status }}</span></td>
+            <td>{{ "%.4f"|format(item.actualCost) }}</td>
+            <td>{{ item.createdAtLocal }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="text-center text-muted py-5">暂无生成任务。</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane fade" id="pane-audit" role="tabpanel" aria-labelledby="tab-audit">
+    {% if dashboard.recentAudit %}
+    <ol class="list-group list-group-numbered">
+      {% for item in dashboard.recentAudit %}
+      <li class="list-group-item d-flex justify-content-between align-items-start">
+        <div>
+          <strong>{{ item.action }}</strong>
+          <div class="small text-muted">{{ item.resourceType }} / {{ item.resourceId[:8] ~ "…" if item.resourceId else "—" }}</div>
+        </div>
+        <time class="text-muted small">{{ item.createdAtLocal }}</time>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+      <div class="text-center text-muted py-5">暂无管理审计。</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

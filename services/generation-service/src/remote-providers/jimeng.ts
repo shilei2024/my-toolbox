@@ -1,7 +1,7 @@
 import { assertRequestSupported } from "../providers/capabilities.ts";
 import { ProviderError } from "../providers/errors.ts";
 import type { ImageProvider } from "../providers/image-provider.ts";
-import type { CostEstimate, GenerationRequest, ProviderBinding, ProviderCallContext, ProviderCancelResult, ProviderDescriptor, ProviderHealthResult, ProviderStatusResult, ProviderSubmission } from "../providers/types.ts";
+import type { CostEstimate, GenerationRequest, ProviderBinding, ProviderCallContext, ProviderCancelResult, ProviderDescriptor, ProviderHealthResult, ProviderImageOutput, ProviderStatusResult, ProviderSubmission } from "../providers/types.ts";
 import { isObject, mapRemoteHttpError, requestRemoteJson, type RemoteProviderHttpConfig } from "./http.ts";
 import { base64ImageOutput, combinedPrompt } from "./image-output.ts";
 import { bindingCost, callSignal, configBoolean, configNumber, configString, modelFrom, synchronousCancellation, synchronousStatus } from "./synchronous.ts";
@@ -9,7 +9,7 @@ import { bindingCost, callSignal, configBoolean, configNumber, configString, mod
 export class JimengImageProvider implements ImageProvider {
   readonly descriptor: ProviderDescriptor = {
     code: "jimeng", displayName: "即梦 / Seedream", availability: "active", priority: 30,
-    capabilities: { modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 1, supportsSeed: true, supportsCancellation: false, supportsStatusPolling: false },
+    capabilities: { modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 8, supportsSeed: true, supportsCancellation: false, supportsStatusPolling: false },
   };
   readonly #config: RemoteProviderHttpConfig;
   readonly #fetcher: typeof fetch;
@@ -22,29 +22,42 @@ export class JimengImageProvider implements ImageProvider {
     if (guidanceScale !== undefined && (guidanceScale < 1 || guidanceScale > 10)) throw configuration("invalid_guidance_scale", "Jimeng guidanceScale must be between 1 and 10");
     const optimizeMode = configString(binding, "optimizePromptMode");
     if (optimizeMode !== undefined && !["standard", "fast"].includes(optimizeMode)) throw configuration("invalid_optimize_mode", "Jimeng optimizePromptMode is invalid");
-    const body = {
-      model,
-      prompt: combinedPrompt(request.prompt, request.negativePrompt),
-      size: `${request.width}x${request.height}`,
-      sequential_image_generation: "disabled",
-      stream: false,
-      response_format: "b64_json",
-      watermark: configBoolean(binding, "watermark") ?? true,
-      ...(request.seed === undefined ? {} : { seed: request.seed }),
-      ...(guidanceScale === undefined ? {} : { guidance_scale: guidanceScale }),
-      ...(optimizeMode === undefined ? {} : { optimize_prompt_options: { mode: optimizeMode } }),
-    };
-    const signal = callSignal(context);
+    // Seedream returns one image per call. Fan out for count > 1 so the
+    // platform contract (count 1-8) works even though the API is single-output;
+    // a user-provided seed becomes seed + index so each image is reproducible
+    // and distinct.
+    const watermark = configBoolean(binding, "watermark") ?? true;
+    const outputs: ProviderImageOutput[] = [];
+    let externalRequestId = context.attemptId;
+    let upstreamRequestId: string | null = null;
     try {
-      const response = await requestRemoteJson(this.#config, "/images/generations", {
-        method: "POST", headers: { authorization: `Bearer ${this.#config.apiKey}`, "content-type": "application/json" }, body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
-      }, this.#fetcher);
-      const images = jimengImages(response.data);
-      if (images.length !== 1) throw new ProviderError({ providerCode: "jimeng", category: "upstream", code: "no_output", message: "Jimeng returned no image output", retryable: false });
-      const output = base64ImageOutput("jimeng", images[0]!, this.#config.maxResponseBytes);
-      const externalRequestId = response.requestId ?? context.attemptId;
-      return { externalRequestId, state: "succeeded", outputs: [output], providerMetadata: { model, outputCount: 1, upstreamRequestId: response.requestId ?? null } };
+      for (let index = 0; index < request.count; index += 1) {
+        const body = {
+          model,
+          prompt: combinedPrompt(request.prompt, request.negativePrompt),
+          size: `${request.width}x${request.height}`,
+          sequential_image_generation: "disabled",
+          stream: false,
+          response_format: "b64_json",
+          watermark,
+          ...(request.seed === undefined ? {} : { seed: request.seed + index }),
+          ...(guidanceScale === undefined ? {} : { guidance_scale: guidanceScale }),
+          ...(optimizeMode === undefined ? {} : { optimize_prompt_options: { mode: optimizeMode } }),
+        };
+        const signal = callSignal(context);
+        const response = await requestRemoteJson(this.#config, "/images/generations", {
+          method: "POST", headers: { authorization: `Bearer ${this.#config.apiKey}`, "content-type": "application/json" }, body: JSON.stringify(body),
+          ...(signal ? { signal } : {}),
+        }, this.#fetcher);
+        const images = jimengImages(response.data);
+        if (images.length !== 1) throw new ProviderError({ providerCode: "jimeng", category: "upstream", code: "no_output", message: "Jimeng returned no image output", retryable: false });
+        outputs.push(base64ImageOutput("jimeng", images[0]!, this.#config.maxResponseBytes));
+        if (response.requestId) {
+          externalRequestId = response.requestId;
+          upstreamRequestId = response.requestId;
+        }
+      }
+      return { externalRequestId, state: "succeeded", outputs, providerMetadata: { model, outputCount: outputs.length, upstreamRequestId } };
     } catch (error) { throw mapRemoteHttpError(error, "jimeng", jimengContentPolicy); }
   }
 

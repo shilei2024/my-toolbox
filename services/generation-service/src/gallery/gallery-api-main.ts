@@ -49,7 +49,7 @@ const generationQueue = config.redisUrl ? (() => {
   const publisher = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-cancel", maxRetriesPerRequest: 1, enableOfflineQueue: false });
   return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
 })() : undefined;
-const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}) });
+const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
 const app = await createGalleryHttpServer({ service, admin, billing, generation, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
 
 await app.listen({ host: config.host, port: config.port });
