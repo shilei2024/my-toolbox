@@ -7,6 +7,8 @@
   503，不再产生永远停留在 pending 的任务。
 - **创作页体验**：账单接口故障不再阻塞工作流加载；任务轮询增加指数退避（2s→10s）
   并在瞬时失败后继续轮询；未登录时“开始生成”变为登录链接（`/login?next=/create`）。
+- **认证页防缓存**：登录/注册/退出页面强制 `Cache-Control: private, no-store`，
+  修复 CDN 缓存旧 CSRF token 导致表单提交 400 的问题。
 - **真实即梦冒烟**：新增 `npm run smoke:jimeng`（支持 `--health`），只输出安全字段，
   不打印 API key；生产服务器可用其完成 Provider 级连通性与生成验证。
 - **统一后台并入主线**：上一分支的 `/admin/gallery` 统一后台随本次发布一起合入 main。

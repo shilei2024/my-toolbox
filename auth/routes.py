@@ -15,6 +15,15 @@ from .forms import LoginForm, RegisterForm
 auth_bp = Blueprint("auth", __name__, template_folder="../templates")
 
 
+@auth_bp.after_app_request
+def _no_store_auth_pages(response):
+    """Never cache login/register/logout pages (CDN-cached CSRF tokens break forms)."""
+    if request.endpoint in {"auth.login", "auth.register", "auth.logout"}:
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Vary"] = "Cookie"
+    return response
+
+
 def _safe_next_url(value: str | None, external_url: str) -> str | None:
     """Allow relative paths, plus absolute HTTPS URLs on the external tool origin.
 

@@ -88,6 +88,13 @@ class GalleryRoundTripTests(unittest.TestCase):
         self.assertEqual(logout.status_code, 302)
         self.assertEqual(logout.headers["Location"], "https://gallery.example.com/my-images")
 
+    def test_auth_pages_are_never_cached_by_proxies(self):
+        for path in ("/login", "/register"):
+            response = self.app.test_client().get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("no-store", response.headers["Cache-Control"])
+            self.assertEqual(response.headers["Vary"], "Cookie")
+
     def test_malicious_next_falls_back_to_home(self):
         response = self._register("roundtrip-evil@example.com", next_url="https://evil.example/steal")
         self.assertEqual(response.status_code, 302)
