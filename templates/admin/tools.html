@@ -23,7 +23,7 @@
             <td><code>{{ t.id }}</code></td>
             <td><i class="bi {{ t.icon }}" style="color: {{ t.color }};"></i> {{ t.name }}</td>
             <td><code>{{ t.route }}</code></td>
-            <td><small class="text-muted">{{ t.blueprint_module }}</small></td>
+            <td><small class="text-muted">{{ t.external_url if t.external_url else (t.blueprint_module or '—') }}</small></td>
             <td>
               {% if t.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
             </td>

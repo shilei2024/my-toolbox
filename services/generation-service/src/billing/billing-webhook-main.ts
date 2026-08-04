@@ -1,0 +1,27 @@
+import { Pool } from "pg";
+import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
+import { BillingService, BillingWebhookProcessor } from "./billing-service.ts";
+import { loadBillingConfig } from "./config.ts";
+import { PaymentProviderRegistry } from "./payment-provider.ts";
+import { PostgresBillingRepository } from "./postgres-billing-repository.ts";
+import { StripePaymentProvider } from "./stripe-provider.ts";
+import { createBillingWebhookHttpServer } from "./webhook-http-server.ts";
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_URL is required");
+const config = loadBillingConfig();
+if (!config.stripe) throw new Error("No payment provider is enabled");
+const logger = new ConsoleStructuredLogger();
+const pool = new Pool({ connectionString: databaseUrl, max: 6, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+const repository = new PostgresBillingRepository(pool);
+const providers = new PaymentProviderRegistry();
+providers.register(new StripePaymentProvider(config.stripe.webhookSecret, config.stripe.secretKey));
+const service = new BillingService({ repository, providers, logger, publicBaseUrl: config.publicBaseUrl });
+const processor = new BillingWebhookProcessor(repository, logger);
+const app = await createBillingWebhookHttpServer({ service, logger, trustProxy: process.env.TRUST_PROXY === "true" });
+await app.listen({ host: config.webhookHost, port: config.webhookPort });
+const timer = setInterval(() => { void processor.runOnce(); }, 1_000);
+logger.info("billing.webhook_started", { host: config.webhookHost, port: config.webhookPort });
+const shutdown = async (): Promise<void> => { clearInterval(timer); await app.close(); await pool.end(); };
+process.once("SIGINT", () => { void shutdown(); });
+process.once("SIGTERM", () => { void shutdown(); });
