@@ -23,6 +23,9 @@
 | 8 | Gallery 展示 | 公开作品（或本人作品）能打开，图片可下载/点赞/收藏 | 浏览器访问详情页 |
 | 9 | Vercel build 成功 | 两个 Vercel 项目生产构建均为 Success，路由清单完整 | Vercel Deployments |
 | 10 | 服务器服务稳定 | 运行 24h：api healthy，dispatcher/worker 无异常重启，日志无密钥泄露 | `docker compose ps` + 日志 |
+| 11 | 桥接预检 | Flask 与 Gallery 两侧预检全部 PASS 且退出码 0，输出不含密钥 | 服务器执行 `flask --app app check-gallery-integration`；本地执行 Gallery 预检脚本 |
+| 12 | 回跳安全 | Gallery 发起登录/注册/退出后回到原页面；伪造 `next` 只回主站首页，不跳外部域名 | 浏览器实测 + 契约测试 `tests/test_gallery_round_trip.py` |
+| 13 | 身份透传 | Gallery 正确显示登录账号/角色；缺失或错误内省密钥时返回 404 且不泄露身份字段 | 契约测试 + 浏览器 Network 检查 |
 
 ## 记录要求
 

@@ -136,8 +136,24 @@ CAM 权限只授予生产 Bucket 或生产前缀所需的对象上传、读取/�
 - `SESSION_COOKIE_DOMAIN=.<受控父域名>`（仅当 Flask 与 Gallery 确实共享受控父域）
 - `SESSION_COOKIE_SECURE=true`
 - 与 `GALLERY_INTROSPECTION_SECRET` 配对的内部鉴权密钥
+- `APP_BASE_URL=https://<主站生产域名>`（用于预检验证共享 Cookie 域）
 
 普通 `*.vercel.app` 域名不能共享你的业务域 Cookie；正式共用用户必须绑定受控业务域名。
+
+填写完成后，在 Flask 发布目录运行不输出密钥的预检：
+
+```bash
+flask --app app check-gallery-integration
+```
+
+预期全部 `[PASS]` 且退出码 0。常见失败与修复：
+
+| 输出项 | 失败原因与修复 |
+| --- | --- |
+| `gallery_url` / `app_base_url` | `AI_IMAGE_EXTERNAL_URL` / `APP_BASE_URL` 必须为 HTTPS 绝对地址 |
+| `introspection_secret` | `GALLERY_INTROSPECTION_SECRET` 至少 32 字节，且与 Vercel Production 完全一致 |
+| `secure_cookie` | 生产环境把 `SESSION_COOKIE_SECURE=true` |
+| `cookie_domain` / `shared_cookie_domain` | 填写 `SESSION_COOKIE_DOMAIN`，且主站与 Gallery 都位于该父域下 |
 
 服务端新增可选配置：
 

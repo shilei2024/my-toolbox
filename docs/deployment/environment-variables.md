@@ -48,6 +48,40 @@ M1.1 新增服务端变量：
 | `GALLERY_DEFAULT_MODERATION` | Generation Worker | `pending` | 新图片审核状态；`approved` 会直接发布公开图片 |
 | `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL` | Next Server Runtime | 无 | Flask 登录/退出页 HTTPS URL，Gallery 登录入口依赖前者 |
 
+## 主站 ↔ Gallery 登录桥接变量
+
+Flask 主站与 Vercel Gallery Web 通过共享 Cookie 与签名会话内省识别同一登录态。这些变量缺失或值不合法时，首页 AI 入口自动隐藏、Gallery 回退为游客（fail closed）。
+
+| 变量 | 归属 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `AI_IMAGE_EXTERNAL_URL` | Flask 主站 | 空 | Gallery 公网 HTTPS URL（如 `https://gallery.example.com/create`）；未配置时首页隐藏 AI 作图入口 |
+| `GALLERY_INTROSPECTION_SECRET` | Flask + Vercel | 空 | 内部会话内省共享密钥，至少 32 个 UTF-8 字节；只保存在服务端，禁止 `NEXT_PUBLIC_` |
+| `APP_BASE_URL` | Flask 主站 | `http://localhost:8000` | 主站公网 HTTPS Origin；预检用它校验双方同处 `SESSION_COOKIE_DOMAIN` 之下 |
+| `SESSION_COOKIE_DOMAIN` | Flask 主站 | 空 | 双方共享受控父域（如 `.example.com`）；`*.vercel.app` 无法共享业务 Cookie |
+| `SESSION_COOKIE_SECURE` | Flask 主站 | `false` | 生产必须为 `true`；Gallery 为 HTTPS 时预检直接失败 |
+| `MAVIS_AUTH_INTROSPECTION_URL` | Vercel | 空 | Flask 内部会话检查 HTTPS URL（`/internal/gallery/session`） |
+| `MAVIS_AUTH_LOGIN_URL` | Vercel | 空 | Flask 登录页 HTTPS URL；未配置时 Gallery 隐藏登录入口 |
+| `MAVIS_AUTH_LOGOUT_URL` | Vercel | 空 | Flask 退出页 HTTPS URL；可选，未配置时隐藏退出入口 |
+
+### 预检命令（不输出密钥）
+
+Flask 主站：
+
+```bash
+flask --app app check-gallery-integration
+```
+
+每项输出以 `[PASS]` 或 `[FAIL]` 开头，只报告变量名与状态；任一 `[FAIL]` 时退出码为 1。输出永远不包含密钥正文或完整内网地址。
+
+Gallery Web：
+
+```bash
+cd apps/gallery-web
+node --experimental-strip-types scripts/check-bridge-config.ts
+```
+
+同样只报告变量名与状态，退出码 0 表示桥接配置就绪。
+
 ## 新增变量流程
 
 1. 选择通用、供应商无关的命名；Provider 特有变量限制在 Adapter。
