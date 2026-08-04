@@ -65,13 +65,18 @@ tools:
     enabled: true
     order: 38
 
+  # AI 作图已迁移到独立部署的新链路（Generation Service + Gallery Web）。
+  # 此处仅保留外部入口：填上 external_url（新链路地址，如 https://xxx.com/gallery）
+  # 并重启应用后，首页自动显示「AI 作图」卡片并跳转到新链路；留空则隐藏。
+  # 旧 Flask 实现 tools/ai_image 已移除，/tools/ai-image 不再注册路由。
   - id: ai_image
     name: AI 作图
-    description: 输入一句话，AI 生成方形/横版/竖版图片。
+    description: 输入一句话，AI 生成方形/横版/竖版图片（新链路 Gallery）。
     icon: bi-brush
     color: "#d63384"
     route: /tools/ai-image
-    blueprint_module: tools.ai_image
+    blueprint_module: ""
+    external_url: ""
     category: image
     enabled: true
     order: 40

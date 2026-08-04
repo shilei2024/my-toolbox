@@ -93,6 +93,10 @@ class Tool(db.Model):
     color: Mapped[str] = mapped_column(String(16), default="#0d6efd", nullable=False)
     route: Mapped[str] = mapped_column(String(255), nullable=False)
     blueprint_module: Mapped[str] = mapped_column(String(255), nullable=False)
+    # external_url: 非空时该工具是一个外部链接入口（不注册内部 blueprint），
+    # 用于把 AI 作图等能力指向独立部署的 Generation Service / Gallery Web。
+    # 为空字符串 = 未配置，首页自动隐藏，直到上线后填入新链路地址。
+    external_url: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     required_plan: Mapped[str] = mapped_column(String(32), default="free", nullable=False)
     # category: 分组键，首页按它分块。未指定时归到 "其他工具"。
@@ -107,6 +111,8 @@ class Tool(db.Model):
             "icon": self.icon,
             "color": self.color,
             "route": self.route,
+            "blueprint_module": self.blueprint_module,
+            "external_url": self.external_url,
             "enabled": self.enabled,
             "required_plan": self.required_plan,
             "category": self.category,

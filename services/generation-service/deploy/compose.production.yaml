@@ -1,0 +1,108 @@
+name: mindfulpenpal-generation-production
+
+x-generation-environment: &generation-environment
+  APP_ENV: production
+  GALLERY_HOST: 0.0.0.0
+  GALLERY_PORT: "3101"
+  GALLERY_TRUST_PROXY: "true"
+  GENERATION_ALLOW_MOCK_PROVIDER: "false"
+
+x-generation-service: &generation-service
+  image: ${GENERATION_IMAGE:?set GENERATION_IMAGE to an immutable image digest}
+  restart: unless-stopped
+  env_file:
+    - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+  environment: *generation-environment
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  networks:
+    - generation-internal
+  profiles: ["production"]
+
+services:
+  migrate:
+    image: ${POSTGRES_MIGRATION_IMAGE:?set POSTGRES_MIGRATION_IMAGE to an immutable image digest}
+    restart: "no"
+    env_file:
+      - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+    volumes:
+      - ../database/migrations:/migrations:ro
+      - ./migrate-production.sh:/migrate-production.sh:ro
+    command: ["sh", "/migrate-production.sh"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks:
+      - generation-internal
+    profiles: ["migration"]
+
+  api:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:start"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3101/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    mem_limit: 512m
+
+  dispatcher:
+    <<: *generation-service
+    command: ["npm", "run", "generation:dispatcher"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+
+  worker:
+    <<: *generation-service
+    command: ["npm", "run", "generation:worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - generation-worker-temp:/tmp/generation
+    stop_grace_period: 45s
+    mem_limit: 768m
+
+  deletion-worker:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:deletion-worker"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+
+  caddy:
+    image: ${CADDY_IMAGE:?set CADDY_IMAGE to an immutable image digest}
+    restart: unless-stopped
+    env_file:
+      - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - generation-caddy-data:/data
+      - generation-caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    networks:
+      - generation-internal
+    profiles: ["production"]
+
+networks:
+  generation-internal:
+    driver: bridge
+
+volumes:
+  generation-worker-temp:
+  generation-caddy-data:
+  generation-caddy-config:

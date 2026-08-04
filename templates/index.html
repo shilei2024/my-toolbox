@@ -75,7 +75,11 @@
     <div class="row g-3">
       {% for tool in groups[cat] %}
         <div class="col-12 col-sm-6 col-lg-3">
-          <a class="text-decoration-none tool-card-link" href="{{ tool.route }}">
+          {% if tool.external_url %}
+            <a class="text-decoration-none tool-card-link" href="{{ tool.external_url }}" target="_blank" rel="noopener">
+          {% else %}
+            <a class="text-decoration-none tool-card-link" href="{{ tool.route }}">
+          {% endif %}
             <div class="card tool-card h-100 shadow-sm border-0">
               <div class="card-body d-flex flex-column">
                 <div class="d-flex align-items-center gap-2 mb-2">
@@ -90,7 +94,9 @@
                 <p class="card-text text-muted small flex-grow-1">{{ tool.description }}</p>
                 <div class="d-flex justify-content-between align-items-center small text-muted">
                   <span>
-                    {% if current_user.is_authenticated and is_admin %}
+                    {% if tool.external_url %}
+                      新链路
+                    {% elif current_user.is_authenticated and is_admin %}
                       今日剩余 <strong class="text-dark">∞</strong> 次
                     {% elif current_user.is_authenticated %}
                       今日剩余 <strong class="text-dark">{{ remaining_for(tool.id) }}</strong> 次

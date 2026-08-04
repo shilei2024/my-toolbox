@@ -119,8 +119,6 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ["FLASK_ENV"] = "development"
 # 关闭后台调度（避免测试进程挂起 / 拉起线程）
 os.environ["VERCEL"] = "1"  # 让 create_app 跳过 APScheduler 分支
-# AI 作图使用 mock 提供方，避免联网依赖
-os.environ["AI_PROVIDER"] = "mock"
 # 固定的种子管理员账号（使用 .com 域名，email-validator 会拒绝 .local）
 os.environ["ADMIN_EMAIL"] = "admin@test.com"
 os.environ["ADMIN_PASSWORD"] = "Admin123456"
@@ -171,7 +169,11 @@ TOOL_IDS = []
 try:
     import yaml
     cfg = yaml.safe_load((PROJECT_DIR / "tools_config.yaml").read_text(encoding="utf-8")) or {}
-    TOOL_IDS = [t["id"] for t in cfg.get("tools", [])]
+    # 外部入口工具（blueprint_module 为空，如迁移后的 AI 作图）不导入模块
+    TOOL_IDS = [
+        t["id"] for t in cfg.get("tools", [])
+        if (t.get("blueprint_module") or "").strip()
+    ]
 except Exception as exc:  # noqa: BLE001
     record("启动", "读取 tools_config.yaml", False, str(exc))
 
@@ -346,6 +348,9 @@ _cfg = _yaml.safe_load((PROJECT_DIR / "tools_config.yaml").read_text(encoding="u
 for t in _cfg.get("tools", []):
     tid = t["id"]
     route = t["route"]
+    # 外部入口工具不注册内部路由（如迁移后的 AI 作图），跳过页面测试
+    if not (t.get("blueprint_module") or "").strip():
+        continue
     try:
         # strict_slashes=False 后，无尾斜杠也应直接 200（不再 308 重定向）
         r1 = client.get(route)
@@ -454,22 +459,8 @@ try:
 except Exception as exc:  # noqa: BLE001
     record("功能", "image_compress 压缩图片", False, str(exc).splitlines()[0], traceback.format_exc())
 
-# 5.7 AI 作图（mock）— 该工具端点为 /generate 而非 /process
-try:
-    r = client.post("/tools/ai-image/generate",
-                    data={"prompt": "a red cat", "size": "512x512"},
-                    content_type="multipart/form-data", headers=AJ)
-    if r.status_code == 200 and (j := r.get_json(silent=True)) and j.get("task_id"):
-        tid = j["task_id"]
-        s = client.get(f"/tools/ai-image/status/{tid}", headers=AJ)
-        sj = s.get_json(silent=True) or {}
-        ok = sj.get("status") == "done" and sj.get("url")
-        msg = "" if ok else f"status={sj.get('status')} err={sj.get('error')}"
-        record("功能", "ai_image AI 作图 (mock)", ok, msg)
-    else:
-        record("功能", "ai_image AI 作图 (mock)", False, f"未返回 task_id: {r.get_data(as_text=True)[:120]}")
-except Exception as exc:  # noqa: BLE001
-    record("功能", "ai_image AI 作图 (mock)", False, str(exc).splitlines()[0], traceback.format_exc())
+# 5.7 AI 作图已迁移至独立的新链路（Generation Service + Gallery Web），
+# 旧 Flask 工具 tools/ai_image 已移除，此处不再测试 /tools/ai-image。
 
 # 5.7b PDF 压缩
 try:
@@ -872,10 +863,6 @@ try:
         "site_tagline": "测试标语",
         "daily_free_limit": "12",
         "anon_free_limit": "4",
-        "AI_PROVIDER": "mock",
-        "AI_BASE_URL": "https://image.pollinations.ai",
-        "AI_MODEL": "",
-        "AI_API_KEY": "",
     }, follow_redirects=False)
     home = client.get("/")
     ok = (
@@ -988,24 +975,7 @@ for tid, data, mime in _dl_tests:
     except Exception as exc:  # noqa: BLE001
         record("下载", f"{tid} 下载产物", False, str(exc).splitlines()[0], traceback.format_exc())
 
-# ai_image 下载（status 返回 url）
-try:
-    r = client.post("/tools/ai-image/generate", data={"prompt": "x", "size": "256x256"},
-                    content_type="multipart/form-data", headers=AJ)
-    j = r.get_json() or {}
-    if j.get("task_id"):
-        s = client.get(f"/tools/ai-image/status/{j['task_id']}", headers=AJ).get_json() or {}
-        url = s.get("url", "")
-        if url:
-            d = client.get(url)
-            ok = d.status_code == 200 and d.mimetype.startswith("image/")
-            record("下载", "ai_image 下载产物", ok, f"{url} -> {d.status_code} {d.mimetype}")
-        else:
-            record("下载", "ai_image 下载产物", False, f"status 未返回 url: {s}")
-    else:
-        record("下载", "ai_image 下载产物", False, f"未返回 task_id: {j}")
-except Exception as exc:  # noqa: BLE001
-    record("下载", "ai_image 下载产物", False, str(exc).splitlines()[0], traceback.format_exc())
+# ai_image 下载测试已随旧 Flask 工具移除（AI 作图迁移至新链路）。
 
 # base64 解码图片后下载
 try:

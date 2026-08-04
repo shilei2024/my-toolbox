@@ -6,6 +6,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.tmp/
 
 # Distribution / packaging
 .Python
@@ -17,6 +18,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# gallery-web 前端共享类型库（非 Python packaging lib/）
+!apps/gallery-web/src/lib/
 parts/
 sdist/
 var/
@@ -58,8 +61,12 @@ htmlcov/
 .env.*.local
 *.env.local
 .env.production
+.env.development
+.env.staging
+.env.test
 secrets.json
 secrets.yaml
+.vercel/
 
 # =============================================================================
 # Database & user-uploaded content
@@ -116,6 +123,14 @@ Desktop.ini
 # =============================================================================
 *.spec
 site-packages/
+node_modules/
+dist/
+coverage/
+.npm-cache/
+/quick-lru.tgz
+
+# Machine-local npm mirror configuration (do not commit)
+apps/gallery-web/.npmrc
 
 # test reports (generated)
 tests/test_report.json

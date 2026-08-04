@@ -1,5 +1,7 @@
 # My Toolbox 在线工具箱
 
+> 项目工程治理、架构、部署、API、运维和路线图统一收录在 [文档中心](docs/README.md)。所有功能实现前必须通过 [Golden Rule](docs/architecture/engineering-principles.md)。
+
 My Toolbox 是一个基于 Flask 的轻量级在线工具箱，集成 PDF、图片、文本、数据转换和开发辅助工具。项目支持匿名试用、用户登录、按工具计量，以及可在线调整站点信息和免费限额的管理后台。
 
 ## 功能亮点

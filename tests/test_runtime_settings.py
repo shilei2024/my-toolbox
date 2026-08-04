@@ -37,10 +37,6 @@ class RuntimeSettingsTests(unittest.TestCase):
                 "site_tagline": "设置保存后立即生效",
                 "daily_free_limit": "18",
                 "anon_free_limit": "6",
-                "AI_PROVIDER": "mock",
-                "AI_API_KEY": "",
-                "AI_BASE_URL": "",
-                "AI_MODEL": "",
             },
         )
         self.assertEqual(response.status_code, 302)
