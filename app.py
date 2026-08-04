@@ -49,6 +49,22 @@ _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
 _is_readonly_fs = False  # set True at runtime if mkdir fails (e.g. Vercel)
 
 
+def _has_external_database() -> bool:
+    """True when an external Postgres URL is configured for this process.
+
+    Vercel Postgres is injected as POSTGRES_URL_NON_POOLING / POSTGRES_URL;
+    standalone deployments (e.g. Tencent Cloud PostgreSQL) use DATABASE_URL.
+    Without any of these the read-only Vercel filesystem falls back to an
+    empty in-memory SQLite, which makes every stored account disappear.
+    """
+    database_url = os.environ.get("DATABASE_URL", "")
+    return bool(
+        os.environ.get("POSTGRES_URL_NON_POOLING")
+        or os.environ.get("POSTGRES_URL")
+        or database_url.startswith(("postgres://", "postgresql://"))
+    )
+
+
 def create_app() -> Flask:
     global _is_readonly_fs
     _log = lambda msg: print(f"[my-toolbox] {msg}", file=sys.stderr, flush=True)
@@ -90,18 +106,12 @@ def create_app() -> Flask:
         app.config["UPLOAD_DIR"] = _tmp / "uploads"
         app.config["INSTANCE_DIR"] = _tmp / "instance"
         _is_readonly_fs = True
-        # Only switch to in-memory SQLite if no external DB env var is set.
-        # Vercel Postgres URLs use "postgres://" (not "postgresql://"), so we
-        # detect via env var presence rather than URL substring matching.
-        _has_external_db = bool(
-            os.environ.get("POSTGRES_URL_NON_POOLING")
-            or os.environ.get("POSTGRES_URL")
-        )
+        _has_external_db = _has_external_database()
         if not _has_external_db:
             app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-            _log("  DB: in-memory SQLite (no Vercel Postgres detected)")
+            _log("  DB: in-memory SQLite (no external Postgres detected)")
         else:
-            _log("  DB: Vercel Postgres (external, persistent)")
+            _log("  DB: external Postgres (persistent)")
         # These MUST succeed — /tmp is always writable
         Path(app.config["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
         Path(app.config["INSTANCE_DIR"]).mkdir(parents=True, exist_ok=True)

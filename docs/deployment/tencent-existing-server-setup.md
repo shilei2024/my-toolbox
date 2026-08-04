@@ -335,6 +335,13 @@ curl https://api-ai.mindfulpenpal.com/health
 把 `<地域>`、`<账号ID>`、`<桶名>` 换成真实值。这个策略只影响 `images/jobs/*`，
 私有图片仍然只能通过服务端签名 URL 访问。
 
+> 填值规则（最容易出错的地方）：
+> - `<地域>` = 桶所在地域代码，如 `ap-shanghai`；
+> - `<账号ID>` = **APPID（12 位数字）**，不是登录账号也不是昵称；
+> - `<桶名>` = **带 APPID 后缀的完整桶名**，例如桶显示为 `mavis-gallery-1393621694` 时，
+>   Resource 应写成 `qcs::cos:ap-shanghai:uid/1393621694:mavis-gallery-1393621694/images/jobs/*`。
+> 若控制台粘贴 JSON 报错，优先检查这三个值是否还留着 `<>` 尖括号占位符。
+
 确认环境文件里已填：
 
 ```ini
@@ -416,6 +423,11 @@ Vercel 项目 Settings → Environment Variables → Production：
 | `MAVIS_AUTH_LOGOUT_URL` | `https://mindfulpenpal.com/logout` |
 
 确认该项目 Root Directory 为 `apps/gallery-web`，Production Branch 为 `main`。
+
+> Vercel 新版界面入口：Project → Settings → Environments → 找到 **Production** 区块 →
+> 在 “Git Branch” 选择 `main` 并保存（旧版在 Settings → Git 的 “Production Branch” 输入框，
+> 新版已迁移到 Environments）。若界面没有下拉框，说明该区域已改用部署管理：
+> 到 Deployments 页找到来自 `main` 的最新部署，点 “Promote to Production” 同样可让生产跟随 main。
 
 ## 11. 第 10 步：启用 AI Provider 与验收
 
