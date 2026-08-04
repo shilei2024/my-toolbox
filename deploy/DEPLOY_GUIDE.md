@@ -268,6 +268,10 @@ curl https://<api-ai域名>/health
 
 确认 Gallery Web 项目的 Root Directory 是 `apps/gallery-web`、Production Branch 是 `main`。所有变量都不要加 `NEXT_PUBLIC_` 前缀。
 
+> Vercel 新版界面入口：Project → Settings → Environments → **Production** 区块 → “Git Branch” 选择 `main`
+> 并保存（旧版 Settings → Git 的 “Production Branch” 已迁移到 Environments）。
+> 找不到下拉框时，可到 Deployments 页对来自 `main` 的最新部署点 “Promote to Production”。
+
 ## 9. 启用 AI Provider
 
 1. 浏览器登录原站后台 `/admin`。
