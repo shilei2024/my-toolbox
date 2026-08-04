@@ -50,7 +50,10 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
       ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...(init.headers ?? {}),
     },
-  }).catch(() => { throw new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503); });
+  }).catch((reason: unknown) => {
+    console.info(`[gallery] service request failed ${path}: ${String(reason)}`);
+    throw new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503);
+  });
 
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json") ? await response.json() as unknown : undefined;

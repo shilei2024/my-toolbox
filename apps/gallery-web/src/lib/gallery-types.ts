@@ -8,10 +8,14 @@
 
 export type ViewerRole = "guest" | "user" | "admin";
 
+/** Bridge health between Gallery Web and the Flask auth introspection endpoint. */
+export type ViewerBridge = "ok" | "guest" | "unconfigured" | "error";
+
 export interface ViewerContext {
   readonly userId?: number;
   readonly role: ViewerRole;
   readonly requestId: string;
+  readonly bridge?: ViewerBridge;
 }
 
 export interface GalleryFilters {
