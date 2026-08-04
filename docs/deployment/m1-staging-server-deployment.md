@@ -110,6 +110,8 @@ docker compose --env-file deploy/.env.staging \
 - `GALLERY_SERVICE_BASE_URL=https://<Generation Staging API domain>`
 - `GALLERY_INTERNAL_HMAC_SECRET=<与 Generation Service 完全相同>`
 - `GALLERY_PUBLIC_ORIGIN=https://<固定 Preview branch alias>`
+- `MAVIS_AUTH_LOGIN_URL=https://<Staging Flask>/login`
+- `MAVIS_AUTH_LOGOUT_URL=https://<Staging Flask>/logout`
 
 重新部署 Preview 后验证 `/api/generation/workflows`。共享登录还需要：
 
@@ -117,6 +119,13 @@ docker compose --env-file deploy/.env.staging \
 - `GALLERY_INTROSPECTION_SECRET=<与 Staging Flask 相同的独立密钥>`
 
 普通 `vercel.app` 域名不能共享业务父域 Cookie。完整登录验证必须给 Flask 和 Gallery 配置受控的同父域 Staging 子域，并设置安全 Cookie Domain。
+
+Staging 环境模板新增（可选）：
+
+- `BILLING_SIGNUP_GRANT=10`：新用户首次汇总时发放的一次性积分。
+- `GALLERY_DEFAULT_MODERATION=pending`：`approved` 仅用于快速验收公开画廊链路。
+
+数据库迁移按编号应用到 `0007_remote_provider_bindings.sql`；`0007` 只为远端 Provider 增加 bindings，Provider 行仍默认 disabled。
 
 ## 7. 备份、恢复与容量检查
 
@@ -157,6 +166,6 @@ docker compose --env-file deploy/.env.staging \
 - Caddy 无法签发证书：检查 DNS、生效时间、80/443 和安全组。
 - API 不健康：检查迁移日志、数据库连接、COS hostname 与 32+ byte secret。
 - Worker 退出：检查全部 BullMQ 数值变量、COS 配置、临时目录和 Provider 配置。
-- Workflow 为空：确认 `0006` 已应用，并只在 Staging 启用 Mock 或真实 Provider。
+- Workflow 为空：确认 `0007` 已应用，并只在 Staging 启用 Mock 或真实 Provider。
 - 一直 pending：检查 Dispatcher、Redis 和 outbox 日志。
 - Vercel 返回 503：确认 Preview 环境变量已保存并重新部署。

@@ -41,7 +41,7 @@ const service = new GalleryService({
 const admin = new AdminService({ repository: new PostgresAdminRepository(pool, assets), logger, onContentChanged: () => service.invalidatePublicData() });
 const paymentProviders = new PaymentProviderRegistry();
 if (billingConfig.stripe) paymentProviders.register(new StripePaymentProvider(billingConfig.stripe.webhookSecret, billingConfig.stripe.secretKey));
-const billing = new BillingService({ repository: new PostgresBillingRepository(pool), providers: paymentProviders, logger, publicBaseUrl: billingConfig.publicBaseUrl });
+const billing = new BillingService({ repository: new PostgresBillingRepository(pool), providers: paymentProviders, logger, publicBaseUrl: billingConfig.publicBaseUrl, signupGrant: billingConfig.signupGrant });
 const configuredGenerationCreditCost = process.env.GENERATION_DEFAULT_CREDIT_COST?.trim();
 const generationQueue = config.redisUrl ? (() => {
   const queueConfig = loadGenerationQueueConfig();

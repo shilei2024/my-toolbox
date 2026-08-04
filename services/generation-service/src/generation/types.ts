@@ -3,6 +3,14 @@ import type { JsonObject } from "../providers/types.ts";
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
 export type PromptVisibility = "public" | "hidden";
+export type DefaultModerationStatus = "pending" | "approved";
+
+export function parseDefaultModeration(value: string | undefined, fallback: DefaultModerationStatus = "pending"): DefaultModerationStatus {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized !== "pending" && normalized !== "approved") throw new Error("GALLERY_DEFAULT_MODERATION must be 'pending' or 'approved'");
+  return normalized;
+}
 
 export interface GenerationWorkflowView {
   readonly slug: string;

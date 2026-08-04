@@ -20,6 +20,7 @@ import { GenerationQueueProcessor } from "./generation-queue-processor.ts";
 import { GenerationWorkerRuntime } from "./generation-worker.ts";
 import { PostgresGenerationJobRepository } from "./postgres-generation-job-repository.ts";
 import { createGenerationRedisConnections } from "./redis-connections.ts";
+import { parseDefaultModeration } from "../generation/types.ts";
 
 const databaseUrl = required("DATABASE_URL");
 const queueConfig = loadGenerationQueueConfig();
@@ -55,7 +56,7 @@ const temporaryRoot = path.resolve(required("GENERATION_TEMP_DIR"));
 const polling = new PollingService({ intervalMs: integer("GENERATION_POLL_INTERVAL_MS", 1000, 100, 60_000), maxAttempts: integer("GENERATION_POLL_MAX_ATTEMPTS", 600, 1, 7200) });
 const persistence = new ImagePersistenceService(storage, temporaryRoot, integer("GENERATION_REMOTE_DOWNLOAD_TIMEOUT_MS", 60_000, 1000, 300_000));
 const pipeline = new ProductionGenerationPipeline(polling, persistence, logger);
-const processor = new GenerationQueueProcessor(new PostgresGenerationJobRepository(pool), new ProviderSelectionPolicy(registry), pipeline, logger, {
+const processor = new GenerationQueueProcessor(new PostgresGenerationJobRepository(pool, { defaultModerationStatus: parseDefaultModeration(process.env.GALLERY_DEFAULT_MODERATION) }), new ProviderSelectionPolicy(registry), pipeline, logger, {
   retryBaseMs: integer("GENERATION_PROVIDER_RETRY_BASE_MS", 500, 0, 30_000), maxTotalCalls: integer("GENERATION_PROVIDER_MAX_TOTAL_CALLS", 6, 1, 10),
 });
 const redis = createGenerationRedisConnections(queueConfig, logger);

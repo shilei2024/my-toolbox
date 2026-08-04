@@ -126,6 +126,11 @@ site-packages/
 node_modules/
 dist/
 coverage/
+.npm-cache/
+/quick-lru.tgz
+
+# Machine-local npm mirror configuration (do not commit)
+apps/gallery-web/.npmrc
 
 # test reports (generated)
 tests/test_report.json

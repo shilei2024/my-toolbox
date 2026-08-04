@@ -1,6 +1,11 @@
 # Changelog
 
 ## 0.3.0 — 进行中
+- **M1.1 AI 作图可用性补全**: 新用户首次汇总自动发放一次性积分
+  （`BILLING_SIGNUP_GRANT`，默认 10，幂等账本）；迁移 `0007` 为四个 workflow
+  补齐 OpenAI/Gemini/即梦 默认模型绑定；Worker 支持 `GALLERY_DEFAULT_MODERATION`
+  决定生成即发布还是人工审核；Gallery Web 新增 `/login`、`/logout`、
+  `/api/me/session` 与导航头登录入口（`MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`）
 - **AI 作图迁移新链路**: 移除旧 Flask 工具 `tools/ai_image`（含模板、路由、
   Pollinations/OpenAI provider 配置面板），首页入口改为可配置外部链接
   （`tools_config.yaml` 的 `ai_image.external_url`，指向独立部署的

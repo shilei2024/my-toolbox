@@ -48,6 +48,14 @@ Phase 9 adds:
 
 Payments, credits and membership remain outside Phase 9.
 
+M1 adds the production loop and operational defaults:
+
+- signed internal Generation API (`/v1/generations`, `/v1/generation/workflows`) with durable create/get/cancel;
+- one-time `signup_grant` credits (`BILLING_SIGNUP_GRANT`, default 10) granted idempotently on first account summary;
+- remote-provider bindings for every active workflow (migration `0007`);
+- `GALLERY_DEFAULT_MODERATION` controlling immediate public publish vs. pending admin review;
+- Next.js login/logout redirects through `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`.
+
 ## Run tests
 
 ```powershell

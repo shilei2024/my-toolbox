@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
+import type { DefaultModerationStatus } from "../generation/types.ts";
 import type { ProductionGenerationResult } from "../pipeline/production-generation-pipeline.ts";
 import { PostgresProviderCatalog } from "../providers/postgres-catalog.ts";
 import type { ProviderAttemptEvent } from "../providers/multi-provider-executor.ts";
@@ -16,7 +17,12 @@ interface ClaimRow extends QueryResultRow {
 export class PostgresGenerationJobRepository implements GenerationJobRepository {
   readonly #pool: Pool;
   readonly #catalog: PostgresProviderCatalog;
-  constructor(pool: Pool) { this.#pool = pool; this.#catalog = new PostgresProviderCatalog(pool); }
+  readonly #defaultModerationStatus: DefaultModerationStatus;
+  constructor(pool: Pool, options: { readonly defaultModerationStatus?: DefaultModerationStatus } = {}) {
+    this.#pool = pool;
+    this.#catalog = new PostgresProviderCatalog(pool);
+    this.#defaultModerationStatus = options.defaultModerationStatus ?? "pending";
+  }
 
   async claim(jobId: string, _descriptor: QueueAttemptDescriptor): Promise<GenerationJobClaim> {
     const client = await this.#pool.connect();
@@ -103,10 +109,11 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
         const image = await client.query<{ id: string }>(`INSERT INTO ai.images (
             job_id, successful_attempt_id, creator_user_id, provider_id, workflow_version_id, slug, title,
             prompt, negative_prompt, provider_code_snapshot, model_snapshot, workflow_name_snapshot,
-            width, height, generation_ms, visibility, prompt_visibility, moderation_status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $7, $12, $13, $14, $15, $16, 'pending')
+            width, height, generation_ms, visibility, prompt_visibility, moderation_status, published_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $7, $12, $13, $14, $15, $16, $17,
+            CASE WHEN $17::ai.moderation_status = 'approved' AND $15::ai.image_visibility = 'public' THEN now() ELSE NULL END)
           ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id`, [jobId, attemptId, job.user_id, providerId, job.workflow_version_id,
-          `${jobId}-${index + 1}`, job.workflow_name, job.prompt, job.negative_prompt, result.providerCode, modelFrom(result.providerMetadata), asset.width, asset.height, result.generationDurationMs, job.visibility, job.prompt_visibility]);
+          `${jobId}-${index + 1}`, job.workflow_name, job.prompt, job.negative_prompt, result.providerCode, modelFrom(result.providerMetadata), asset.width, asset.height, result.generationDurationMs, job.visibility, job.prompt_visibility, this.#defaultModerationStatus]);
         await client.query(`INSERT INTO ai.image_assets (image_id, variant, storage_provider, bucket, region, object_key, public_url, mime_type, byte_size, width, height, sha256)
           VALUES ($1, 'original', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (image_id, variant) DO NOTHING`, [image.rows[0]!.id, asset.storageProvider, asset.bucket, asset.region, asset.objectKey,

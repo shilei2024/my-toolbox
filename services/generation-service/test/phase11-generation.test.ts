@@ -5,7 +5,7 @@ import { GenerationService } from "../src/generation/generation-service.ts";
 import { createGalleryHttpServer } from "../src/gallery/http-server.ts";
 import { InternalViewerContextCodec, USER_CONTEXT_HEADER, USER_CONTEXT_SIGNATURE_HEADER } from "../src/gallery/internal-auth.ts";
 import type { GenerationRepository } from "../src/generation/repository.ts";
-import type { CancelGenerationResult, CreateGenerationInput, GenerationView, GenerationWorkflowView } from "../src/generation/types.ts";
+import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerationInput, type GenerationView, type GenerationWorkflowView } from "../src/generation/types.ts";
 
 const generation: GenerationView = {
   id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像",
@@ -56,6 +56,13 @@ describe("M1 generation API domain", () => {
 
   it("fails closed for invalid credit configuration", () => {
     assert.throws(() => new GenerationService({ repository: new FakeRepository(), defaultCreditCost: "-1" }), /GENERATION_DEFAULT_CREDIT_COST/);
+  });
+
+  it("parses the default moderation policy fail-closed", () => {
+    assert.equal(parseDefaultModeration(undefined), "pending");
+    assert.equal(parseDefaultModeration("approved"), "approved");
+    assert.equal(parseDefaultModeration("APPROVED"), "approved");
+    assert.throws(() => parseDefaultModeration("auto"), /GALLERY_DEFAULT_MODERATION/);
   });
 
   it("exposes the signed internal HTTP contract and returns 202 for durable creation", async () => {

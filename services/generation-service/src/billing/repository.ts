@@ -2,6 +2,7 @@ import type { BillingSummary, NormalizedPaymentEvent, PaymentOrder, StoredPaymen
 
 export interface BillingRepository {
   summary(userId?: number): Promise<BillingSummary>;
+  ensureSignupGrant(userId: number, amount: string): Promise<void>;
   createOrGetOrder(userId: number, planSlug: string, idempotencyKey: string): Promise<PaymentOrder>;
   customerReference(userId: number, provider: string): Promise<string | undefined>;
   markCheckoutOpen(orderId: string, externalCheckoutId: string, checkoutUrl: string, expiresAt?: string): Promise<void>;

@@ -84,6 +84,17 @@ for provider in OPENAI GEMINI JIMENG; do
   fi
 done
 
+case "$(get_value GALLERY_DEFAULT_MODERATION)" in
+  ""|pending|approved) ;;
+  *) echo "preflight failed: GALLERY_DEFAULT_MODERATION must be pending or approved" >&2; exit 1 ;;
+esac
+
+signup_grant="$(get_value BILLING_SIGNUP_GRANT)"
+if [ -n "$signup_grant" ] && ! printf '%s' "$signup_grant" | grep -Eq '^(0|[1-9][0-9]{0,8})(\.[0-9]{1,4})?$'; then
+  echo "preflight failed: BILLING_SIGNUP_GRANT must be a non-negative decimal with up to 4 fractional digits" >&2
+  exit 1
+fi
+
 if command -v stat >/dev/null 2>&1; then
   permissions="$(stat -c '%a' "$env_file" 2>/dev/null || true)"
   if [ -n "$permissions" ] && [ "$permissions" != "600" ] && [ "$permissions" != "400" ]; then

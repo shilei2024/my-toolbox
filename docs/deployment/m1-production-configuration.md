@@ -125,6 +125,8 @@ CAM 权限只授予生产 Bucket 或生产前缀所需的对象上传、读取/�
 | `MAVIS_AUTH_INTROSPECTION_URL` | 已上线 Flask 的内部会话检查 HTTPS URL |
 | `GALLERY_INTROSPECTION_SECRET` | Flask 与 Gallery 专用的另一把独立密钥 |
 | `GALLERY_PUBLIC_ORIGIN` | Gallery 最终生产 HTTPS Origin，不带路径 |
+| `MAVIS_AUTH_LOGIN_URL` | 已上线 Flask 的登录页 HTTPS URL（如 `https://tools.example.com/login`） |
+| `MAVIS_AUTH_LOGOUT_URL` | 已上线 Flask 的退出页 HTTPS URL（如 `https://tools.example.com/logout`），可选 |
 
 这些值只选择 **Production**，不要误加到 Preview/Development。环境变量更改后必须生成一个新 deployment；不要把未经验证的 Preview 直接重新构建成不同产物，正式发布应提升同一已验证产物。
 
@@ -137,6 +139,15 @@ CAM 权限只授予生产 Bucket 或生产前缀所需的对象上传、读取/�
 
 普通 `*.vercel.app` 域名不能共享你的业务域 Cookie；正式共用用户必须绑定受控业务域名。
 
+服务端新增可选配置：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `BILLING_SIGNUP_GRANT` | `10` | 新用户首次打开账户汇总时发放的一次性积分；`0` 表示关闭 |
+| `GALLERY_DEFAULT_MODERATION` | `pending` | 新图片默认审核状态；`approved` 会在生成完成时直接发布公开图片（生产慎用） |
+
+数据库迁移按编号应用到 `0007_remote_provider_bindings.sql`；`0007` 仅为目录数据（bindings），可安全回滚（禁用 Provider 即可，不删除数据）。
+
 ## 5. 当前 No-Go 阻断项
 
 下列任一项未完成都不能切生产流量：
@@ -146,6 +157,7 @@ CAM 权限只授予生产 Bucket 或生产前缀所需的对象上传、读取/�
 - 数据库备份成功并记录可恢复 ID，恢复演练和回滚负责人明确；
 - 同一个镜像 digest 已完成 Staging 真实链路验证；
 - 登录、创建任务、扣减积分、队列消费、COS 落盘、图库查询、取消/失败补偿完成验收；
+- 新用户积分到账、审核/发布策略、Gallery 登录入口完成验收；
 - 旧 Vercel deployment ID、旧后端镜像 digest、DNS/TLS 和监控告警已记录。
 
 ## 6. 回滚

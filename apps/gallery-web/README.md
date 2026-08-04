@@ -16,6 +16,7 @@ npm.cmd run dev
 - `MAVIS_AUTH_INTROSPECTION_URL`
 - `GALLERY_INTROSPECTION_SECRET`
 - `GALLERY_PUBLIC_ORIGIN`
+- `MAVIS_AUTH_LOGIN_URL`（登录入口；可选 `MAVIS_AUTH_LOGOUT_URL`）
 
 完整变量、信任边界和部署顺序见 `../../docs/deployment/phase-6-configuration.md` 与 `../../docs/deployment/phase-6-deployment.md`。
 

@@ -12,8 +12,19 @@
 
 ## 验证
 
-- Generation Service typecheck 与 57 项测试通过。
+- Generation Service typecheck 与 62 项测试通过。
 - Gallery Web ESLint 与 Next.js 生产构建通过。
+
+## M1.1 可用性补全
+
+解决 M1 代码完成后仍无法开箱使用的四个缺口：
+
+- 新用户积分：`BILLING_SIGNUP_GRANT`（默认 10）在用户首次打开账户汇总时幂等发放 `signup_grant`，新注册用户不再因 0 积分无法创建任务；设为 `0` 可完全关闭。
+- 远端 Provider 绑定：新增 `0007_remote_provider_bindings.sql`，为四个 workflow 补齐 OpenAI / Gemini / 即梦 的默认模型绑定（Provider 默认仍为 disabled），管理员只需在后台启用即可路由，无需手写 SQL。
+- 发布策略：`GALLERY_DEFAULT_MODERATION=pending|approved`（默认 pending）。`approved` 时公开图片在生成完成时直接写入 `published_at`，便于 Staging 快速验收；生产默认仍要求人工审核。
+- 登录入口：Gallery Web 新增 `/login`、`/logout` 跳转路由、`/api/me/session` 会话路由和导航头登录/账号入口，通过 `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL` 指向既有 Flask 登录页，修复定价页 `/login` 404 与访客无法发现登录入口的问题。
+
+验证：Generation Service typecheck + 62 项测试、Gallery Web ESLint + SEO 测试 + 生产构建、Python 迁移契约测试 14 项全部通过。
 
 ## 待 Staging 验证
 

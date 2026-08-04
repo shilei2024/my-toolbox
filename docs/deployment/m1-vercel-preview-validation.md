@@ -6,7 +6,7 @@ Vercel 只部署 `apps/gallery-web`。Generation API、Dispatcher、Worker、Pos
 
 ## 1. 数据库
 
-备份 Staging 后按编号应用到 `0006_generation_api_catalog.sql`。预期新增四个 workflow，ComfyUI/Mock Provider 默认均为 `disabled`。回滚采用禁用目录项，不删除已引用数据。
+备份 Staging 后按编号应用到 `0007_remote_provider_bindings.sql`。预期新增四个 workflow，ComfyUI/Mock Provider 默认均为 `disabled`，并为 OpenAI/Gemini/即梦 准备默认模型绑定。回滚采用禁用目录项，不删除已引用数据。
 
 ## 2. 后端进程
 
@@ -26,6 +26,8 @@ Staging Mock：设置 `APP_ENV=staging`、`GENERATION_ALLOW_MOCK_PROVIDER=true`�
 
 Worker 新增变量：`GENERATION_TEMP_DIR`、`GENERATION_POLL_INTERVAL_MS`、`GENERATION_POLL_MAX_ATTEMPTS`、`GENERATION_REMOTE_DOWNLOAD_TIMEOUT_MS`、`GENERATION_PROVIDER_RETRY_BASE_MS`、`GENERATION_PROVIDER_MAX_TOTAL_CALLS`。Dispatcher 使用 `GENERATION_OUTBOX_POLL_MS`。API 使用 `GENERATION_DEFAULT_CREDIT_COST`。其余 Redis/BullMQ、COS、ComfyUI 与远程 Provider 变量沿用 Phase 4/5/9。
 
+Worker 审核变量：`GALLERY_DEFAULT_MODERATION=pending|approved`（`approved` 仅用于快速验收公开画廊）。API 计费变量：`BILLING_SIGNUP_GRANT=10`（新用户首次汇总时发放；`0` 关闭）。
+
 启用 ComfyUI 时还必须设置实际已安装的 `COMFYUI_DEFAULT_MODEL`；可选调节 `COMFYUI_DEFAULT_STEPS`、`COMFYUI_DEFAULT_CFG`、`COMFYUI_DEFAULT_SAMPLER`、`COMFYUI_DEFAULT_SCHEDULER`。默认采样参数仅是起点，模型文件名绝不在代码中猜测。
 
 ## 3. Vercel Preview 变量
@@ -35,6 +37,7 @@ Worker 新增变量：`GENERATION_TEMP_DIR`、`GENERATION_POLL_INTERVAL_MS`、`G
 - `MAVIS_AUTH_INTROSPECTION_URL`：Staging Flask `/auth/internal/gallery/session`。
 - `GALLERY_INTROSPECTION_SECRET`：与 Staging Flask 相同。
 - `GALLERY_PUBLIC_ORIGIN`：Preview 固定 Origin/branch alias。
+- `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`：Staging Flask 的登录/退出页 HTTPS URL。
 
 这些变量都禁止添加 `NEXT_PUBLIC_` 前缀。
 
@@ -59,6 +62,7 @@ npx vercel build
 ## 5. Preview 验收
 
 1. 未登录能访问创作页但不能提交；登录后显示共享账户积分。
+1. 新注册用户首次打开创作页/账单后积分到账（`signup_grant`），重复访问不重复发放。
 2. 同一个 Idempotency-Key 重试只产生一个任务和一笔预留。
 3. 状态收敛为 pending → running → completed，作品链接可打开，COS 与 asset 记录一致。
 4. 排队/运行取消最终变为 cancelled，未消费积分释放。
@@ -68,7 +72,7 @@ npx vercel build
 
 ## 常见失败、恢复与回滚
 
-- 没有工作流：Provider 仍 disabled、缺 binding 或 `0006` 未应用。
+- 没有工作流：Provider 仍 disabled、缺 binding 或 `0007` 未应用。
 - 一直 pending：检查 Dispatcher、outbox `published_at` 与 Redis。
 - 一直 running：检查 Worker、Provider、COS；不要手工改 completed。
 - 401：检查 Flask introspection 和两个独立 HMAC secret。
