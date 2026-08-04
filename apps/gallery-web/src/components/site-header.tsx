@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { publicAdminConsoleUrl } from "@/lib/admin-links";
 
 interface SessionView {
   readonly role: "guest" | "user" | "admin";
@@ -33,6 +34,9 @@ export function SiteHeader() {
       {session === undefined ? null : authenticated
         ? <Link className="nav-link auth-link" href="/billing">我的账号</Link>
         : <Link className="button" href={`/login?next=${encodeURIComponent(returnTo)}`}>登录</Link>}
+      {session?.role === "admin" && publicAdminConsoleUrl() !== undefined
+        ? <Link className="nav-link auth-link" href={publicAdminConsoleUrl()!}>后台</Link>
+        : null}
       <Link className="button" href="/billing">积分与账单</Link><Link className="button primary" href="/create">开始创作</Link>
     </div>
   </div></header>;

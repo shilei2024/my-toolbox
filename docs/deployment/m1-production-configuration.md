@@ -137,6 +137,8 @@ CAM 权限只授予生产 Bucket 或生产前缀所需的对象上传、读取/�
 - `SESSION_COOKIE_SECURE=true`
 - 与 `GALLERY_INTROSPECTION_SECRET` 配对的内部鉴权密钥
 - `APP_BASE_URL=https://<主站生产域名>`（用于预检验证共享 Cookie 域）
+- `GALLERY_SERVICE_BASE_URL=https://<Generation API 生产域名>`（统一后台读取管理数据）
+- `GALLERY_INTERNAL_HMAC_SECRET=<与 Vercel 完全一致的 32+ 字节密钥>`（统一后台签名）
 
 普通 `*.vercel.app` 域名不能共享你的业务域 Cookie；正式共用用户必须绑定受控业务域名。
 
@@ -154,6 +156,12 @@ flask --app app check-gallery-integration
 | `introspection_secret` | `GALLERY_INTROSPECTION_SECRET` 至少 32 字节，且与 Vercel Production 完全一致 |
 | `secure_cookie` | 生产环境把 `SESSION_COOKIE_SECURE=true` |
 | `cookie_domain` / `shared_cookie_domain` | 填写 `SESSION_COOKIE_DOMAIN`，且主站与 Gallery 都位于该父域下 |
+| `gallery_service_url` / `gallery_hmac_secret` | 填写 `GALLERY_SERVICE_BASE_URL`（HTTPS）与 `GALLERY_INTERNAL_HMAC_SECRET`（≥32 字节） |
+
+Vercel Production 还需要为 Gallery Web 配置：
+
+- `MAVIS_ADMIN_URL=https://<主站生产域名>/admin/gallery`（统一后台，`/admin` 自动跳转）
+- `NEXT_PUBLIC_MAVIS_ADMIN_URL=https://<主站生产域名>/admin/gallery`（导航栏“后台”入口）
 
 服务端新增可选配置：
 

@@ -92,6 +92,12 @@ class Config:
     # Keeping this environment-specific avoids committing Preview/Production URLs.
     AI_IMAGE_EXTERNAL_URL: str = os.environ.get("AI_IMAGE_EXTERNAL_URL", "").strip()
 
+    # --- Gallery admin bridge (Flask admin -> Generation Service) ---
+    # Same contract the Next.js BFF uses: a public HTTPS API origin plus the
+    # shared HMAC secret that signs the internal admin viewer context.
+    GALLERY_SERVICE_BASE_URL: str = os.environ.get("GALLERY_SERVICE_BASE_URL", "").strip()
+    GALLERY_INTERNAL_HMAC_SECRET: str = os.environ.get("GALLERY_INTERNAL_HMAC_SECRET", "")
+
     # --- Paths ---
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     INSTANCE_DIR: Path = BASE_DIR / "instance"

@@ -26,6 +26,7 @@
 | 11 | 桥接预检 | Flask 与 Gallery 两侧预检全部 PASS 且退出码 0，输出不含密钥 | 服务器执行 `flask --app app check-gallery-integration`；本地执行 Gallery 预检脚本 |
 | 12 | 回跳安全 | Gallery 发起登录/注册/退出后回到原页面；伪造 `next` 只回主站首页，不跳外部域名 | 浏览器实测 + 契约测试 `tests/test_gallery_round_trip.py` |
 | 13 | 身份透传 | Gallery 正确显示登录账号/角色；缺失或错误内省密钥时返回 404 且不泄露身份字段 | 契约测试 + 浏览器 Network 检查 |
+| 14 | 统一管理后台 | 主站 `/admin/gallery` 可查看概览/审核/Provider/工作流/任务/审计并执行审核与配置变更；Gallery `/admin` 自动跳转主站；非管理员访问被拒 | 浏览器实测 + `tests/test_admin_gallery_routes.py` |
 
 ## 记录要求
 

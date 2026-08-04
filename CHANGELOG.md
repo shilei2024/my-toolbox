@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 · 统一管理后台 / 2026-08-05
+- **合并两个后台**：`mindfulpenpal.com/admin` 成为唯一管理入口，新增 AI 作图模块
+  （`/admin/gallery`），覆盖概览、内容审核、Provider、工作流、生成任务与审计记录；
+  `gallery.mindfulpenpal.com/admin` 配置 `MAVIS_ADMIN_URL` 后 307 重定向到主站，
+  Gallery 导航栏向管理员显示“后台”入口。
+- **Flask 签名直连**：新增 `utils/gallery_admin_client.py`，用与 Next.js BFF 相同的
+  60 秒 HMAC Admin Context 调用 Generation Service `/v1/admin/*`，服务端 RBAC、
+  乐观锁与审计不变；新增 `GALLERY_SERVICE_BASE_URL` / `GALLERY_INTERNAL_HMAC_SECRET`
+  配置与预检项。
+- **权限与降级**：非管理员访问统一后台返回 403；管理服务未配置/不可用时页面友好降级，
+  不泄露密钥与内网信息。
+- **测试与文档**：新增签名客户端与后台路由契约测试；更新 Phase 8 架构、部署、环境变量、
+  上线验收文档。
+
 ## 0.4.4 · 优化 / 2026-08-04
 - **回跳统一与加固**：注册、登录、退出共用 `_safe_next_url` 白名单，注册/登录页之间透传 `next`；
   拒绝控制字符、反斜杠、携带账号密码的绝对地址，防止开放重定向变体。

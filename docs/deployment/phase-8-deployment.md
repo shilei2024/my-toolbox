@@ -8,6 +8,9 @@
 4. 使用测试管理员验证 dashboard 和一次无风险 Workflow 排序更新。
 5. 部署 Next.js，验证 `/admin` 为 `noindex,nofollow`，跨 Origin 写请求为 403。
 6. 执行一次审核操作，确认图片公开状态、Gallery 缓存失效、`moderation_events` 和 `audit_logs` 同步产生。
+7. 配置统一后台：Flask 设置 `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`，
+   Vercel 设置 `MAVIS_ADMIN_URL` 与 `NEXT_PUBLIC_MAVIS_ADMIN_URL`；主站 `/admin/gallery` 可读可写，
+   Gallery `/admin` 自动跳转主站，导航栏向管理员显示“后台”。
 
 ## 配置
 
@@ -18,6 +21,7 @@ Phase 8 不新增密钥。继续复用：
 - `MAVIS_AUTH_INTROSPECTION_URL`
 - `GALLERY_INTROSPECTION_SECRET`
 - `GALLERY_PUBLIC_ORIGIN`
+- `MAVIS_ADMIN_URL` / `NEXT_PUBLIC_MAVIS_ADMIN_URL`（统一后台入口）
 
 Flask `public.users.is_admin` 是当前角色事实。生产环境应限制 Generation Service 只允许 Next.js/BFF 私网访问，并为管理员账户启用强密码和后续 MFA。
 

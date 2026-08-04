@@ -63,6 +63,17 @@ Flask 主站与 Vercel Gallery Web 通过共享 Cookie 与签名会话内省识�
 | `MAVIS_AUTH_LOGIN_URL` | Vercel | 空 | Flask 登录页 HTTPS URL；未配置时 Gallery 隐藏登录入口 |
 | `MAVIS_AUTH_LOGOUT_URL` | Vercel | 空 | Flask 退出页 HTTPS URL；可选，未配置时隐藏退出入口 |
 
+### 统一管理后台变量
+
+主站 Flask 后台直连 Generation Service 管理 API，使用与 Next.js BFF 相同的 HMAC 契约；Gallery 不再维护独立后台。
+
+| 变量 | 归属 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `GALLERY_SERVICE_BASE_URL` | Flask 主站 | 空 | Generation Service 公网 HTTPS API Origin（与 Vercel 侧同名变量一致） |
+| `GALLERY_INTERNAL_HMAC_SECRET` | Flask 主站 + Generation Service | 空 | 管理上下文签名密钥，至少 32 个 UTF-8 字节，与 Vercel 侧一致 |
+| `MAVIS_ADMIN_URL` | Vercel（服务端） | 空 | 统一后台地址（如 `https://mindfulpenpal.com/admin/gallery`）；配置后 Gallery `/admin` 自动重定向 |
+| `NEXT_PUBLIC_MAVIS_ADMIN_URL` | Vercel（公开） | 空 | 同一后台地址，供 Gallery 导航栏对管理员显示“后台”入口；不含敏感信息 |
+
 ### 预检命令（不输出密钥）
 
 Flask 主站：
