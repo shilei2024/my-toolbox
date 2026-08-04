@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 · 即梦全链路优化 / 2026-08-05
+- **即梦多张生成**：Seedream 单次只返回一张，Adapter 对 `count>1` 逐张扇出调用，
+  用户 seed 依次递增（seed + index），平台 1–8 张契约全部可用；新增契约测试。
+- **队列未配置 fail-fast**：Generation API 在 Redis/BullMQ 未配置时创建请求直接返回
+  503，不再产生永远停留在 pending 的任务。
+- **创作页体验**：账单接口故障不再阻塞工作流加载；任务轮询增加指数退避（2s→10s）
+  并在瞬时失败后继续轮询；未登录时“开始生成”变为登录链接（`/login?next=/create`）。
+- **真实即梦冒烟**：新增 `npm run smoke:jimeng`（支持 `--health`），只输出安全字段，
+  不打印 API key；生产服务器可用其完成 Provider 级连通性与生成验证。
+- **统一后台并入主线**：上一分支的 `/admin/gallery` 统一后台随本次发布一起合入 main。
+
 ## 0.5.0 · 统一管理后台 / 2026-08-05
 - **合并两个后台**：`mindfulpenpal.com/admin` 成为唯一管理入口，新增 AI 作图模块
   （`/admin/gallery`），覆盖概览、内容审核、Provider、工作流、生成任务与审计记录；

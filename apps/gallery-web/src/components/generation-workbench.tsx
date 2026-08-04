@@ -22,19 +22,20 @@ export function GenerationWorkbench() {
   const [billing, setBilling] = useState<BillingSummary>();
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pollRef = useRef<{ readonly timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const creationAttemptRef = useRef<{ readonly payload: string; readonly key: string } | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetch("/api/generation/workflows", { cache: "no-store" }).then(readJson),
-      fetch("/api/billing/summary", { cache: "no-store" }).then(async (response) => response.ok ? response.json() as Promise<BillingSummary> : undefined),
-    ]).then(([workflowBody, billingBody]) => {
-      if (!active) return;
+    fetch("/api/generation/workflows", { cache: "no-store" }).then(readJson).then(async (workflowBody) => {
       const items = (workflowBody as { items?: unknown }).items;
       if (!Array.isArray(items) || items.length === 0) throw new Error("暂时没有可用的创作方式。");
       const next = items as GenerationWorkflow[];
+      // Billing outages must not block the composer; the account note just stays empty.
+      const billingBody = await fetch("/api/billing/summary", { cache: "no-store" })
+        .then(async (response) => response.ok ? response.json() as Promise<BillingSummary> : undefined)
+        .catch(() => undefined);
+      if (!active) return;
       setWorkflows(next);
       setSelected(next[0]!.slug);
       setSize(`${next[0]!.defaults.width}x${next[0]!.defaults.height}`);
@@ -43,7 +44,7 @@ export function GenerationWorkbench() {
       setBilling(billingBody);
       setLoadState("ready");
     }).catch((error) => { if (active) { setLoadState("error"); setMessage(error instanceof Error ? error.message : "创作服务暂时不可用。"); } });
-    return () => { active = false; if (pollRef.current) clearTimeout(pollRef.current); };
+    return () => { active = false; if (pollRef.current?.timer) clearTimeout(pollRef.current.timer); };
   }, []);
 
   const workflow = useMemo(() => workflows.find((item) => item.slug === selected), [workflows, selected]);
@@ -70,15 +71,21 @@ export function GenerationWorkbench() {
     finally { setSubmitting(false); }
   }
 
-  function schedulePoll(id: string) {
-    if (pollRef.current) clearTimeout(pollRef.current);
-    pollRef.current = setTimeout(async () => {
+  function schedulePoll(id: string, nextDelayMs = 2000) {
+    if (pollRef.current?.timer) clearTimeout(pollRef.current.timer);
+    const timer = setTimeout(async () => {
       try {
         const current = await fetch(`/api/generations/${encodeURIComponent(id)}`, { cache: "no-store" }).then(readJson) as GenerationView;
         setGeneration(current);
-        if (!terminal.has(current.status)) schedulePoll(id);
-      } catch (error) { setMessage(error instanceof Error ? error.message : "任务状态更新失败。"); }
-    }, 2000);
+        if (!terminal.has(current.status)) schedulePoll(id, 2000);
+      } catch (error) {
+        // Transient failures must not silently stop progress updates; back off
+        // and keep polling so the task can still reach its terminal state.
+        setMessage(error instanceof Error ? error.message : "任务状态更新失败。");
+        schedulePoll(id, Math.min(nextDelayMs * 2, 10_000));
+      }
+    }, nextDelayMs);
+    pollRef.current = { timer };
   }
 
   async function cancel() {
@@ -116,7 +123,9 @@ export function GenerationWorkbench() {
         </div><label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label></div>
 
         {message && loadState !== "error" ? <div className="inline-error" role="alert">{message}</div> : null}
-        <div className="composer-submit"><div><span>本次预计</span><strong>{estimate} 积分</strong></div><button className="button primary create-submit" type="submit" disabled={!loggedIn || loadState !== "ready" || submitting || prompt.trim().length === 0}>{submitting ? "正在创建…" : loggedIn ? "开始生成" : "登录后生成"}</button></div>
+        <div className="composer-submit"><div><span>本次预计</span><strong>{estimate} 积分</strong></div>{loggedIn
+          ? <button className="button primary create-submit" type="submit" disabled={loadState !== "ready" || submitting || prompt.trim().length === 0}>{submitting ? "正在创建…" : "开始生成"}</button>
+          : <Link className="button primary create-submit" href="/login?next=/create">登录后生成</Link>}</div>
       </form>
 
       <aside className="creation-preview" aria-labelledby="preview-title">

@@ -32,7 +32,7 @@ flowchart LR
 | `comfyui` | `ComfyUIProvider` | text/image-to-image | 临时文件 | 支持 | 异步轮询、定向取消 |
 | `openai` | `OpenAIImageProvider` | text-to-image | Base64 | 不支持 | 同步；不可轮询/取消 |
 | `gemini` | `GeminiImageProvider` | text-to-image | Base64 inline data | 不支持 | 同步；不可轮询/取消 |
-| `jimeng` | `JimengImageProvider` | text-to-image | Base64 | 支持 | 同步；不可轮询/取消 |
+| `jimeng` | `JimengImageProvider` | text-to-image | Base64 | 支持 | 同步；不可轮询/取消；`count>1` 时按张扇出调用，seed 依次递增 |
 
 远程 Provider 在本阶段声明 `maxOutputs=1`。多图请求仍可路由给支持该能力的 ComfyUI；不会假装第三方模型能稳定返回指定数量。后续如官方批处理契约稳定，可通过 capability 和 binding 单独启用。
 
@@ -99,6 +99,9 @@ flowchart LR
 - TypeScript strict / exact optional property 类型检查通过；
 - Phase 3–9 常规测试 48/48 通过；
 - OpenAI、Gemini、即梦请求/响应契约使用注入 Fetch 验证，没有产生外部费用；
+- 即梦单次只返回一张图；Adapter 对 `count>1` 逐张调用（seed + index），保证平台 1–8 张契约可用；
+- Generation API 在 Redis/BullMQ 未配置时对创建请求直接返回 503，避免产出永远无法消费的 pending 任务；
+- 真实即梦冒烟：`npm run smoke:jimeng`（需 `JIMENG_API_KEY`），`--health` 只做连通性检查；
 - PostgreSQL 18 实际执行 migration 0001–0004；Phase 9 catalog/FK 集成测试 2/2 通过；
 - 原 Provider contract、ComfyUI、BullMQ、Gallery、SEO 和 Admin 回归全部通过；
 - 浏览器 request、Redis payload 和 Gallery frontend 均保持 Provider 无感。
