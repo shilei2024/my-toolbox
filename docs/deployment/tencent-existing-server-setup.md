@@ -456,3 +456,8 @@ Vercel 项目 Settings → Environment Variables → Production：
 | 图片上传 COS 403 | CAM 策略地域/桶名/账号ID 写错，或服务器时间不准 |
 | 公开图片 403 | 桶策略没有放行 `images/jobs/*` |
 | 积分不足 | 新用户首次进创建页才到账；`BILLING_SIGNUP_GRANT=0` 表示关闭 |
+| Caddy 报 `address already in use`（443） | 服务器上有 Tailscale 占用端口：`sudo systemctl stop tailscaled && sudo systemctl disable tailscaled`，再重建 caddy |
+| Caddy 容器没有网络（`docker inspect ... NetworkSettings.Networks` 为 `{}`） | `docker compose ... up -d --force-recreate --no-build caddy` 强制重建 |
+| 容器内 DNS 报 `network is unreachable` 或 `127.0.0.53` 拒绝 | 在 `/etc/docker/daemon.json` 配置 `"dns": ["223.5.5.5", "119.29.29.29"]` 后重启 Docker |
+| dispatcher/worker 报 `DEPTH_ZERO_SELF_SIGNED_CERT` | `DATABASE_URL` 加 `uselibpqcompat=true&sslmode=require`（自签证书场景，node pg 客户端兼容 libpq 语义） |
+| api 报 `[ioredis] ETIMEDOUT` | `REDIS_URL` 必须写 `redis://redis:6379`（内网 Redis 无 TLS），并保持 `ALLOW_PLAINTEXT_REDIS=true` |
