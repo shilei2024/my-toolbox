@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.4 · 优化 / 2026-08-04
+- **回跳统一与加固**：注册、登录、退出共用 `_safe_next_url` 白名单，注册/登录页之间透传 `next`；
+  拒绝控制字符、反斜杠、携带账号密码的绝对地址，防止开放重定向变体。
+- **桥接配置可审计**：Flask 新增 `flask --app app check-gallery-integration` 预检 CLI，
+  Gallery 新增 `scripts/check-bridge-config.ts` 预检脚本，只报告变量名/状态，不输出密钥。
+- **契约测试**：新增 `tests/test_gallery_round_trip.py`，覆盖注册→回跳→会话内省→退出全链路、
+  伪造 `next` 拒绝、内省 fail-closed 与预检退出码；Gallery 新增桥接配置检查单测。
+- **文档与模板**：`.env.example` 补充 `SESSION_COOKIE_SECURE`；部署/验收文档补充预检命令与验收项。
+
 ## 0.4.3 · 修复 / 2026-08-04
 - **修复登录桥路径**：Flask introspection 路由实际为 `/internal/gallery/session`，
   部署文档此前误写为 `/auth/internal/gallery/session`，导致 Gallery 登录桥一直 404

@@ -6,6 +6,7 @@ from flask import Flask
 from flask_login import UserMixin
 
 from auth.routes import auth_bp
+from auth.routes import _safe_next_url
 from extensions import login_manager
 
 
@@ -63,6 +64,29 @@ class GalleryAuthBridgeTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"role": "admin", "userId": 1})
+
+    def test_gallery_return_url_allows_only_configured_https_origin(self):
+        gallery = "https://gallery.example.com/create"
+        self.assertEqual(
+            _safe_next_url("https://gallery.example.com/my-images?cursor=1", gallery),
+            "https://gallery.example.com/my-images?cursor=1",
+        )
+        self.assertEqual(
+            _safe_next_url("https://gallery.example.com:443/my-images", gallery),
+            "https://gallery.example.com:443/my-images",
+        )
+        self.assertEqual(_safe_next_url("/billing", gallery), "/billing")
+        self.assertIsNone(_safe_next_url("//evil.example/steal", gallery))
+        self.assertIsNone(_safe_next_url("https://evil.example/steal", gallery))
+        self.assertIsNone(_safe_next_url("http://gallery.example.com/steal", gallery))
+        self.assertIsNone(_safe_next_url("https://gallery.example.com:8443/steal", gallery))
+        self.assertIsNone(_safe_next_url("https://user:pass@gallery.example.com/steal", gallery))
+        self.assertIsNone(_safe_next_url("https://gallery.example.com./steal", gallery))
+
+    def test_gallery_return_url_rejects_header_and_path_smuggling(self):
+        gallery = "https://gallery.example.com/create"
+        for value in ("/\nevil.example/steal", "/\revil.example/steal", "/\\evil.example/steal", "/ evil.example/steal"):
+            self.assertIsNone(_safe_next_url(value, gallery), value)
 
 
 if __name__ == "__main__":

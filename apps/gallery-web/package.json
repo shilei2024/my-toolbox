@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:seo": "node --experimental-strip-types --test test/seo.test.ts"
+    "test": "node --experimental-strip-types --test test/seo.test.ts test/bridge-config.test.ts",
+    "test:seo": "node --experimental-strip-types --test test/seo.test.ts",
+    "test:bridge": "node --experimental-strip-types --test test/bridge-config.test.ts"
   },
   "dependencies": {
     "next": "16.2.12",

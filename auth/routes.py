@@ -20,9 +20,13 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
 
     `external_url` comes from AI_IMAGE_EXTERNAL_URL (e.g. the Gallery Web), so
     login/logout initiated from Gallery can return to the original page without
-    enabling open redirects to arbitrary hosts.
+    enabling open redirects to arbitrary hosts. Control characters, whitespace
+    and backslashes are rejected because they can smuggle header or URL
+    variants; absolute URLs carrying userinfo are rejected as well.
     """
     if not value:
+        return None
+    if any(char.isspace() or char == "\\" for char in value):
         return None
     if value.startswith("/") and not value.startswith("//"):
         return value
@@ -37,6 +41,8 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
         candidate.scheme == "https"
         and candidate.hostname == external.hostname
         and (candidate.port or 443) == (external.port or 443)
+        and candidate.username is None
+        and candidate.password is None
     ):
         return value
     return None
@@ -44,8 +50,9 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
 
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
+    next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     if current_user.is_authenticated:
-        return redirect(url_for("home"))
+        return redirect(next_url or url_for("home"))
 
     form = RegisterForm()
     if form.validate_on_submit():
@@ -53,7 +60,7 @@ def register():
         existing = db.session.query(User).filter_by(email=email).one_or_none()
         if existing is not None:
             flash("该邮箱已注册，请直接登录。", "warning")
-            return redirect(url_for("auth.login"))
+            return redirect(url_for("auth.login", **({"next": next_url} if next_url else {})))
 
         user = User(email=email, is_admin=False, is_active_user=True)
         user.set_password(form.password.data)
@@ -62,10 +69,9 @@ def register():
 
         login_user(user, remember=True)
         flash("注册成功，欢迎！", "success")
-        next_url = request.args.get("next") or "/"
-        return redirect(next_url)
+        return redirect(next_url or "/")
 
-    return render_template("register.html", form=form)
+    return render_template("register.html", form=form, next_url=next_url)
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -80,10 +86,10 @@ def login():
         user = db.session.query(User).filter_by(email=email).one_or_none()
         if user is None or not user.check_password(form.password.data):
             flash("邮箱或密码错误。", "danger")
-            return render_template("login.html", form=form), 401
+            return render_template("login.html", form=form, next_url=next_url), 401
         if not user.is_active_user:
             flash("账号已被禁用，请联系管理员。", "danger")
-            return render_template("login.html", form=form), 403
+            return render_template("login.html", form=form, next_url=next_url), 403
 
         user.last_login_at = datetime.now(timezone.utc)
         db.session.commit()
@@ -92,7 +98,7 @@ def login():
 
         return redirect(next_url or "/")
 
-    return render_template("login.html", form=form)
+    return render_template("login.html", form=form, next_url=next_url)
 
 
 @auth_bp.route("/logout", methods=["GET", "POST"])

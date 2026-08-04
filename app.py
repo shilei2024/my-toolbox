@@ -465,6 +465,17 @@ def _register_cli(app: Flask) -> None:
             for t in list_enabled_tools():
                 print(f"- {t.id:15s} {t.name:20s} {t.route} (enabled={t.enabled})")
 
+    @app.cli.command("check-gallery-integration")
+    def check_gallery_integration_cmd():  # noqa: ANN202
+        """Validate bridge settings without printing any secret values."""
+        from utils.integration_check import gallery_integration_checks
+
+        checks = gallery_integration_checks(app)
+        for check in checks:
+            print(f"[{'PASS' if check.ok else 'FAIL'}] {check.name}: {check.message}")
+        if not all(check.ok for check in checks):
+            raise SystemExit(1)
+
 
 def _seed_admin(app: Flask, force: bool = False) -> None:
     """Idempotently create the bootstrap admin."""
