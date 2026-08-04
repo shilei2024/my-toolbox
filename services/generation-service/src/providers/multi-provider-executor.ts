@@ -40,7 +40,7 @@ export class MultiProviderExecutor {
     if (!Number.isInteger(this.#maxTotalCalls) || this.#maxTotalCalls < 1) throw new TypeError("maxTotalCalls must be a positive integer");
   }
 
-  async execute(request: GenerationRequest, bindings: readonly ProviderBinding[], context: ProviderCallContext, onAttempt: (event: ProviderAttemptEvent) => Promise<void> | void = () => undefined): Promise<ProductionGenerationResult> {
+  async execute(request: GenerationRequest, bindings: readonly ProviderBinding[], context: ProviderCallContext, onAttempt: (event: ProviderAttemptEvent) => Promise<string | void> | string | void = () => undefined): Promise<ProductionGenerationResult> {
     const candidates = this.#selection.rank(request, bindings);
     if (candidates.length === 0) throw new NoEligibleProviderError();
     let totalCall = 0;
@@ -51,8 +51,9 @@ export class MultiProviderExecutor {
       for (let providerAttempt = 1; providerAttempt <= attempts; providerAttempt += 1) {
         if (context.signal?.aborted) throw cancelled(candidate);
         totalCall += 1;
-        await onAttempt({ providerCode: candidate.provider.descriptor.code, bindingId: candidate.binding.id, providerAttempt, totalCall });
-        const attemptContext = providerAttempt === 1 && totalCall === 1 ? context : { ...context, attemptId: childAttemptId(context.attemptId, candidate.provider.descriptor.code, providerAttempt, totalCall) };
+        const recordedAttemptId = await onAttempt({ providerCode: candidate.provider.descriptor.code, bindingId: candidate.binding.id, providerAttempt, totalCall });
+        const derivedAttemptId = providerAttempt === 1 && totalCall === 1 ? context.attemptId : childAttemptId(context.attemptId, candidate.provider.descriptor.code, providerAttempt, totalCall);
+        const attemptContext = recordedAttemptId ? { ...context, attemptId: recordedAttemptId } : derivedAttemptId === context.attemptId ? context : { ...context, attemptId: derivedAttemptId };
         try { return await this.#pipeline.execute(candidate.provider, request, candidate.binding, attemptContext); }
         catch (error) {
           lastError = normalizeProviderError(error, candidate.provider.descriptor.code);

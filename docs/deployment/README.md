@@ -6,9 +6,12 @@
 
 - [Vercel 前端部署](vercel-deployment.md)
 - [腾讯云 CVM 后端部署](tencent-backend-deployment.md)
+- [腾讯云资源准备指南（小白版）](tencent-cloud-setup-guide.md)
 - [环境变量与密钥管理](environment-variables.md)
 - [部署准备检查清单](../operations/deployment-checklist.md)
 - [回滚指南](../operations/rollback-guide.md)
+- [AI 增强版生产部署指南（非程序员版）](../../deploy/DEPLOY_GUIDE.md)
+- [上线验收清单](ai-merge-acceptance.md)
 
 ## 配置与部署文档
 
@@ -31,3 +34,9 @@
 - 不包含真实密钥的发布证据包
 
 任何教程缺少“为什么、命令、预期输出、验证、常见失败、恢复、回滚”之一，都视为未完成文档。
+
+M1 AI 生图上线测试见 [Vercel Preview 与 Generation Staging 验证](m1-vercel-preview-validation.md) 和 [Generation Staging 服务器部署](m1-staging-server-deployment.md)。
+
+M1 生产服务器、托管 PostgreSQL/Redis、腾讯 COS 与 Vercel 的人工密钥清单见 [M1 AI 功能生产配置（人工填写版）](m1-production-configuration.md)。该文档只准备配置，不绕过生产 Go/No-Go 门禁。
+
+AI 模块并入生产主线的合并流程与审批门见 [AI 模块并入生产主线 · 合并 Runbook](../operations/ai-merge-runbook.md)。

@@ -10,15 +10,20 @@ export class BillingService {
   readonly #providers: PaymentProviderRegistry;
   readonly #logger: StructuredLogger;
   readonly #publicBaseUrl: string;
+  readonly #signupGrant: string;
 
-  constructor(options: { repository: BillingRepository; providers: PaymentProviderRegistry; logger: StructuredLogger; publicBaseUrl: string }) {
+  constructor(options: { repository: BillingRepository; providers: PaymentProviderRegistry; logger: StructuredLogger; publicBaseUrl: string; signupGrant?: string }) {
     this.#repository = options.repository;
     this.#providers = options.providers;
     this.#logger = options.logger;
     this.#publicBaseUrl = options.publicBaseUrl.replace(/\/$/, "");
+    this.#signupGrant = normalizeCreditAmount(options.signupGrant ?? "0");
   }
 
-  summary(userId?: number): Promise<BillingSummary> {
+  async summary(userId?: number): Promise<BillingSummary> {
+    if (userId && Number(this.#signupGrant) > 0) {
+      await this.#repository.ensureSignupGrant(userId, this.#signupGrant);
+    }
     return this.#repository.summary(userId);
   }
 
@@ -106,4 +111,9 @@ function assertHostedUrl(value: string): void {
 function safeErrorCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error && typeof error.code === "string") return error.code.slice(0, 80);
   return "processing_failed";
+}
+
+function normalizeCreditAmount(value: string): string {
+  if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,4})?$/.test(value) || Number(value) < 0) throw new Error("signupGrant must be a non-negative decimal with up to 4 fractional digits");
+  return Number(value).toFixed(4);
 }

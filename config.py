@@ -46,6 +46,7 @@ class Config:
     # --- Flask ---
     SECRET_KEY: str = os.environ.get("SECRET_KEY", "dev-only-change-me")
     SESSION_COOKIE_NAME = "mytoolbox_session"
+    SESSION_COOKIE_DOMAIN: str | None = os.environ.get("SESSION_COOKIE_DOMAIN") or None
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     # Cookies must be secure in production (HTTPS). Override via env if serving plain HTTP locally.
@@ -86,6 +87,9 @@ class Config:
     # --- Gallery BFF bridge ---
     # Shared only between Flask and the Next.js server. Never expose to browsers.
     GALLERY_INTROSPECTION_SECRET: str = os.environ.get("GALLERY_INTROSPECTION_SECRET", "")
+    # Optional public HTTPS entry to the independently deployed Gallery Web.
+    # Keeping this environment-specific avoids committing Preview/Production URLs.
+    AI_IMAGE_EXTERNAL_URL: str = os.environ.get("AI_IMAGE_EXTERNAL_URL", "").strip()
 
     # --- Paths ---
     UPLOAD_DIR: Path = BASE_DIR / "uploads"

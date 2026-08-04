@@ -16,6 +16,7 @@ MIGRATION = (
 GALLERY_MIGRATION = MIGRATION.with_name("0002_gallery_system.sql")
 ADMIN_MIGRATION = MIGRATION.with_name("0003_admin_console.sql")
 MULTI_PROVIDER_MIGRATION = MIGRATION.with_name("0004_multi_provider.sql")
+REMOTE_BINDINGS_MIGRATION = MIGRATION.with_name("0007_remote_provider_bindings.sql")
 GALLERY_REPOSITORY = MIGRATION.parents[2] / "src" / "gallery" / "postgres-gallery-repository.ts"
 
 
@@ -147,6 +148,17 @@ class AIImageSchemaContractTests(unittest.TestCase):
         self.assertIn("'openai'", sql)
         self.assertIn("'gemini'", sql)
         self.assertIn("'jimeng'", sql)
+
+    def test_phase_11_remote_provider_bindings_are_operational(self):
+        sql = re.sub(r"\s+", " ", REMOTE_BINDINGS_MIGRATION.read_text(encoding="utf-8").lower()).strip()
+        self.assertTrue(sql.startswith("begin;"))
+        self.assertTrue(sql.endswith("commit;"))
+        self.assertIn("insert into ai.workflow_provider_bindings", sql)
+        self.assertIn("provider_model_id", sql)
+        self.assertIn("m.is_default and m.is_enabled", sql)
+        self.assertIn("on conflict (workflow_version_id, provider_id) do nothing", sql)
+        for code in ("'jimeng'", "'openai'", "'gemini'"):
+            self.assertIn(code, sql)
 
 
 if __name__ == "__main__":

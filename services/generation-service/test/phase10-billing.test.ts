@@ -17,8 +17,17 @@ class FakeRepository implements BillingRepository {
   readonly received: NormalizedPaymentEvent[] = [];
   readonly processed: string[] = [];
   readonly failed: string[] = [];
+  readonly granted: string[] = [];
+  readonly grantedUsers = new Set<number>();
   claimed: StoredPaymentEvent[] = [];
   checkout?: { orderId: string; externalId: string };
+  ensureSignupGrant(userId: number, amount: string): Promise<void> {
+    if (!this.grantedUsers.has(userId)) {
+      this.grantedUsers.add(userId);
+      this.granted.push(`${userId}:${amount}`);
+    }
+    return Promise.resolve();
+  }
   summary(): Promise<BillingSummary> { return Promise.resolve({ plans: [plan], account: { availableAmount: "42.0000", reservedAmount: "3.0000", lifetimeGranted: "50.0000", lifetimeSpent: "5.0000" }, subscription: { planSlug: plan.slug, planName: plan.displayName, provider: "fakepay", status: "active", cancelAtPeriodEnd: false }, ledger: [] }); }
   createOrGetOrder(userId: number, _planSlug: string, idempotencyKey: string): Promise<PaymentOrder> { return Promise.resolve({ id: "order-1", userId, plan, provider: "fakepay", idempotencyKey, status: "created" }); }
   customerReference(): Promise<string | undefined> { return Promise.resolve("cus-1"); }
@@ -67,6 +76,29 @@ describe("Phase 10 billing boundary", () => {
   it("keeps Stripe disabled by default and rejects partial secret configuration", () => {
     assert.equal(loadBillingConfig({}).stripe, undefined);
     assert.throws(() => loadBillingConfig({ BILLING_STRIPE_ENABLED: "true", STRIPE_SECRET_KEY: "sk_test_only" }), /STRIPE_SECRET_KEY/);
+  });
+
+  it("grants one-time signup credits when an authenticated account is first summarized", async () => {
+    const repository = new FakeRepository(); const providers = new PaymentProviderRegistry();
+    const service = new BillingService({ repository, providers, logger, publicBaseUrl: "https://mindfulpenpal.com", signupGrant: "10" });
+    await service.summary(7);
+    await service.summary(7);
+    assert.deepEqual(repository.granted, ["7:10.0000"]);
+    assert.equal(repository.granted.length, 1);
+  });
+
+  it("never grants signup credits to guests or when the grant is disabled", async () => {
+    const repository = new FakeRepository(); const providers = new PaymentProviderRegistry();
+    const service = new BillingService({ repository, providers, logger, publicBaseUrl: "https://mindfulpenpal.com", signupGrant: "0" });
+    await service.summary(undefined);
+    await service.summary(7);
+    assert.deepEqual(repository.granted, []);
+  });
+
+  it("validates signup grant configuration and defaults to ten credits", () => {
+    assert.equal(loadBillingConfig({}).signupGrant, "10.0000");
+    assert.equal(loadBillingConfig({ BILLING_SIGNUP_GRANT: "2.5" }).signupGrant, "2.5000");
+    assert.throws(() => loadBillingConfig({ BILLING_SIGNUP_GRANT: "-1" }), /BILLING_SIGNUP_GRANT/);
   });
 
   it("processes claimed webhook inbox records independently of HTTP receipt", async () => {

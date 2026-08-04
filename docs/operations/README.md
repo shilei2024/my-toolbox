@@ -6,6 +6,7 @@
 - [GitHub 工作流与保护规则](github-workflow-guide.md)
 - [CI/CD 指南](ci-cd-guide.md)
 - [发布与版本指南](release-guide.md)
+- [AI 模块并入生产主线 · 合并 Runbook](ai-merge-runbook.md)
 - [生产发布检查清单](release-checklist.md)
 - [部署准备检查清单](deployment-checklist.md)
 - [回滚与紧急恢复](rollback-guide.md)

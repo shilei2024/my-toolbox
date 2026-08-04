@@ -1,0 +1,163 @@
+# MindfulPenpal AI 增强版 - 腾讯云 Docker 生产编排（单文件版）
+#
+# 默认（推荐）：PostgreSQL / Redis 使用托管服务，通过 DATABASE_URL / REDIS_URL
+# 连接（生产安全要求）。只有小型自托管/验收环境才启用 local-infra profile，
+# 由本机容器提供 PostgreSQL 与 Redis。
+#
+# 使用：
+#   docker compose --env-file /etc/mindfulpenpal.production.env \
+#     -f deploy/docker-compose.production.yml --profile migration run --rm migrate
+#   docker compose --env-file /etc/mindfulpenpal.production.env \
+#     -f deploy/docker-compose.production.yml --profile production up -d --no-build
+#
+# 完整非程序员说明见 deploy/DEPLOY_GUIDE.md。
+
+name: mindfulpenpal-ai-production
+
+x-generation-environment: &generation-environment
+  APP_ENV: production
+  GALLERY_HOST: 0.0.0.0
+  GALLERY_PORT: "3101"
+  GALLERY_TRUST_PROXY: "true"
+  GENERATION_ALLOW_MOCK_PROVIDER: "false"
+
+x-generation-service: &generation-service
+  image: ${GENERATION_IMAGE:?set GENERATION_IMAGE to an immutable image digest}
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  env_file:
+    - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+  environment: *generation-environment
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  networks:
+    - mindfulpenpal-ai
+  profiles: ["production"]
+
+services:
+  migrate:
+    image: ${POSTGRES_MIGRATION_IMAGE:?set POSTGRES_MIGRATION_IMAGE to an immutable image digest}
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+    volumes:
+      - ../services/generation-service/database/migrations:/migrations:ro
+      - ../services/generation-service/deploy/migrate-production.sh:/migrate-production.sh:ro
+    command: ["sh", "/migrate-production.sh"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks:
+      - mindfulpenpal-ai
+    profiles: ["migration"]
+
+  # 仅在 local-infra profile 下启动：生产推荐使用托管 PostgreSQL（DATABASE_URL）。
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    profiles: ["local-infra"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mavis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD when using local-infra}
+      POSTGRES_DB: ${POSTGRES_DB:-mindfulpenpal}
+    volumes:
+      - mindfulpenpal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - mindfulpenpal-ai
+
+  # 仅在 local-infra profile 下启动：生产推荐使用托管 Redis（REDIS_URL，TLS）。
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    restart: unless-stopped
+    profiles: ["local-infra"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mindfulpenpal-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - mindfulpenpal-ai
+
+  api:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:start"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3101/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    mem_limit: 512m
+
+  dispatcher:
+    <<: *generation-service
+    command: ["npm", "run", "generation:dispatcher"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+
+  worker:
+    <<: *generation-service
+    command: ["npm", "run", "generation:worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - mindfulpenpal-worker-temp:/tmp/generation
+    stop_grace_period: 45s
+    mem_limit: 768m
+
+  deletion-worker:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:deletion-worker"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+
+  caddy:
+    image: ${CADDY_IMAGE:?set CADDY_IMAGE to an immutable image digest}
+    restart: unless-stopped
+    profiles: ["production"]
+    env_file:
+      - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../services/generation-service/deploy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - mindfulpenpal-caddy-data:/data
+      - mindfulpenpal-caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    networks:
+      - mindfulpenpal-ai
+
+networks:
+  mindfulpenpal-ai:
+    driver: bridge
+
+volumes:
+  mindfulpenpal-pgdata:
+  mindfulpenpal-redisdata:
+  mindfulpenpal-worker-temp:
+  mindfulpenpal-caddy-data:
+  mindfulpenpal-caddy-config:

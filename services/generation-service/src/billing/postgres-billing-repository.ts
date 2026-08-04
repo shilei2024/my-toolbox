@@ -51,6 +51,13 @@ export class PostgresBillingRepository implements BillingRepository {
     };
   }
 
+  async ensureSignupGrant(userId: number, amount: string): Promise<void> {
+    if (Number(amount) <= 0) return;
+    await this.transaction(async (client) => {
+      await grantCredits(client, userId, amount, "signup_grant", "system", "signup", `signup-grant:${userId}`);
+    });
+  }
+
   async createOrGetOrder(userId: number, planSlug: string, idempotencyKey: string): Promise<PaymentOrder> {
     return this.transaction(async (client) => {
       const planResult = await client.query<PlanRow>(`${planSelect} WHERE slug = $1 AND is_enabled AND is_public FOR SHARE`, [planSlug]);

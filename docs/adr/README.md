@@ -21,3 +21,5 @@
 | [0011](0011-centralized-documentation-information-architecture.md) | 统一文档信息架构 |
 | [0012](0012-permanent-engineering-governance.md) | 永久工程治理与 Golden Rule |
 | [0013](0013-gitflow-preview-and-immutable-release-promotion.md) | GitFlow、Preview 与不可变发布晋级 |
+| [0014](0014-generation-api-and-vercel-creation-workbench.md) | Generation API、异步生产闭环与 Vercel 创作工作台 |
+| [0015](0015-m1-first-run-credits-and-operational-bindings.md) | M1 首次积分、远端 Provider 绑定与发布策略 |

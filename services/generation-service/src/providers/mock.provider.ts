@@ -18,7 +18,7 @@ import type {
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 interface MockTask {
-  readonly output: ProviderImageOutput;
+  readonly outputs: readonly ProviderImageOutput[];
   readonly readyAt: number;
   cancelled: boolean;
 }
@@ -92,16 +92,17 @@ export class MockImageProvider implements ImageProvider {
       height: request.height,
       ...(request.seed === undefined ? {} : { seed: request.seed }),
     };
+    const outputs = Array.from({ length: request.count }, (_, index) => ({ ...output, ...(request.seed === undefined ? {} : { seed: request.seed + index }) }));
     const providerMetadata: JsonObject = {
       mock: true,
       workflowRef: binding.providerWorkflowRef ?? null,
       model: binding.providerModel ?? "mock-v1",
     };
     if (!this.#asynchronous) {
-      return { externalRequestId, state: "succeeded", outputs: [output], providerMetadata, actualCost: 0 };
+      return { externalRequestId, state: "succeeded", outputs, providerMetadata, actualCost: 0 };
     }
     this.#tasks.set(externalRequestId, {
-      output,
+      outputs,
       readyAt: this.#now() + this.#latencyMs,
       cancelled: false,
     });
@@ -131,7 +132,7 @@ export class MockImageProvider implements ImageProvider {
     if (this.#now() < task.readyAt) {
       return { externalRequestId, state: "running", progress: 0.5, outputs: [], providerMetadata: { mock: true }, actualCost: 0 };
     }
-    return { externalRequestId, state: "succeeded", progress: 1, outputs: [task.output], providerMetadata: { mock: true }, actualCost: 0 };
+    return { externalRequestId, state: "succeeded", progress: 1, outputs: task.outputs, providerMetadata: { mock: true }, actualCost: 0 };
   }
 
   async healthCheck(_context: ProviderCallContext): Promise<ProviderHealthResult> {

@@ -1,6 +1,20 @@
 # Changelog
 
+## 0.4.0 — 进行中 / 2026-08-04
+- **CI 修复**: 修复 `0007_remote_provider_bindings.sql` 的 FROM 子句别名顺序问题
+  （`seed` 别名需在 JOIN 条件之前定义），PR #3 四个 CI job 全部通过
+- **部署资产（已有服务器场景）**: compose 支持 `host.docker.internal` 连接本机
+  PostgreSQL；Redis 仅内网发布（`ALLOW_PLAINTEXT_REDIS` 显式开关）；本机构建镜像
+  可用 `ALLOW_LOCAL_IMAGE_TAGS` 显式放行；Dockerfile 支持 `NPM_REGISTRY` 国内源
+  构建参数；迁移脚本支持 `MIGRATIONS_DIR` 直接用本机 psql 执行
+- **新文档**: [已有服务器与 COS 的生产部署（数据库搬迁版）](docs/deployment/tencent-existing-server-setup.md)
+
 ## 0.3.0 — 进行中
+- **M1.1 AI 作图可用性补全**: 新用户首次汇总自动发放一次性积分
+  （`BILLING_SIGNUP_GRANT`，默认 10，幂等账本）；迁移 `0007` 为四个 workflow
+  补齐 OpenAI/Gemini/即梦 默认模型绑定；Worker 支持 `GALLERY_DEFAULT_MODERATION`
+  决定生成即发布还是人工审核；Gallery Web 新增 `/login`、`/logout`、
+  `/api/me/session` 与导航头登录入口（`MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`）
 - **AI 作图迁移新链路**: 移除旧 Flask 工具 `tools/ai_image`（含模板、路由、
   Pollinations/OpenAI provider 配置面板），首页入口改为可配置外部链接
   （`tools_config.yaml` 的 `ai_image.external_url`，指向独立部署的

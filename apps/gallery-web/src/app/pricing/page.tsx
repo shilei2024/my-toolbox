@@ -5,6 +5,7 @@ import type { BillingPlan, BillingSummary } from "@/lib/billing-types";
 import { getBillingSummary } from "@/server/billing-client";
 import { GalleryClientError } from "@/server/gallery-client";
 import { resolveViewerFromRequest } from "@/server/viewer";
+import { loginUrl } from "@/server/auth-links";
 
 export const metadata: Metadata = { title: "会员与积分", description: "选择适合你的 Mavis 创作额度与会员方案。" };
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ function PlanCard({ plan, authenticated, featured }: { plan: BillingPlan; authen
     <h2>{plan.displayName}</h2><p className="plan-description">{plan.description}</p>
     <p className="plan-price"><strong>{price}</strong>{plan.billingInterval ? <span>/{plan.billingInterval === "month" ? "月" : "年"}</span> : null}</p>
     <ul>{features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
-    {plan.kind === "free" ? <Link className="button billing-button" href="/gallery">浏览画廊</Link> : authenticated ? <CheckoutButton planSlug={plan.slug} /> : <Link className="button primary billing-button" href="/login?next=/pricing">登录后选择</Link>}
+    {plan.kind === "free" ? <Link className="button billing-button" href="/gallery">浏览画廊</Link> : authenticated ? <CheckoutButton planSlug={plan.slug} /> : loginUrl("/pricing") ? <Link className="button primary billing-button" href={loginUrl("/pricing")!}>登录后选择</Link> : <p className="plan-login-note">请先在工具站登录账号</p>}
   </article>;
 }
 function entitlementLines(plan: BillingPlan): string[] {

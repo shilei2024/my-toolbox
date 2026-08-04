@@ -16,7 +16,8 @@ export class ComfyUIProvider implements ImageProvider {
 
   readonly #client: ComfyUIClient;
   readonly #workflows: WorkflowLoader;
-  constructor(client: ComfyUIClient, workflows: WorkflowLoader) { this.#client = client; this.#workflows = workflows; }
+  readonly #defaults: Readonly<JsonObject>;
+  constructor(client: ComfyUIClient, workflows: WorkflowLoader, defaults: Readonly<JsonObject> = {}) { this.#client = client; this.#workflows = workflows; this.#defaults = defaults; }
 
   async generate(request: GenerationRequest, binding: ProviderBinding, context: ProviderCallContext): Promise<ProviderSubmission> {
     assertRequestSupported(this.descriptor, request);
@@ -64,7 +65,7 @@ export class ComfyUIProvider implements ImageProvider {
   async estimateCost(_request: GenerationRequest, binding: ProviderBinding): Promise<CostEstimate> { return { amount: binding.estimatedCost ?? 0, currency: "USD", estimated: true }; }
 
   private values(request: GenerationRequest, binding: ProviderBinding): PlaceholderValues {
-    const parameter = (key: string, fallback?: JsonValue): JsonValue | undefined => request.parameters[key] ?? binding.providerConfig[key] ?? fallback;
+    const parameter = (key: string, fallback?: JsonValue): JsonValue | undefined => request.parameters[key] ?? binding.providerConfig[key] ?? this.#defaults[key] ?? fallback;
     const optionalValues = {
       seed: request.seed,
       steps: parameter("steps"),

@@ -2,7 +2,9 @@
 
 ## 当前状态
 
-目标是 Ubuntu CVM + Docker Compose，但仓库目前没有生产 Dockerfile、production Compose 和 Generation API/Dispatcher/Worker 完整入口。因此本文定义标准和操作顺序，**当前不得按文档直接部署生产**。这些阻断项关闭后，才能启用后端 CD。
+目标是 Ubuntu CVM + Docker Compose。`release/0.4.0` 已补齐生产 Dockerfile、根级 `deploy/docker-compose.production.yml` 与 Generation API/Dispatcher/Worker 完整入口；本文继续作为标准与操作顺序，实际部署请以 [小白生产部署指南](../../deploy/DEPLOY_GUIDE.md) 与 [腾讯云资源准备指南](tencent-cloud-setup-guide.md) 为准。
+
+生产发布仍需满足：CI 全绿、[上线验收清单](ai-merge-acceptance.md) 10 项通过、独立审批合入 `main`。
 
 ## 设计
 

@@ -40,6 +40,14 @@ Vercel 变量变更只应用于之后的新 deployment，不会修改已经存�
 
 完整业务变量分别见 [Phase 4–10 配置文档](README.md)。
 
+M1.1 新增服务端变量：
+
+| 变量 | 归属 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `BILLING_SIGNUP_GRANT` | Generation API（Billing） | `10` | 新用户首次账户汇总时发放的一次性积分；`0` 关闭 |
+| `GALLERY_DEFAULT_MODERATION` | Generation Worker | `pending` | 新图片审核状态；`approved` 会直接发布公开图片 |
+| `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL` | Next Server Runtime | 无 | Flask 登录/退出页 HTTPS URL，Gallery 登录入口依赖前者 |
+
 ## 新增变量流程
 
 1. 选择通用、供应商无关的命名；Provider 特有变量限制在 Adapter。

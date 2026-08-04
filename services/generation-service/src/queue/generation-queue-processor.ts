@@ -59,25 +59,27 @@ export class GenerationQueueProcessor {
 
     await context.updateProgress(5);
     let providerCode = "unselected";
+    let activeAttemptId = attemptId;
     try {
       const result = await this.#executor.execute(plan.request, plan.bindings, { ...plan.context, ...(context.signal ? { signal: context.signal } : {}) }, async (attempt) => {
         providerCode = attempt.providerCode;
+        activeAttemptId = await this.#repository.markProviderAttempt(data.jobId, attemptId, attempt);
         await context.updateProgress(attempt.totalCall === 1
           ? { percent: 10, stage: "provider_selected", provider: providerCode }
           : { percent: 10, stage: "provider_fallback", provider: providerCode, attempt: attempt.providerAttempt });
       });
-      await this.#repository.markCompleted(data.jobId, attemptId, result);
+      await this.#repository.markCompleted(data.jobId, activeAttemptId, result);
       await context.updateProgress(100);
       return toQueueResult(data.jobId, result);
     } catch (error) {
       const normalized = normalizeQueueFailure(error, providerCode);
       const cancelled = context.signal?.aborted || normalized.category === "cancelled";
       if (cancelled) {
-        await this.#repository.markCancelled(data.jobId, attemptId, normalized.code);
+        await this.#repository.markCancelled(data.jobId, activeAttemptId, normalized.code);
         throw new QueueExecutionError(normalized.code, "Generation job was cancelled", false, true, error);
       }
       const willRetry = normalized.retryable && context.attemptsMade + 1 < context.maxAttempts;
-      await this.#repository.markFailed(data.jobId, attemptId, normalized, willRetry);
+      await this.#repository.markFailed(data.jobId, activeAttemptId, normalized, willRetry);
       this.#logger.error("queue.execution_failed", { generationId: data.jobId, queueJobId: context.queueJobId, provider: providerCode, attemptNumber, willRetry, failureReason: normalized.code });
       throw new QueueExecutionError(normalized.code, normalized.message, willRetry, false, error);
     }
