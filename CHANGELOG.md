@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 · 优化 / 2026-08-04
+- **登录/登出回跳优化**：从 Gallery 点击登录，登录成功后回到 Gallery 原页面；Flask 通过
+  `AI_IMAGE_EXTERNAL_URL` 域名白名单校验绝对跳转地址，防止开放重定向。
+- **性能优化**：同一请求内 Gallery 对主站 introspection 只调用一次（React cache 去重），
+  减少 `/admin` 等页面的重复鉴权延迟。
+
 ## 0.4.1 · 热修 / 2026-08-04
 - **修复 Vercel 只读文件系统忽略 `DATABASE_URL`**：删除 `POSTGRES_URL_*` 后站点曾静默
   回退到空的内存 SQLite，导致老账号消失、无法登录；现在 `POSTGRES_URL_*` 与

@@ -36,8 +36,16 @@ function appendNext(base: string, next?: string): string {
 }
 
 function safeNext(value?: string): string | undefined {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return undefined;
-  return value;
+  if (!value) return undefined;
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  const configured = process.env.GALLERY_PUBLIC_ORIGIN?.trim();
+  if (!configured) return undefined;
+  try {
+    const candidate = new URL(value);
+    const expected = new URL(configured);
+    if (candidate.protocol === "https:" && candidate.origin === expected.origin) return value;
+  } catch { /* ignore malformed URL */ }
+  return undefined;
 }
 
 function isLoopback(hostname: string): boolean {

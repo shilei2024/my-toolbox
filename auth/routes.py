@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
@@ -12,6 +13,33 @@ from models import User
 from .forms import LoginForm, RegisterForm
 
 auth_bp = Blueprint("auth", __name__, template_folder="../templates")
+
+
+def _safe_next_url(value: str | None, external_url: str) -> str | None:
+    """Allow relative paths, plus absolute HTTPS URLs on the external tool origin.
+
+    `external_url` comes from AI_IMAGE_EXTERNAL_URL (e.g. the Gallery Web), so
+    login/logout initiated from Gallery can return to the original page without
+    enabling open redirects to arbitrary hosts.
+    """
+    if not value:
+        return None
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    external = urlparse(external_url)
+    if external.scheme != "https" or not external.hostname:
+        return None
+    try:
+        candidate = urlparse(value)
+    except ValueError:
+        return None
+    if (
+        candidate.scheme == "https"
+        and candidate.hostname == external.hostname
+        and (candidate.port or 443) == (external.port or 443)
+    ):
+        return value
+    return None
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
@@ -42,8 +70,9 @@ def register():
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
+    next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     if current_user.is_authenticated:
-        return redirect(url_for("home"))
+        return redirect(next_url or url_for("home"))
 
     form = LoginForm()
     if form.validate_on_submit():
@@ -61,10 +90,6 @@ def login():
         login_user(user, remember=form.remember.data)
         flash(f"欢迎回来，{user.email}", "success")
 
-        next_url = request.args.get("next")
-        # avoid open-redirect: only allow relative paths
-        if next_url and not next_url.startswith("/"):
-            next_url = None
         return redirect(next_url or "/")
 
     return render_template("login.html", form=form)
@@ -73,9 +98,10 @@ def login():
 @auth_bp.route("/logout", methods=["GET", "POST"])
 @login_required
 def logout():
+    next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     logout_user()
     flash("已退出登录。", "info")
-    return redirect(url_for("home"))
+    return redirect(next_url or url_for("home"))
 
 
 @auth_bp.get("/internal/gallery/session")

@@ -2,11 +2,12 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import type { ViewerBridge, ViewerContext, ViewerRole } from "@/lib/gallery-types";
 
-export async function resolveViewerFromRequest(): Promise<ViewerContext> {
+export const resolveViewerFromRequest = cache(async (): Promise<ViewerContext> => {
   return resolveViewerFromCookieHeader((await cookies()).toString());
-}
+});
 
 export async function resolveViewerFromCookieHeader(cookieHeader: string): Promise<ViewerContext> {
   const requestId = randomUUID();
