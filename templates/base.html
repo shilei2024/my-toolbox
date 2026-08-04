@@ -87,7 +87,7 @@
 
 <footer class="border-top mt-5 py-4 bg-white">
   <div class="container text-center text-muted small">
-    <div>© {{ now().year }} {{ site_name }} · Built with Flask + Bootstrap</div>
+    <div>© {{ now().year }} {{ site_name }} · Built with Flask + Bootstrap · v{{ config.APP_VERSION }}</div>
     <div class="mt-1">
       <a class="text-muted me-2" href="{{ url_for('privacy') }}">隐私</a>
       <a class="text-muted" href="{{ url_for('terms') }}">条款</a>

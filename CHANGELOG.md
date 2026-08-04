@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 · 热修 / 2026-08-04
+- **修复 Vercel 只读文件系统忽略 `DATABASE_URL`**：删除 `POSTGRES_URL_*` 后站点曾静默
+  回退到空的内存 SQLite，导致老账号消失、无法登录；现在 `POSTGRES_URL_*` 与
+  `DATABASE_URL`（postgres 开头）任一存在都会连接外部 PostgreSQL，并新增回归测试。
+- **加固 Gallery 登录桥**：introspection 超时 3s → 10s；`/api/me/session` 新增
+  `bridge` 状态（ok / guest / unconfigured / error），服务器日志输出失败原因（不打印密钥）。
+- **文档修正**：`GALLERY_INTROSPECTION_SECRET` 只在 Vercel 两个项目间共享，
+  服务器环境文件不需要配置；Vercel Production Branch 新版入口说明。
+- **部署验证**：页脚显示版本号，便于确认线上是否为最新构建。
+
 ## 0.4.0 — 进行中 / 2026-08-04
 - **CI 修复**: 修复 `0007_remote_provider_bindings.sql` 的 FROM 子句别名顺序问题
   （`seed` 别名需在 JOIN 条件之前定义），PR #3 四个 CI job 全部通过
