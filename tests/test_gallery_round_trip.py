@@ -20,6 +20,8 @@ os.environ["ADMIN_PASSWORD"] = "Admin123456"
 os.environ["SECRET_KEY"] = "test-secret-key-not-for-prod"
 os.environ["AI_IMAGE_EXTERNAL_URL"] = "https://gallery.example.com/create"
 os.environ["GALLERY_INTROSPECTION_SECRET"] = "gallery-introspection-test-secret-123456789"
+os.environ["GALLERY_SERVICE_BASE_URL"] = "https://api.example.com"
+os.environ["GALLERY_INTERNAL_HMAC_SECRET"] = "gallery-internal-hmac-test-secret-123456"
 
 from app import create_app  # noqa: E402
 
@@ -94,6 +96,21 @@ class GalleryRoundTripTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("no-store", response.headers["Cache-Control"])
             self.assertEqual(response.headers["Vary"], "Cookie")
+
+    def test_authenticated_and_admin_pages_are_never_cached(self):
+        client = self.app.test_client()
+        response = client.post(
+            f"/register?next={quote(GALLERY, safe='')}",
+            data=dict(REGISTER, email="cache-check@example.com"),
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        home = client.get("/")
+        self.assertEqual(home.status_code, 200)
+        self.assertIn("no-store", home.headers["Cache-Control"])
+        admin = client.get("/admin/")
+        self.assertEqual(admin.status_code, 403)
+        self.assertIn("no-store", admin.headers["Cache-Control"])
 
     def test_malicious_next_falls_back_to_home(self):
         response = self._register("roundtrip-evil@example.com", next_url="https://evil.example/steal")

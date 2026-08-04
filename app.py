@@ -450,6 +450,14 @@ def _register_context(app: Flask) -> None:
             "now": china_now,
         }
 
+    @app.after_request
+    def _no_store_private_pages(response):
+        """Never cache authenticated or admin pages (stale CSRF tokens break forms)."""
+        if current_user.is_authenticated or (request.endpoint or "").startswith("admin."):
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            response.headers["Vary"] = "Cookie"
+        return response
+
 
 def _register_cli(app: Flask) -> None:
     @app.cli.command("create-admin")
