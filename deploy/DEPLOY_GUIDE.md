@@ -245,7 +245,7 @@ curl https://<api-ai域名>/health
 
 | 变量 | 值 |
 | --- | --- |
-| `GALLERY_INTROSPECTION_SECRET` | 与服务器环境文件中的值完全一致（至少 32 字节） |
+| `GALLERY_INTROSPECTION_SECRET` | 与 my-toolbox-gallery 完全一致（至少 32 字节）；仅在 Vercel 两个项目间共享，服务器不需要 |
 | `SESSION_COOKIE_DOMAIN` | `.mindfulpenpal.com`（注意开头的点；只有确认共享父域才设置） |
 | `SESSION_COOKIE_SECURE` | `true` |
 | `AI_IMAGE_EXTERNAL_URL` | `https://<gallery域名>/create` |
@@ -261,7 +261,7 @@ curl https://<api-ai域名>/health
 | `GALLERY_SERVICE_BASE_URL` | `https://<api-ai域名>` |
 | `GALLERY_INTERNAL_HMAC_SECRET` | 与服务器一致 |
 | `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/auth/internal/gallery/session` |
-| `GALLERY_INTROSPECTION_SECRET` | 与 Flask 一致 |
+| `GALLERY_INTROSPECTION_SECRET` | 与主站 Flask 完全一致（Vercel 两个项目共享） |
 | `GALLERY_PUBLIC_ORIGIN` | `https://<gallery域名>` |
 | `MAVIS_AUTH_LOGIN_URL` | `https://mindfulpenpal.com/login` |
 | `MAVIS_AUTH_LOGOUT_URL` | `https://mindfulpenpal.com/logout` |

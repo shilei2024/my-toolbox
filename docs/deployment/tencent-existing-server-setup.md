@@ -219,7 +219,7 @@ sudo nano /etc/mindfulpenpal.production.env
 | `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?sslmode=require` |
 | `REDIS_URL` | `redis://redis:6379`（compose 内网 Redis） |
 | `ALLOW_PLAINTEXT_REDIS` | `true`（Redis 只在 Docker 内网，不发布公网端口） |
-| `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` / `GALLERY_INTROSPECTION_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
+| `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
 | `GALLERY_ASSET_HOSTS` | `<桶名>.cos.<地域>.myqcloud.com`（方案 B，见第 8 步） |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` | CAM 子账号密钥 |
 | `COS_BUCKET` / `COS_REGION` | 桶名 / 地域代码（如 `ap-shanghai`） |
@@ -227,6 +227,10 @@ sudo nano /etc/mindfulpenpal.production.env
 | `BILLING_PUBLIC_BASE_URL` | `https://mindfulpenpal.com` |
 | `BILLING_SIGNUP_GRANT` | `10`（新用户送积分） |
 | `OPENAI_API_KEY` / `GEMINI_API_KEY` / `JIMENG_API_KEY` | 至少填一个真实密钥，对应 `*_BASE_URL` 保持默认 |
+
+> 注意：`GALLERY_INTROSPECTION_SECRET` 不属于服务器环境文件，它是 Vercel 主站（Flask）与
+> Gallery Web 两个项目之间共享的独立密钥（至少 32 字节）。Generation Service 不使用它，
+> 服务器上这一项留空不会影响任何功能；必须配置在 Vercel 的两个项目里且两边完全一致。
 
 生成随机值的命令：
 
@@ -399,7 +403,7 @@ Vercel 项目 Settings → Environment Variables → Production：
 | 变量 | 值 |
 | --- | --- |
 | `DATABASE_URL` | `postgresql://mavis:<密码>@<服务器公网IP>:5432/mindfulpenpal?sslmode=require` |
-| `GALLERY_INTROSPECTION_SECRET` | 与服务器环境文件完全一致 |
+| `GALLERY_INTROSPECTION_SECRET` | 与 my-toolbox-gallery 完全一致（Vercel 两个项目共享；服务器环境文件不需要此项） |
 | `SESSION_COOKIE_DOMAIN` | `.mindfulpenpal.com`（注意开头点） |
 | `SESSION_COOKIE_SECURE` | `true` |
 | `AI_IMAGE_EXTERNAL_URL` | `https://gallery.mindfulpenpal.com/create` |
