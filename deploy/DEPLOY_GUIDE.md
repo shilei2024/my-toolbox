@@ -26,6 +26,8 @@
 
 发布前逐项确认，缺任何一项都不要继续：
 
+> 还没买过任何腾讯云资源？先读 [腾讯云资源准备指南（小白版）](../docs/deployment/tencent-cloud-setup-guide.md)，从购买服务器、建 COS 桶、创建最小权限密钥到 DNS 全部有逐步点击教程；本指南假设这些资源已经就绪。
+
 - [ ] GitHub 仓库已有 `main` 与 CI 通过（合并后 CI 会跑 Python / Generation / Gallery 测试）
 - [ ] Vercel 上有**两个项目**：原 Flask 项目（Root Directory 为仓库根目录）与 Gallery Web 项目（Root Directory 为 `apps/gallery-web`）
 - [ ] `mindfulpenpal.com` 的当前生产 deployment ID 已截图记录（回滚用）
