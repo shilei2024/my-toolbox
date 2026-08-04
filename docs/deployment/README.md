@@ -9,6 +9,8 @@
 - [环境变量与密钥管理](environment-variables.md)
 - [部署准备检查清单](../operations/deployment-checklist.md)
 - [回滚指南](../operations/rollback-guide.md)
+- [AI 增强版生产部署指南（非程序员版）](../../deploy/DEPLOY_GUIDE.md)
+- [上线验收清单](ai-merge-acceptance.md)
 
 ## 配置与部署文档
 
@@ -35,3 +37,5 @@
 M1 AI 生图上线测试见 [Vercel Preview 与 Generation Staging 验证](m1-vercel-preview-validation.md) 和 [Generation Staging 服务器部署](m1-staging-server-deployment.md)。
 
 M1 生产服务器、托管 PostgreSQL/Redis、腾讯 COS 与 Vercel 的人工密钥清单见 [M1 AI 功能生产配置（人工填写版）](m1-production-configuration.md)。该文档只准备配置，不绕过生产 Go/No-Go 门禁。
+
+AI 模块并入生产主线的合并流程与审批门见 [AI 模块并入生产主线 · 合并 Runbook](../operations/ai-merge-runbook.md)。
