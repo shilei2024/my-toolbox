@@ -24,6 +24,8 @@ x-generation-environment: &generation-environment
 x-generation-service: &generation-service
   image: ${GENERATION_IMAGE:?set GENERATION_IMAGE to an immutable image digest}
   restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   env_file:
     - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
   environment: *generation-environment
@@ -40,6 +42,8 @@ services:
   migrate:
     image: ${POSTGRES_MIGRATION_IMAGE:?set POSTGRES_MIGRATION_IMAGE to an immutable image digest}
     restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
     volumes:

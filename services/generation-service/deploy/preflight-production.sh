@@ -48,10 +48,16 @@ if [ "$(get_value GENERATION_ALLOW_MOCK_PROVIDER)" != "false" ]; then
   exit 1
 fi
 
+allow_local_tags="$(get_value ALLOW_LOCAL_IMAGE_TAGS)"
 for key in GENERATION_IMAGE POSTGRES_MIGRATION_IMAGE CADDY_IMAGE; do
   value="$(get_value "$key")"
-  if ! printf '%s' "$value" | grep -Eq '@sha256:[[:xdigit:]]{64}$'; then
-    echo "preflight failed: $key must use an immutable sha256 digest" >&2
+  if [ "$allow_local_tags" = "true" ]; then
+    case "$value" in
+      *:* | *@sha256:*) ;;
+      *) echo "preflight failed: $key must be a name:tag or sha256 digest" >&2; exit 1 ;;
+    esac
+  elif ! printf '%s' "$value" | grep -Eq '@sha256:[[:xdigit:]]{64}$'; then
+    echo "preflight failed: $key must use an immutable sha256 digest; set ALLOW_LOCAL_IMAGE_TAGS=true only for images built directly on the server" >&2
     exit 1
   fi
 done
@@ -60,10 +66,17 @@ case "$(get_value DATABASE_URL)" in
   postgres://*|postgresql://*) ;;
   *) echo "preflight failed: DATABASE_URL must be a PostgreSQL URL" >&2; exit 1 ;;
 esac
-case "$(get_value REDIS_URL)" in
-  rediss://*) ;;
-  *) echo "preflight failed: production REDIS_URL must use TLS (rediss://)" >&2; exit 1 ;;
-esac
+if [ "$(get_value ALLOW_PLAINTEXT_REDIS)" = "true" ]; then
+  case "$(get_value REDIS_URL)" in
+    redis://* | rediss://*) ;;
+    *) echo "preflight failed: REDIS_URL must be redis:// or rediss://" >&2; exit 1 ;;
+  esac
+else
+  case "$(get_value REDIS_URL)" in
+    rediss://*) ;;
+    *) echo "preflight failed: production REDIS_URL must use TLS (rediss://); set ALLOW_PLAINTEXT_REDIS=true only for a loopback/internal-only local Redis" >&2; exit 1 ;;
+  esac
+fi
 
 if [ -z "$(get_value COMFYUI_BASE_URL)" ] && \
    [ -z "$(get_value OPENAI_API_KEY)" ] && \

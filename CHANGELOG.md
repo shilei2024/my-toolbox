@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 进行中 / 2026-08-04
+- **CI 修复**: 修复 `0007_remote_provider_bindings.sql` 的 FROM 子句别名顺序问题
+  （`seed` 别名需在 JOIN 条件之前定义），PR #3 四个 CI job 全部通过
+- **部署资产（已有服务器场景）**: compose 支持 `host.docker.internal` 连接本机
+  PostgreSQL；Redis 仅内网发布（`ALLOW_PLAINTEXT_REDIS` 显式开关）；本机构建镜像
+  可用 `ALLOW_LOCAL_IMAGE_TAGS` 显式放行；Dockerfile 支持 `NPM_REGISTRY` 国内源
+  构建参数；迁移脚本支持 `MIGRATIONS_DIR` 直接用本机 psql 执行
+- **新文档**: [已有服务器与 COS 的生产部署（数据库搬迁版）](docs/deployment/tencent-existing-server-setup.md)
+
 ## 0.3.0 — 进行中
 - **M1.1 AI 作图可用性补全**: 新用户首次汇总自动发放一次性积分
   （`BILLING_SIGNUP_GRANT`，默认 10，幂等账本）；迁移 `0007` 为四个 workflow

@@ -6,6 +6,8 @@ if [ "${APP_ENV:-}" != "production" ]; then
   exit 1
 fi
 
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE IF NOT EXISTS public.schema_migrations (
   filename text PRIMARY KEY,
@@ -13,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
 );
 SQL
 
-for migration in /migrations/*.sql; do
+for migration in "${MIGRATIONS_DIR}"/*.sql; do
   filename="$(basename "$migration")"
   case "$filename" in
     *"'"*) echo "invalid migration filename" >&2; exit 1 ;;

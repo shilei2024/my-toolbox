@@ -50,6 +50,10 @@ sudo apt update && sudo apt upgrade -y
 安装 Docker（腾讯云国内源会更快）：
 
 ```bash
+> 服务器和 COS 已经存在，并且要把原站数据库搬到腾讯服务器？
+> 先看 [已有服务器与 COS 的生产部署（数据库搬迁版）](../docs/deployment/tencent-existing-server-setup.md)，
+> 本文其余章节按“从零购买资源”继续。
+
 curl -fsSL https://get.docker.com | sudo sh
 sudo systemctl enable --now docker
 sudo usermod -aG docker $USER
