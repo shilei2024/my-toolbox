@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 · 修复 / 2026-08-04
+- **修复登录桥路径**：Flask introspection 路由实际为 `/internal/gallery/session`，
+  部署文档此前误写为 `/auth/internal/gallery/session`，导致 Gallery 登录桥一直 404
+  （`bridge:"error"`）；现保留 `/auth/internal/gallery/session` 兼容别名，并修正文档。
+
 ## 0.4.2 · 优化 / 2026-08-04
 - **登录/登出回跳优化**：从 Gallery 点击登录，登录成功后回到 Gallery 原页面；Flask 通过
   `AI_IMAGE_EXTERNAL_URL` 域名白名单校验绝对跳转地址，防止开放重定向。

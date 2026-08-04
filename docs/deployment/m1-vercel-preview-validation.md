@@ -34,7 +34,7 @@ Worker 审核变量：`GALLERY_DEFAULT_MODERATION=pending|approved`（`approved`
 
 - `GALLERY_SERVICE_BASE_URL`：Staging API HTTPS 网关。
 - `GALLERY_INTERNAL_HMAC_SECRET`：与 Staging API 相同，至少 32 bytes。
-- `MAVIS_AUTH_INTROSPECTION_URL`：Staging Flask `/auth/internal/gallery/session`。
+- `MAVIS_AUTH_INTROSPECTION_URL`：Staging Flask `/internal/gallery/session`。
 - `GALLERY_INTROSPECTION_SECRET`：与 Staging Flask 相同。
 - `GALLERY_PUBLIC_ORIGIN`：Preview 固定 Origin/branch alias。
 - `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`：Staging Flask 的登录/退出页 HTTPS URL。

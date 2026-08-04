@@ -260,7 +260,7 @@ curl https://<api-ai域名>/health
 | --- | --- |
 | `GALLERY_SERVICE_BASE_URL` | `https://<api-ai域名>` |
 | `GALLERY_INTERNAL_HMAC_SECRET` | 与服务器一致 |
-| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/auth/internal/gallery/session` |
+| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/internal/gallery/session` |
 | `GALLERY_INTROSPECTION_SECRET` | 与主站 Flask 完全一致（Vercel 两个项目共享） |
 | `GALLERY_PUBLIC_ORIGIN` | `https://<gallery域名>` |
 | `MAVIS_AUTH_LOGIN_URL` | `https://mindfulpenpal.com/login` |

@@ -78,7 +78,7 @@ class Config:
 
     # --- Misc ---
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://localhost:8000")
-    APP_VERSION: str = os.environ.get("APP_VERSION", "0.4.2")
+    APP_VERSION: str = os.environ.get("APP_VERSION", "0.4.3")
     DISPLAY_TIMEZONE: str = os.environ.get("DISPLAY_TIMEZONE", "Asia/Shanghai")
     SITE_NAME: str = os.environ.get("SITE_NAME", "Mavis 在线工具箱")
     SITE_TAGLINE: str = os.environ.get(

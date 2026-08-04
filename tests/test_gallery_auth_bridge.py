@@ -45,6 +45,14 @@ class GalleryAuthBridgeTests(unittest.TestCase):
         self.assertEqual(response.get_json(), {"role": "guest"})
         self.assertEqual(response.headers["Vary"], "Cookie")
 
+    def test_bridge_compat_alias_returns_guest(self):
+        response = self.client.get(
+            "/auth/internal/gallery/session",
+            headers={"X-Mavis-Introspection-Secret": BRIDGE_SECRET},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"role": "guest"})
+
     def test_bridge_maps_authenticated_admin_to_minimal_context(self):
         with self.client.session_transaction() as session:
             session["_user_id"] = "1"

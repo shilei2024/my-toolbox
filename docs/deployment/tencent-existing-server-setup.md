@@ -420,7 +420,7 @@ Vercel 项目 Settings → Environment Variables → Production：
 | --- | --- |
 | `GALLERY_SERVICE_BASE_URL` | `https://api-ai.mindfulpenpal.com` |
 | `GALLERY_INTERNAL_HMAC_SECRET` | 与服务器一致 |
-| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/auth/internal/gallery/session` |
+| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/internal/gallery/session` |
 | `GALLERY_INTROSPECTION_SECRET` | 与 Flask 一致 |
 | `GALLERY_PUBLIC_ORIGIN` | `https://gallery.mindfulpenpal.com` |
 | `MAVIS_AUTH_LOGIN_URL` | `https://mindfulpenpal.com/login` |

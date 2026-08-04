@@ -105,12 +105,16 @@ def logout():
 
 
 @auth_bp.get("/internal/gallery/session")
+@auth_bp.get("/auth/internal/gallery/session")
 def gallery_session():
     """Return only the identity fields required by the Gallery BFF.
 
     The Next.js server forwards the existing Flask session cookie and proves
     its own identity with a separate shared secret. Browser-supplied user IDs
     are never trusted.
+
+    `/auth/internal/gallery/session` is kept as a compatibility alias: earlier
+    deployment guides used that path, so both must resolve to this endpoint.
     """
     expected = str(current_app.config.get("GALLERY_INTROSPECTION_SECRET", ""))
     supplied = request.headers.get("X-Mavis-Introspection-Secret", "")
