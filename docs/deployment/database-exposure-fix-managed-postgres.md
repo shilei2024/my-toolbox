@@ -319,13 +319,15 @@ telnet 101.43.122.182 5432
 
 如果目标库已经被反复失败的 restore 或主站自动写入弄脏，最干净的做法是删除重建：
 
-1. Vercel → my-toolbox → Settings → General → Danger Zone → **Pause Project**
-   （先暂停主站，防止它再往数据库写数据）；
-2. Vercel → Storage 或 Integrations → Prisma Postgres → **删除刚才的数据库**
+1. 如果 Vercel 提供 **Pause Project**（Settings → General → Danger Zone），先暂停主站；
+   如果没有该选项，就采用下面的顺序：**先创建新库并恢复数据，最后再关联项目**，期间不要
+   访问 mindfulpenpal.com；
+2. Vercel → Storage 或 Integrations → Prisma Postgres → **删除旧数据库**
    （旧连接串随之作废，之前泄露过的密码也一起失效）；
-3. 重新创建 Prisma Postgres 数据库，并关联到 my-toolbox；
-4. 复制新的连接串（`POSTGRES_URL` / `PRISMA_DATABASE_URL` 的值，地址是 `db.prisma.io`），
-   不要发到聊天；
+3. 重新创建 Prisma Postgres 数据库；创建向导如果允许"暂不关联项目"，就先不关联，
+   等数据恢复完成后再关联到 my-toolbox；如果必须立即关联，关联后马上进入第 5 步；
+4. 复制新的连接串（数据库详情页的 Connect/连接信息，或 `POSTGRES_URL` /
+   `PRISMA_DATABASE_URL` 的值，地址是 `db.prisma.io`），不要发到聊天；
 5. 在服务器重新设置 `NEW_DB_URL`，先确认新库是空的：
 
    ```bash
@@ -333,10 +335,13 @@ telnet 101.43.122.182 5432
    ```
 
    预期输出 `Did not find any relations.`；
-6. 新库为空时直接执行普通迁移（不需要 `CLEAN_TARGET=1`）：
+6. 新库为空时直接执行普通迁移（不需要 `CLEAN_TARGET=1`）；如果新库已经有表
+   （说明主站已经连过并自动建表），就改用 `CLEAN_TARGET=1`：
 
    ```bash
    bash deploy/migrate-db-to-managed.sh
    ```
 
-7. 验证 `[4/4] done.` 后，回到 Vercel **Resume** 恢复主站，再用老账号登录验证。
+7. 验证 `[4/4] done.` 后，如果第 3 步没有关联项目，现在到 Vercel 把新库关联到
+   **my-toolbox**（会注入环境变量并重新部署）；
+8. 用老账号登录 mindfulpenpal.com 验证，然后继续后续收尾步骤。
