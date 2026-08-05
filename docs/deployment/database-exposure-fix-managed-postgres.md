@@ -35,23 +35,25 @@ Vercel 主站 Flask ──TLS──> Neon 托管 PostgreSQL
 
 ## 2. 需要准备的东西
 
-1. 一个 Neon 账号（https://console.neon.tech），或者直接在 Vercel 控制台创建 Vercel Postgres
-   （Vercel Postgres 就是 Neon 提供的，步骤和连接串格式类似）；
+1. 直接使用 Vercel 自带的免费数据库：**Vercel Postgres**（由 Neon 提供，有免费 Hobby 档）。
+   不需要另外注册 Neon 账号；只有想用 Neon 独立控制台的高级功能时才需要；
 2. 服务器 SSH（你已经有了）；
 3. 服务器上有 PostgreSQL 16 客户端（`pg_dump`/`psql` 16.14，已经确认有）。
 
-费用说明：免费档可以先完成迁移和验证，但免费档数据库闲置后会休眠，首次访问可能慢几秒到十几秒；
-正式长期使用建议开通付费档（约每月 19 美元量级，以 Neon/Vercel 控制台当前价格为准）。
+费用说明：Vercel Postgres 免费档（Hobby）可以先完成迁移和验证；免费档闲置后可能休眠，
+首次访问会慢几秒，并且存储和计算时长有限。正式长期运营再考虑升级付费档（以 Vercel 控制台
+当前价格为准）。
 
 ## 3. 第 1 步：创建托管数据库
 
-1. 打开 Neon 控制台，注册/登录；
-2. 点 **New Project**；
-3. 名称随意（例如 `mindfulpenpal`）；
-4. **Region 选择 Singapore（ap-southeast-1）**，如果没有 Singapore 就选离上海最近的区域；
-5. 数据库引擎版本如果可选，选 **16**（与当前库一致最稳妥）；
-6. 创建后，在 **Connection Details** 里选择 **Pooled connection**（带 `-pooler` 的那个），
-   复制完整连接串，形如：
+1. 打开 Vercel Dashboard → **Storage** → **Create Database** → 选 **Postgres**
+   （这就是 Vercel Postgres，免费）；
+2. 区域选 **Singapore**（如果没有就选离上海最近的区域）；
+3. 创建后把数据库关联到 **my-toolbox** 项目：Vercel 会自动把 `POSTGRES_URL`、
+   `POSTGRES_URL_NON_POOLING` 等变量注入 Production / Preview / Development 环境，
+   主站 Flask 不需要手动配置；
+4. 在数据库详情页复制 **Pooled connection** 连接串（带 `-pooler` 的那个），供第 4 步
+   服务器 AI 服务使用。连接串形如：
 
    ```text
    postgresql://用户名:密码@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
@@ -113,14 +115,12 @@ CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
 
 ## 5. 第 3 步：切换 Vercel 主站到托管库
 
-1. 打开 Vercel → 项目 **my-toolbox** → Settings → Environment Variables；
-2. 环境选 **Production**；
-3. 确认以下三个变量**不存在**（如果存在就删除，它们优先级高于 DATABASE_URL）：
-   - `POSTGRES_URL`
-   - `POSTGRES_URL_NON_POOLING`
-   - `PRISMA_DATABASE_URL`
-4. 把 `DATABASE_URL` 的值改为第 1 步复制的 **Pooled 连接串**；
-5. 保存，Vercel 会自动重新部署；
+1. 打开 Vercel → 项目 **my-toolbox** → Settings → Environment Variables，环境选 **Production**；
+2. 确认存在 Vercel 自动注入的 `POSTGRES_URL` / `POSTGRES_URL_NON_POOLING`，
+   值指向刚创建的 Vercel Postgres；
+3. 删除旧的 `DATABASE_URL`（它指向腾讯云旧库，避免回退）；
+4. 确认 `PRISMA_DATABASE_URL` 不存在；
+5. 如果保存后没有自动触发部署，就手动 Redeploy 一次；
 6. 等 Deployments 显示 Success。
 
 验证：
