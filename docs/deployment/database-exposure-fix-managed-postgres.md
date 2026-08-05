@@ -1,6 +1,6 @@
 # 关闭 5432 公网暴露：数据库迁移到托管 PostgreSQL（方案 C）
 
-> 状态：待执行。本文是「主站保留 Vercel、数据库迁移到 Vercel/Neon 托管 PostgreSQL」的完整操作手册，
+> 状态：待执行。本文是「主站保留 Vercel、数据库迁移到 Vercel 上的 Prisma Postgres」的完整操作手册，
 > 按顺序执行，任何一步失败都停下来贴出错误，不要跳过验证。
 
 ## 1. 为什么必须做
@@ -12,7 +12,7 @@
 本次迁移后：
 
 - 主站 Flask 继续留在 Vercel，不搬服务器、不做 ICP 备案、不转移域名；
-- 数据库换成 Vercel/Neon 托管 PostgreSQL，使用 TLS 连接，并拥有自动备份；
+- 数据库换成 Vercel 上的 Prisma Postgres 托管数据库，使用 TLS 连接，并拥有自动备份；
 - AI 生成服务继续留在腾讯云服务器，只把数据库连接串改为托管库；
 - 删除 5432 公网防火墙规则，本机 PostgreSQL 停止对外服务；
 - COS 图片存储、Redis、Gallery（Vercel）全部保持不变。
@@ -29,36 +29,33 @@ Vercel 主站 Flask ──公网 5432──> 腾讯云 PostgreSQL（暴露）
 迁移后：
 
 ```text
-Vercel 主站 Flask ──TLS──> Neon 托管 PostgreSQL
-腾讯云 AI 服务（api/worker/dispatcher）──TLS──> Neon 托管 PostgreSQL
+Vercel 主站 Flask ──TLS──> Prisma Postgres（db.prisma.io）
+腾讯云 AI 服务（api/worker/dispatcher）──TLS──> Prisma Postgres（db.prisma.io）
 ```
 
 ## 2. 需要准备的东西
 
-1. 直接使用 Vercel 自带的免费数据库：**Vercel Postgres**（由 Neon 提供，有免费 Hobby 档）。
-   不需要另外注册 Neon 账号；只有想用 Neon 独立控制台的高级功能时才需要；
+1. 使用 Vercel 上的 **Prisma Postgres**（Vercel Marketplace 集成，有免费档）。
+   连接串地址固定是 `db.prisma.io`，不需要另外注册独立账号；
 2. 服务器 SSH（你已经有了）；
 3. 服务器上有 PostgreSQL 16 客户端（`pg_dump`/`psql` 16.14，已经确认有）。
 
-费用说明：Vercel Postgres 免费档（Hobby）可以先完成迁移和验证；免费档闲置后可能休眠，
-首次访问会慢几秒，并且存储和计算时长有限。正式长期运营再考虑升级付费档（以 Vercel 控制台
-当前价格为准）。
+费用说明：Prisma Postgres 免费档可以先完成迁移和验证；免费档有存储和连接数限制，
+正式长期运营再考虑升级付费档（以 Vercel 控制台当前价格为准）。
 
 ## 3. 第 1 步：创建托管数据库
 
-1. 打开 Vercel Dashboard → **Storage** → **Create Database** → 选 **Postgres**
-   （这就是 Vercel Postgres，免费）；
-2. 区域选 **Singapore**（如果没有就选离上海最近的区域）；
-3. 创建后把数据库关联到 **my-toolbox** 项目：Vercel 会自动把 `POSTGRES_URL`、
-   `POSTGRES_URL_NON_POOLING` 等变量注入 Production / Preview / Development 环境，
-   主站 Flask 不需要手动配置；
-4. 复制一条完整的 PostgreSQL 连接串（`postgresql://...`）。Vercel 页面里通常有两条：
-   `POSTGRES_URL`（池化连接）和 `POSTGRES_URL_NON_POOLING`（直连）；带 `-pooler`
-   字样的是池化连接，没有则是直连。本手册的迁移和 AI 服务用量都很小，**两条都可以用**，
-   任选一条即可。连接串形如：
+1. 在 Vercel 上添加 **Prisma Postgres** 集成（Vercel Marketplace / 集成页面），
+   创建数据库并关联到 **my-toolbox** 项目；
+2. 创建向导里如果有区域选项，选离上海最近的区域；
+3. Vercel 会自动把 `POSTGRES_URL`、`PRISMA_DATABASE_URL` 等变量注入 Production /
+   Preview / Development 环境，主站 Flask 不需要手动配置；
+4. 复制一条完整的连接串（`postgres://...`）。Prisma Postgres 的连接串地址固定是
+   `db.prisma.io`，**没有** `-pooler` 这种写法，直接从项目环境变量里复制
+   `POSTGRES_URL` 或 `PRISMA_DATABASE_URL` 的值即可。连接串形如：
 
    ```text
-   postgresql://用户名:密码@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+   postgres://用户名:密码@db.prisma.io:5432/postgres?sslmode=require
    ```
 
 > 重要：不要把连接串、密码、用户名发到聊天、工单或 GitHub。以下步骤全部在你自己电脑和
@@ -91,7 +88,7 @@ git pull
 
 ```bash
 export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|')"
-export NEW_DB_URL='postgresql://<Neon用户名>:<Neon密码>@<ep-xxxx>-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require'
+export NEW_DB_URL='postgres://<用户名>:<密码>@db.prisma.io:5432/postgres?sslmode=require'
 psql "$NEW_DB_URL" -c "SELECT version();"
 sh deploy/migrate-db-to-managed.sh
 ```
@@ -131,12 +128,11 @@ CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
 ## 5. 第 3 步：切换 Vercel 主站到托管库
 
 1. 打开 Vercel → 项目 **my-toolbox** → Settings → Environment Variables，环境选 **Production**；
-2. 确认存在 Vercel 自动注入的 `POSTGRES_URL` / `POSTGRES_URL_NON_POOLING`，
-   值指向刚创建的 Vercel Postgres；
+2. 确认存在 Vercel 注入的 `POSTGRES_URL`（以及存在的 `POSTGRES_URL_NON_POOLING` /
+   `PRISMA_DATABASE_URL`），值包含 `db.prisma.io`，指向刚创建的 Prisma Postgres；
 3. 删除旧的 `DATABASE_URL`（它指向腾讯云旧库，避免回退）；
-4. 确认 `PRISMA_DATABASE_URL` 不存在；
-5. 如果保存后没有自动触发部署，就手动 Redeploy 一次；
-6. 等 Deployments 显示 Success。
+4. 如果保存后没有自动触发部署，就手动 Redeploy 一次；
+5. 等 Deployments 显示 Success。
 
 验证：
 
@@ -152,8 +148,8 @@ CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
 sudoedit /etc/mindfulpenpal.production.env
 ```
 
-只改 `DATABASE_URL` 这一行，改成和第 1 步复制的同一条连接串（推荐用池化的
-`POSTGRES_URL`，直连也能用）。**其他行（Redis、COS、Provider 等）一律不动。**
+只改 `DATABASE_URL` 这一行，改成和第 1 步复制的同一条连接串（`db.prisma.io` 那条）。
+**其他行（Redis、COS、Provider 等）一律不动。**
 保存退出（nano 是 Ctrl+O 回车，再 Ctrl+X）。
 
 然后重启 AI 相关容器：
@@ -232,7 +228,7 @@ telnet 101.43.122.182 5432
 1. 旧数据库（db.prisma.io）如果还在，登录对应平台删除项目或轮换密码；
 2. 本机 PostgreSQL 已停用，`mavis` 账号不再对外；
 3. 第 2 步的 dump 文件保留至少 30 天（文件在 `/opt/mindfulpenpal/backups/`）；
-4. 托管库启用后，确认 Neon/Vercel 控制台里自动备份已开启（付费档默认有）；
+4. 托管库启用后，确认 Prisma Postgres 控制台里自动备份已开启（付费档默认有）；
 5. 以后不要把任何数据库连接串、密码发到聊天或工单。
 
 ## 9. 回滚方案
@@ -251,6 +247,6 @@ telnet 101.43.122.182 5432
 | --- | --- |
 | `pg_restore` 报 ERROR | 贴出完整错误；确认目标库为空后可用 `CLEAN_TARGET=1` 重跑 |
 | 免费档数据库休眠，首次访问慢 | 属正常现象；正式使用建议升级付费档 |
-| Vercel 部署后老账号消失 | 检查 `POSTGRES_URL_*`、`PRISMA_DATABASE_URL` 是否已删除，确认部署 Success |
+| Vercel 部署后老账号消失 | 检查 `POSTGRES_URL` 是否指向 `db.prisma.io` 新库、旧的 `DATABASE_URL` 是否已删除，确认部署 Success |
 | worker 日志报数据库错误 | 确认服务器 env 的 `DATABASE_URL` 已改，并执行了 `--force-recreate` |
-| 连接串里密码含特殊字符 | 在 Neon 控制台复制 Pooled 连接串，不要手工改动 |
+| 连接串里密码含特殊字符 | 从 Vercel 项目环境变量里复制完整值，不要手工改动 |
