@@ -150,10 +150,19 @@ grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | sed -E 's#(postgres(ql
 
 验证要点：
 
-- `users` 数量与现在一致（当前是 6）；
+- `users` 数量与源库一致（迁移前本机是 6，如果迁移期间有新注册或自动创建的管理员，会多于 6）；
 - `public_tables` 为 16；
 - `ai` schema 存在；
 - 全程没有 `ERROR`。
+
+如果 restore 阶段没有报错，但验证阶段报 `SSL connection has been closed unexpectedly`，
+说明数据已经恢复成功，只是公网连接抖动；**不要重跑迁移**，手动逐条验证即可：
+
+```bash
+psql "$NEW_DB_URL" -c "SELECT count(*) AS users FROM public.users;"
+psql "$NEW_DB_URL" -c "SELECT count(*) AS public_tables FROM information_schema.tables WHERE table_schema='public';"
+psql "$NEW_DB_URL" -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='ai';"
+```
 
 如果出现 ERROR，把完整错误贴出来，不要反复重试。已经失败过一次、确认目标库没有其他数据时，
 可以带 `CLEAN_TARGET=1` 重跑：

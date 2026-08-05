@@ -64,9 +64,22 @@ else
 fi
 
 echo "[3/4] verifying"
-psql "$NEW_DB_URL" -c "SELECT count(*) AS users FROM public.users;"
-psql "$NEW_DB_URL" -c "SELECT count(*) AS public_tables FROM information_schema.tables WHERE table_schema='public';"
-psql "$NEW_DB_URL" -c "SELECT schema_name FROM information_schema.schemata WHERE schema_name='ai';"
+verify_query() {
+  local label="$1" sql="$2" attempt=1
+  while [ "$attempt" -le 3 ]; do
+    if psql "$NEW_DB_URL" -c "$sql"; then
+      return 0
+    fi
+    echo "[verify] $label: attempt $attempt failed (likely connection issue); retrying in 2s..." >&2
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  echo "[verify] $label: failed after 3 attempts" >&2
+  return 1
+}
+verify_query "users" "SELECT count(*) AS users FROM public.users;"
+verify_query "public_tables" "SELECT count(*) AS public_tables FROM information_schema.tables WHERE table_schema='public';"
+verify_query "ai_schema" "SELECT schema_name FROM information_schema.schemata WHERE schema_name='ai';"
 
 echo "[4/4] done. dump kept at: $DUMP_FILE"
 echo "Next: update Vercel and server DATABASE_URL to the managed URL (see docs/deployment/database-exposure-fix-managed-postgres.md)"
