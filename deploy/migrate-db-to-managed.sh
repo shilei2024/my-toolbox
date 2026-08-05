@@ -28,6 +28,11 @@ sanitize_url() {
 OLD_DB_URL="$(sanitize_url "$OLD_DB_URL")"
 NEW_DB_URL="$(sanitize_url "$NEW_DB_URL")"
 
+# Avoid hanging forever when a statement is blocked (e.g., by live app
+# connections holding locks on the managed database). A blocked statement now
+# fails after 2 minutes instead of waiting indefinitely.
+export PGOPTIONS="-c lock_timeout=120000 -c statement_timeout=300000"
+
 BACKUP_DIR="${BACKUP_DIR:-/opt/mindfulpenpal/backups}"
 mkdir -p "$BACKUP_DIR"
 DUMP_FILE="$BACKUP_DIR/mindfulpenpal-before-managed-$(date +%Y%m%d-%H%M%S).dump"

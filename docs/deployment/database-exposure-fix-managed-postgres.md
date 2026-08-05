@@ -262,7 +262,34 @@ telnet 101.43.122.182 5432
 | 现象 | 处理 |
 | --- | --- |
 | `pg_restore` 报 ERROR（例如 relation ... already exists） | 说明目标库已有表（可能是 Vercel 部署时 Flask 自动建的空表）。先用只读命令检查 `users` 数量和 `ai` schema，确认目标库没有独立数据后，用 `CLEAN_TARGET=1` 重跑 |
+| `pg_restore` 长时间卡住不动 | 通常是主站（Vercel）仍连着新库，DROP 表在等锁，或免费档连接数满了在排队。按 Ctrl+C 停止（dump 已保存），再按第 10 节排查 |
 | 免费档数据库休眠，首次访问慢 | 属正常现象；正式使用建议升级付费档 |
 | Vercel 部署后老账号消失 | 检查 `POSTGRES_URL` 是否指向 `db.prisma.io` 新库、旧的 `DATABASE_URL` 是否已删除，确认部署 Success |
 | worker 日志报数据库错误 | 确认服务器 env 的 `DATABASE_URL` 已改，并执行了 `--force-recreate` |
 | 连接串里密码含特殊字符 | 从 Vercel 项目环境变量里复制完整值，不要手工改动 |
+
+## 11. restore 卡住怎么办
+
+1. 按 `Ctrl+C` 停止（dump 文件已保存，不会丢数据）；
+2. 查看新库当前有哪些连接、是否在等锁：
+
+   ```bash
+   psql "$NEW_DB_URL" -c "SELECT pid, state, wait_event_type, wait_event, left(query,90) AS query FROM pg_stat_activity WHERE datname=current_database();"
+   ```
+
+   如果看到大量 `idle in transaction` / `active` 的连接（通常是 Vercel 主站），说明 DROP 表
+   在等它们释放锁；
+3. 终止其他连接后重试：
+
+   ```bash
+   psql "$NEW_DB_URL" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid();"
+   ```
+
+   如果提示没有权限，就去 Prisma Postgres / Vercel 集成控制台找 Reset（清空数据库）功能；
+4. 重新执行：
+
+   ```bash
+   CLEAN_TARGET=1 bash deploy/migrate-db-to-managed.sh
+   ```
+
+   如果第 2 步的查询本身也卡住，说明连接数已满，优先用控制台 Reset，而不是继续等待。
