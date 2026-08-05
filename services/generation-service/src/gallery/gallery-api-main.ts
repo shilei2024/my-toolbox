@@ -30,9 +30,10 @@ const redis = config.redisUrl ? new Redis(config.redisUrl, { lazyConnect: true, 
 if (redis) await redis.connect();
 const assets = new TencentCosGalleryAssetUrlResolver({ ...config.cos, allowedPublicHosts: config.assetHosts, privateUrlTtlSeconds: config.privateUrlTtlSeconds });
 const repository = new PostgresGalleryRepository(pool, assets);
+const cursorCodec = new GalleryCursorCodec(config.cursorSecret);
 const service = new GalleryService({
   repository,
-  cursor: new GalleryCursorCodec(config.cursorSecret),
+  cursor: cursorCodec,
   cache: redis ? new RedisGalleryCache(redis) : new NoopGalleryCache(),
   logger,
   cacheTtlSeconds: config.cacheTtlSeconds,
@@ -49,7 +50,7 @@ const generationQueue = config.redisUrl ? (() => {
   const publisher = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-cancel", maxRetriesPerRequest: 1, enableOfflineQueue: false });
   return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
 })() : undefined;
-const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
+const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
 const app = await createGalleryHttpServer({ service, admin, billing, generation, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
 
 await app.listen({ host: config.host, port: config.port });

@@ -1,11 +1,14 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
+import type { DecodedCursor } from "../gallery/cursor.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
-import type { CancelGenerationResult, CreateGenerationInput, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
+import type { CancelGenerationResult, CreateGenerationInput, GenerationPageResult, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
+import { clampToBounds, workflowBounds, workflowSizePresets } from "./workflow-options.ts";
 
-interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown> }
+interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown>; input_schema: unknown }
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
+  prompt: string; negative_prompt: string;
   visibility: GenerationVisibility; prompt_visibility: PromptVisibility; credits_reserved: string; credits_charged: string; cancel_requested_at: Date | null;
   created_at: Date; updated_at: Date; finished_at: Date | null; error_code: string | null; error_message: string | null; images: unknown;
 }
@@ -15,7 +18,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
   constructor(pool: Pool) { this.#pool = pool; }
 
   async listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
-    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, v.defaults
+    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, v.defaults, v.input_schema
       FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
       WHERE w.is_enabled AND EXISTS (
         SELECT 1 FROM ai.workflow_provider_bindings b JOIN ai.providers p ON p.id = b.provider_id
@@ -30,7 +33,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
       await client.query("BEGIN");
       const existing = await this.findByIdempotency(client, input.userId, input.idempotencyKey);
       if (existing) { await client.query("COMMIT"); return existing; }
-      const workflowResult = await client.query<WorkflowRow>(`SELECT v.id, w.slug, w.name, w.description, w.category, v.defaults
+      const workflowResult = await client.query<WorkflowRow>(`SELECT v.id, w.slug, w.name, w.description, w.category, v.defaults, v.input_schema
         FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
         WHERE w.slug = $1 AND w.is_enabled AND EXISTS (
           SELECT 1 FROM ai.workflow_provider_bindings b JOIN ai.providers p ON p.id = b.provider_id
@@ -38,6 +41,11 @@ export class PostgresGenerationRepository implements GenerationRepository {
         ) FOR SHARE`, [input.workflowSlug]);
       const workflow = workflowResult.rows[0];
       if (!workflow) throw new GenerationError("workflow_unavailable", "所选创作方式当前不可用。", 409);
+      const bounds = workflowBounds(workflow.input_schema);
+      if (input.width < bounds.width.min || input.width > bounds.width.max || input.height < bounds.height.min || input.height > bounds.height.max
+        || input.count < bounds.count.min || input.count > bounds.count.max) {
+        throw new GenerationError("invalid_request", "所选创作方式不支持该画面尺寸或数量，请按选项调整。", 400);
+      }
       const cost = (Number(workflowCreditCost(workflow.defaults, defaultCreditCost)) * input.count).toFixed(4);
       const inserted = await client.query<{ id: string }>(`INSERT INTO ai.generation_jobs (
           user_id, workflow_version_id, idempotency_key, prompt, negative_prompt, input_params,
@@ -68,6 +76,34 @@ export class PostgresGenerationRepository implements GenerationRepository {
   }
 
   findForViewer(id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> { return this.findById(this.#pool, id, userId, isAdmin); }
+
+  async listForViewer(userId: number, cursor: DecodedCursor | undefined, limit: number, status?: GenerationStatus): Promise<GenerationPageResult> {
+    const values: unknown[] = [userId, limit + 1];
+    const conditions = ["j.user_id = $1"];
+    if (status) {
+      values.push(status);
+      conditions.push(`j.status = $${values.length}`);
+    }
+    if (cursor) {
+      values.push(cursor.at, cursor.id);
+      conditions.push(`(j.created_at, j.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
+    }
+    const result = await this.#pool.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
+        j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count,
+        j.visibility, j.prompt_visibility, j.credits_reserved, j.credits_charged, j.cancel_requested_at,
+        j.created_at, j.updated_at, j.finished_at, j.error_code, j.error_message,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
+          FROM ai.images i WHERE i.job_id = j.id AND i.deleted_at IS NULL), '[]'::jsonb) AS images
+      FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY j.created_at DESC, j.id DESC
+      LIMIT $2`, values);
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    return { items: items.map(jobView), ...(hasMore && last ? { next: { at: last.created_at.toISOString(), id: last.id } } : {}) };
+  }
 
   async requestCancellation(id: string, userId: number, isAdmin: boolean): Promise<CancelGenerationResult | undefined> {
     const client = await this.#pool.connect();
@@ -109,7 +145,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
 
   private async findById(client: Pick<Pool, "query"> | PoolClient, id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> {
     const result = await client.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
-        j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
+        j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
         j.credits_reserved, j.credits_charged, j.cancel_requested_at, j.created_at, j.updated_at, j.finished_at,
         j.error_code, j.error_message,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
@@ -121,12 +157,18 @@ export class PostgresGenerationRepository implements GenerationRepository {
 }
 
 function workflowView(row: WorkflowRow, defaultCreditCost: string): GenerationWorkflowView {
+  const bounds = workflowBounds(row.input_schema);
+  const defaults = {
+    width: boundedInteger(row.defaults.width, 1024, 64, 8192),
+    height: boundedInteger(row.defaults.height, 1024, 64, 8192),
+    count: boundedInteger(row.defaults.count, 1, 1, 8),
+    visibility: visibility(row.defaults.visibility),
+  };
   return {
     slug: row.slug, name: row.name, description: row.description, category: row.category,
-    defaults: {
-      width: boundedInteger(row.defaults.width, 1024, 64, 8192), height: boundedInteger(row.defaults.height, 1024, 64, 8192),
-      count: boundedInteger(row.defaults.count, 1, 1, 8), visibility: visibility(row.defaults.visibility),
-    },
+    defaults: { ...defaults, count: clampToBounds(defaults.count, bounds.count) },
+    countRange: { min: bounds.count.min, max: bounds.count.max },
+    sizes: workflowSizePresets(bounds, defaults),
     creditCost: workflowCreditCost(row.defaults, defaultCreditCost),
   };
 }
@@ -141,6 +183,7 @@ function jobView(row: JobRow): GenerationView {
   const safeMessage = row.error_message?.replace(/[\r\n]/g, " ").slice(0, 240);
   return {
     id: row.id, status: row.status, workflowSlug: row.workflow_slug, workflowName: row.workflow_name,
+    prompt: row.prompt, negativePrompt: row.negative_prompt,
     width: row.requested_width, height: row.requested_height, count: row.requested_count,
     visibility: row.visibility, promptVisibility: row.prompt_visibility,
     creditsReserved: row.credits_reserved, creditsCharged: row.credits_charged,

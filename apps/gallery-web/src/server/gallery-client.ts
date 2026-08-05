@@ -52,7 +52,7 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
     },
   }).catch((reason: unknown) => {
     console.info(`[gallery] service request failed ${path}: ${String(reason)}`);
-    throw new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503);
+    throw new GalleryClientError("service_unavailable", "创作服务暂时不可用，请稍后重试。", 503);
   });
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -65,22 +65,22 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
 }
 
 export function safeProxyError(error: unknown): Response {
-  const normalized = error instanceof GalleryClientError ? error : new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503);
+  const normalized = error instanceof GalleryClientError ? error : new GalleryClientError("service_unavailable", "创作服务暂时不可用，请稍后重试。", 503);
   return Response.json({ error: { code: normalized.code, message: normalized.message } }, { status: normalized.status });
 }
 
 function serviceBaseUrl(): URL {
   const raw = process.env.GALLERY_SERVICE_BASE_URL?.trim();
-  if (!raw) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  if (!raw) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   let url: URL;
-  try { url = new URL(raw.endsWith("/") ? raw : `${raw}/`); } catch { throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503); }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  try { url = new URL(raw.endsWith("/") ? raw : `${raw}/`); } catch { throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503); }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   return url;
 }
 
 function internalSecret(): string {
   const secret = process.env.GALLERY_INTERNAL_HMAC_SECRET?.trim() ?? "";
-  if (Buffer.byteLength(secret, "utf8") < 32) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  if (Buffer.byteLength(secret, "utf8") < 32) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   return secret;
 }
 
@@ -105,7 +105,7 @@ function safeError(value: unknown): { code: string; message: string } {
       if (typeof code === "string" && typeof message === "string") return { code, message };
     }
   }
-  return { code: "service_unavailable", message: "Gallery service is temporarily unavailable" };
+  return { code: "service_unavailable", message: "创作服务暂时不可用，请稍后重试。" };
 }
 
 function isLoopback(hostname: string): boolean { return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]"; }
