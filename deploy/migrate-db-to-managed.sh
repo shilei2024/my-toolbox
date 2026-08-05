@@ -28,6 +28,22 @@ sanitize_url() {
 OLD_DB_URL="$(sanitize_url "$OLD_DB_URL")"
 NEW_DB_URL="$(sanitize_url "$NEW_DB_URL")"
 
+# Long-lived connections across the public internet can be silently dropped by
+# middleboxes. Ask libpq to send TCP keepalives so a dead connection fails fast
+# instead of hanging forever.
+append_conn_param() {
+  local url="$1" param="$2"
+  case "$url" in
+    *"${param%%=*}"=*) printf '%s' "$url" ;;
+    *"?"*) printf '%s&%s' "$url" "$param" ;;
+    *) printf '%s?%s' "$url" "$param" ;;
+  esac
+}
+OLD_DB_URL="$(append_conn_param "$OLD_DB_URL" "keepalives=1")"
+OLD_DB_URL="$(append_conn_param "$OLD_DB_URL" "keepalives_idle=30")"
+NEW_DB_URL="$(append_conn_param "$NEW_DB_URL" "keepalives=1")"
+NEW_DB_URL="$(append_conn_param "$NEW_DB_URL" "keepalives_idle=30")"
+
 # Avoid hanging forever when a statement is blocked (e.g., by live app
 # connections holding locks on the managed database). A blocked statement now
 # fails after 2 minutes instead of waiting indefinitely.

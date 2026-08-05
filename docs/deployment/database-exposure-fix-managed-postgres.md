@@ -99,27 +99,6 @@ bash deploy/migrate-db-to-managed.sh
 > ```bash
 > echo "$NEW_DB_URL" | grep -q db.prisma.io && echo "NEW_DB_URL OK"
 > ```
->
-> 推荐：把两个连接串保存到本机文件（只有 root 能读），以后重新登录只需 `source` 一次，
-> 不用反复粘贴密码：
->
-> ```bash
-> sudoedit /opt/mindfulpenpal/.migrate-env
-> ```
->
-> 文件里写两行（占位符换成真实值，不要发到聊天）：
->
-> ```text
-> export OLD_DB_URL="postgresql://..."
-> export NEW_DB_URL='postgres://...@db.prisma.io:5432/postgres?sslmode=require'
-> ```
->
-> 保存退出后：
->
-> ```bash
-> sudo chmod 600 /opt/mindfulpenpal/.migrate-env
-> source /opt/mindfulpenpal/.migrate-env
-> ```
 
 先确认旧库地址确实指向本机（下面的命令会把密码隐藏，只显示主机名，可以放心执行）：
 
