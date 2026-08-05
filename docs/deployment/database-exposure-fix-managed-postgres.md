@@ -73,11 +73,24 @@ git pull
 
 > 如果仓库还没有这个迁移脚本，先让 Codex 把脚本推送上去，再执行 `git pull`。
 
+> 可选（推荐）：迁移期间如果不想让 AI 服务继续往旧库写数据，可以先暂停生成相关容器，
+> 等第 4 步改好连接串后再启动：
+>
+> ```bash
+> cd /opt/mindfulpenpal
+> docker compose --env-file /etc/mindfulpenpal.production.env \
+>   -f deploy/docker-compose.production.yml --profile production stop \
+>   api dispatcher worker deletion-worker
+> ```
+>
+> 注意：暂停后 Gallery 的生成入口会暂时不可用，几分钟内恢复正常。
+
 把旧库地址从环境变量文件里取出来（不用手动敲密码），再填上新库地址：
 
 ```bash
-export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's#host.docker.internal#127.0.0.1#')"
+export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|')"
 export NEW_DB_URL='postgresql://<Neon用户名>:<Neon密码>@<ep-xxxx>-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require'
+psql "$NEW_DB_URL" -c "SELECT version();"
 sh deploy/migrate-db-to-managed.sh
 ```
 
