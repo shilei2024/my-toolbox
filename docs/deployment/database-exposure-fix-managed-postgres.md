@@ -52,8 +52,10 @@ Vercel 主站 Flask ──TLS──> Neon 托管 PostgreSQL
 3. 创建后把数据库关联到 **my-toolbox** 项目：Vercel 会自动把 `POSTGRES_URL`、
    `POSTGRES_URL_NON_POOLING` 等变量注入 Production / Preview / Development 环境，
    主站 Flask 不需要手动配置；
-4. 在数据库详情页复制 **Pooled connection** 连接串（带 `-pooler` 的那个），供第 4 步
-   服务器 AI 服务使用。连接串形如：
+4. 复制一条完整的 PostgreSQL 连接串（`postgresql://...`）。Vercel 页面里通常有两条：
+   `POSTGRES_URL`（池化连接）和 `POSTGRES_URL_NON_POOLING`（直连）；带 `-pooler`
+   字样的是池化连接，没有则是直连。本手册的迁移和 AI 服务用量都很小，**两条都可以用**，
+   任选一条即可。连接串形如：
 
    ```text
    postgresql://用户名:密码@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
@@ -150,8 +152,9 @@ CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
 sudoedit /etc/mindfulpenpal.production.env
 ```
 
-只改 `DATABASE_URL` 这一行，改成和第 1 步相同的 Pooled 连接串。**其他行（Redis、COS、
-Provider 等）一律不动。** 保存退出（nano 是 Ctrl+O 回车，再 Ctrl+X）。
+只改 `DATABASE_URL` 这一行，改成和第 1 步复制的同一条连接串（推荐用池化的
+`POSTGRES_URL`，直连也能用）。**其他行（Redis、COS、Provider 等）一律不动。**
+保存退出（nano 是 Ctrl+O 回车，再 Ctrl+X）。
 
 然后重启 AI 相关容器：
 
