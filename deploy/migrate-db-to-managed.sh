@@ -16,6 +16,18 @@ set -euo pipefail
 : "${OLD_DB_URL:?set OLD_DB_URL to the current database URL}"
 : "${NEW_DB_URL:?set NEW_DB_URL to the managed database URL}"
 
+# Prisma-generated URLs may include uselibpqcompat, which libpq 16 (pg_dump/psql)
+# rejects as an unknown query parameter. Strip it from both URLs before use.
+sanitize_url() {
+  local value="$1"
+  value="$(printf '%s' "$value" | sed 's/[?&]uselibpqcompat=[^&]*//')"
+  # If the removed parameter was the first one, restore the ? before remaining params.
+  value="$(printf '%s' "$value" | sed 's#\(://[^?]*\)&#\1?#')"
+  printf '%s' "$value"
+}
+OLD_DB_URL="$(sanitize_url "$OLD_DB_URL")"
+NEW_DB_URL="$(sanitize_url "$NEW_DB_URL")"
+
 BACKUP_DIR="${BACKUP_DIR:-/opt/mindfulpenpal/backups}"
 mkdir -p "$BACKUP_DIR"
 DUMP_FILE="$BACKUP_DIR/mindfulpenpal-before-managed-$(date +%Y%m%d-%H%M%S).dump"

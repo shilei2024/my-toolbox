@@ -87,11 +87,20 @@ git pull
 把旧库地址从环境变量文件里取出来（不用手动敲密码），再填上新库地址：
 
 ```bash
-export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|')"
+export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|' | sed 's/[?&]uselibpqcompat=[^&]*//')"
 export NEW_DB_URL='postgres://<用户名>:<密码>@db.prisma.io:5432/postgres?sslmode=require'
 psql "$NEW_DB_URL" -c "SELECT version();"
 bash deploy/migrate-db-to-managed.sh
 ```
+
+先确认旧库地址确实指向本机（下面的命令会把密码隐藏，只显示主机名，可以放心执行）：
+
+```bash
+grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | sed -E 's#(postgres(ql)?://)[^@]*@#\1***@#'
+```
+
+预期显示 `host.docker.internal` 或 `127.0.0.1` 或 `localhost`。如果显示 `db.prisma.io`，
+说明服务器 AI 服务还在连 Prisma 旧库，此时**不要**直接迁移，先停下来找 Codex 确认。
 
 预期输出（数字可能不同，但结构一致）：
 
