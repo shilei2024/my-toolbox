@@ -14,7 +14,7 @@ import { ProductionGenerationPipeline } from "../src/pipeline/production-generat
 import { ProviderError } from "../src/providers/errors.ts";
 import { MockImageProvider } from "../src/providers/mock.provider.ts";
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../src/providers/types.ts";
-import { TencentCosStorage } from "../src/storage/tencent-cos.storage.ts";
+import { sanitizeMetadataKey, TencentCosStorage } from "../src/storage/tencent-cos.storage.ts";
 import { injectPlaceholders, WorkflowPlaceholderError } from "../src/workflows/placeholder-injector.ts";
 import { WorkflowLoadError, WorkflowLoader } from "../src/workflows/workflow-loader.ts";
 
@@ -139,12 +139,23 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
     assert.equal(result.providerMetadata.outputCount, 1);
     assert.equal(uploads.length, 1);
     assert.equal(deletes.length, 0);
+    const headers = uploads[0]?.Headers as Record<string, unknown> | undefined;
+    assert.equal(headers?.["x-cos-meta-job-id"], "job-phase4");
+    assert.equal(headers?.["x-cos-meta-output-index"], "0");
+    assert.equal("x-cos-meta-job_id" in (headers ?? {}), false);
     assert.deepEqual(requests, ["POST /prompt", "GET /history/prompt-e2e", "GET /view"]);
     assert.equal(logs.some((entry) => entry.event === "generation.completed" && !("prompt" in entry.fields)), true);
     await assert.rejects(access(path.join(root, "attempt-phase4-0.png")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("COS metadata header names are normalized to hyphenated lowercase keys", () => {
+  assert.equal(sanitizeMetadataKey("job_id"), "job-id");
+  assert.equal(sanitizeMetadataKey("output_index"), "output-index");
+  assert.equal(sanitizeMetadataKey("Job ID"), "job-id");
+  assert.equal(sanitizeMetadataKey("___"), "meta");
 });
 
 test("queued cancellation uses targeted queue deletion and leaves global interrupt disabled", async () => {

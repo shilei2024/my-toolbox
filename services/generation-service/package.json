@@ -11,12 +11,12 @@
     "test:phase8:pg": "node --experimental-strip-types --test test/phase8-admin.pg.integration.ts",
     "test:phase9:pg": "node --experimental-strip-types --test test/phase9-multi-provider.pg.integration.ts",
     "test:phase10:pg": "node --experimental-strip-types --test test/phase10-billing.pg.integration.ts",
-    "gallery:start": "node --experimental-strip-types src/gallery/gallery-api-main.ts",
-    "generation:dispatcher": "node --experimental-strip-types src/queue/generation-dispatcher-main.ts",
-    "generation:worker": "node --experimental-strip-types src/queue/generation-worker-main.ts",
-    "billing:webhook": "node --experimental-strip-types src/billing/billing-webhook-main.ts",
-    "gallery:deletion-worker": "node --experimental-strip-types src/gallery/gallery-deletion-main.ts",
-    "smoke:jimeng": "node --experimental-strip-types scripts/live-jimeng-smoke.ts",
+    "gallery:start": "node --env-file-if-exists=.env --experimental-strip-types src/gallery/gallery-api-main.ts",
+    "generation:dispatcher": "node --env-file-if-exists=.env --experimental-strip-types src/queue/generation-dispatcher-main.ts",
+    "generation:worker": "node --env-file-if-exists=.env --experimental-strip-types src/queue/generation-worker-main.ts",
+    "billing:webhook": "node --env-file-if-exists=.env --experimental-strip-types src/billing/billing-webhook-main.ts",
+    "gallery:deletion-worker": "node --env-file-if-exists=.env --experimental-strip-types src/gallery/gallery-deletion-main.ts",
+    "smoke:jimeng": "node --env-file-if-exists=.env --experimental-strip-types scripts/live-jimeng-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

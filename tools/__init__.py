@@ -62,8 +62,9 @@ def sync_tool_registry(app: Flask) -> None:
             if entry["id"] == "ai_image" and app.config.get("AI_IMAGE_EXTERNAL_URL"):
                 configured_external_url = str(app.config["AI_IMAGE_EXTERNAL_URL"]).strip()
             parsed_external_url = urlparse(configured_external_url)
-            if configured_external_url and (parsed_external_url.scheme != "https" or not parsed_external_url.netloc):
-                logger.error("Tool %s external URL must be an absolute HTTPS URL; hiding entry", entry["id"])
+            loopback_http = parsed_external_url.scheme == "http" and parsed_external_url.hostname in {"localhost", "127.0.0.1", "::1"}
+            if configured_external_url and (parsed_external_url.scheme not in {"https", "http"} or not parsed_external_url.netloc or (parsed_external_url.scheme == "http" and not loopback_http)):
+                logger.error("Tool %s external URL must be an absolute HTTPS URL (HTTP allowed only on loopback); hiding entry", entry["id"])
                 configured_external_url = ""
             tool.external_url = configured_external_url
             tool.order = int(entry.get("order", 100))
