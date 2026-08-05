@@ -93,6 +93,13 @@ psql "$NEW_DB_URL" -c "SELECT version();"
 bash deploy/migrate-db-to-managed.sh
 ```
 
+> 提示：`export` 的变量只在当前终端会话有效。如果中途重新登录过服务器，需要重新执行上面
+> 两个 `export`。可以用下面的命令检查新库变量是否还在（只输出 OK，不会显示密码）：
+>
+> ```bash
+> echo "$NEW_DB_URL" | grep -q db.prisma.io && echo "NEW_DB_URL OK"
+> ```
+
 先确认旧库地址确实指向本机（下面的命令会把密码隐藏，只显示主机名，可以放心执行）：
 
 ```bash
