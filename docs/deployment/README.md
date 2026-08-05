@@ -12,6 +12,7 @@
 - [回滚指南](../operations/rollback-guide.md)
 - [AI 增强版生产部署指南（非程序员版）](../../deploy/DEPLOY_GUIDE.md)
 - [上线验收清单](ai-merge-acceptance.md)
+- [关闭 5432 公网暴露：数据库迁移到托管 PostgreSQL](database-exposure-fix-managed-postgres.md)
 
 ## 配置与部署文档
 
