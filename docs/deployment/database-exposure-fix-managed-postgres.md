@@ -314,3 +314,29 @@ telnet 101.43.122.182 5432
    ```
 
    如果第 2 步的查询本身也卡住，说明连接数已满，优先用控制台 Reset，而不是继续等待。
+
+## 12. 从头重来：删除并重建托管库
+
+如果目标库已经被反复失败的 restore 或主站自动写入弄脏，最干净的做法是删除重建：
+
+1. Vercel → my-toolbox → Settings → General → Danger Zone → **Pause Project**
+   （先暂停主站，防止它再往数据库写数据）；
+2. Vercel → Storage 或 Integrations → Prisma Postgres → **删除刚才的数据库**
+   （旧连接串随之作废，之前泄露过的密码也一起失效）；
+3. 重新创建 Prisma Postgres 数据库，并关联到 my-toolbox；
+4. 复制新的连接串（`POSTGRES_URL` / `PRISMA_DATABASE_URL` 的值，地址是 `db.prisma.io`），
+   不要发到聊天；
+5. 在服务器重新设置 `NEW_DB_URL`，先确认新库是空的：
+
+   ```bash
+   psql "$NEW_DB_URL" -c "\dt public.*"
+   ```
+
+   预期输出 `Did not find any relations.`；
+6. 新库为空时直接执行普通迁移（不需要 `CLEAN_TARGET=1`）：
+
+   ```bash
+   bash deploy/migrate-db-to-managed.sh
+   ```
+
+7. 验证 `[4/4] done.` 后，回到 Vercel **Resume** 恢复主站，再用老账号登录验证。
