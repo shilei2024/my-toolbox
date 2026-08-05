@@ -254,7 +254,7 @@ telnet 101.43.122.182 5432
 
 | 现象 | 处理 |
 | --- | --- |
-| `pg_restore` 报 ERROR | 贴出完整错误；确认目标库为空后可用 `CLEAN_TARGET=1` 重跑 |
+| `pg_restore` 报 ERROR（例如 relation ... already exists） | 说明目标库已有表（可能是 Vercel 部署时 Flask 自动建的空表）。先用只读命令检查 `users` 数量和 `ai` schema，确认目标库没有独立数据后，用 `CLEAN_TARGET=1` 重跑 |
 | 免费档数据库休眠，首次访问慢 | 属正常现象；正式使用建议升级付费档 |
 | Vercel 部署后老账号消失 | 检查 `POSTGRES_URL` 是否指向 `db.prisma.io` 新库、旧的 `DATABASE_URL` 是否已删除，确认部署 Success |
 | worker 日志报数据库错误 | 确认服务器 env 的 `DATABASE_URL` 已改，并执行了 `--force-recreate` |
