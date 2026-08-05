@@ -87,7 +87,7 @@ git pull
 把旧库地址从环境变量文件里取出来（不用手动敲密码），再填上新库地址：
 
 ```bash
-export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|' | sed 's/[?&]uselibpqcompat=[^&]*//')"
+export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|' | sed 's/[?&]uselibpqcompat=[^&]*//' | sed 's#\(://[^?]*\)&#\1?#')"
 export NEW_DB_URL='postgres://<用户名>:<密码>@db.prisma.io:5432/postgres?sslmode=require'
 psql "$NEW_DB_URL" -c "SELECT version();"
 bash deploy/migrate-db-to-managed.sh
