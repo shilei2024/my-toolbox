@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { GalleryCursorCodec, type DecodedCursor } from "../src/gallery/cursor.ts";
 import { GenerationError } from "../src/generation/errors.ts";
 import { GenerationService } from "../src/generation/generation-service.ts";
+import { clampToBounds, workflowBounds, workflowSizePresets } from "../src/generation/workflow-options.ts";
 import { createGalleryHttpServer } from "../src/gallery/http-server.ts";
 import { InternalViewerContextCodec, USER_CONTEXT_HEADER, USER_CONTEXT_SIGNATURE_HEADER } from "../src/gallery/internal-auth.ts";
 import type { GenerationRepository } from "../src/generation/repository.ts";
@@ -20,7 +21,16 @@ class FakeRepository implements GenerationRepository {
   cancelled?: string;
   page: GenerationPageResult = { items: [] };
   listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
-    return Promise.resolve([{ slug: "portrait-v1", name: "质感人像", description: "", category: "portrait", defaults: { width: 1024, height: 1024, count: 1, visibility: "private" }, creditCost: defaultCreditCost }]);
+    return Promise.resolve([{
+      slug: "portrait-v1", name: "质感人像", description: "", category: "portrait",
+      defaults: { width: 1024, height: 1024, count: 1, visibility: "private" },
+      countRange: { min: 1, max: 4 },
+      sizes: [
+        { width: 1024, height: 1024 }, { width: 768, height: 1024 }, { width: 1024, height: 768 },
+        { width: 768, height: 1344 }, { width: 1344, height: 768 }, { width: 832, height: 1248 }, { width: 1248, height: 832 },
+      ],
+      creditCost: defaultCreditCost,
+    }]);
   }
   create(input: CreateGenerationInput): Promise<GenerationView> { this.created = input; return Promise.resolve(generation); }
   findForViewer(id: string): Promise<GenerationView | undefined> { return Promise.resolve(id === generation.id ? generation : undefined); }
@@ -90,6 +100,26 @@ describe("M1 generation API domain", () => {
     assert.equal(parseDefaultModeration("approved"), "approved");
     assert.equal(parseDefaultModeration("APPROVED"), "approved");
     assert.throws(() => parseDefaultModeration("auto"), /GALLERY_DEFAULT_MODERATION/);
+  });
+
+  it("derives per-workflow count bounds and size presets from the input schema", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        width: { type: "integer", minimum: 1000, maximum: 1100 },
+        height: { type: "integer", minimum: 1000, maximum: 1100 },
+        count: { type: "integer", minimum: 1, maximum: 1 },
+      },
+    };
+    const bounds = workflowBounds(schema);
+    assert.deepEqual(bounds.count, { min: 1, max: 1 });
+    assert.equal(bounds.width.min, 1000);
+    assert.equal(bounds.width.max, 1100);
+    assert.equal(clampToBounds(4, bounds.count), 1);
+    const sizes = workflowSizePresets(bounds, { width: 1024, height: 1024 });
+    assert.equal(sizes.length, 1);
+    assert.deepEqual(sizes[0], { width: 1024, height: 1024 });
+    assert.deepEqual(workflowBounds({ properties: { count: { minimum: 2, maximum: 6 } } }).count, { min: 2, max: 6 });
   });
 
   it("exposes the signed internal HTTP contract and returns 202 for durable creation", async () => {

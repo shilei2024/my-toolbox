@@ -60,3 +60,12 @@ sequenceDiagram
 - Next.js 工作台内嵌预览：完成后通过既有 Gallery BFF 获取资产 URL，不新增浏览器可访问的存储凭证；最近任务面板提供状态、取消与失败回填。
 
 安全与回滚：列表接口仅服务 owner 查询，`limit` 1–50、`status` 白名单、游标签名校验；前端预览 URL 来自 Gallery 资产解析器（HTTPS + 主机白名单/短期签名）。回滚只需撤回本分支前端路由与 `GET /v1/generations` 路由，不涉及数据库迁移，历史任务与积分数据不受影响。
+
+## M1.3 创作首页体验与工作流约束
+
+针对 Preview 验收反馈补齐两类约束：
+
+- `GenerationWorkflowView` 的 `countRange` / `sizes` 由 `workflow_versions.input_schema` 的 `minimum`/`maximum` 派生，前端不再硬编码比例与数量；`create` 在事务内按同一份 schema 拒绝越界请求，避免前端选项与服务端校验不一致。
+- 工作台登录态以 `/api/me/session` 为准，计费摘要只做余额展示；服务不可用时错误文案统一本地化，游客与登录态有明确区分，首页仅保留"创作 + 预览"核心内容。
+
+回滚：本变更不涉及数据库迁移与任务/积分数据；回滚服务端 `create` 校验与 Workflow 字段、前端工作台即可，无数据风险。

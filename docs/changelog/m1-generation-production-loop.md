@@ -39,6 +39,17 @@
 
 验证：Generation Service typecheck + 65 项测试（新增列表权限/校验/游标/HTTP 契约）。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
 
+## M1.3 创作首页体验与工作流约束修复
+
+修复 Preview 验收反馈的首页问题，并清理同类体验缺陷：
+
+- **工作流选项**：`GenerationWorkflow` 新增 `countRange` 与 `sizes`（由 `workflow_versions.input_schema` 派生）；创建任务时服务端按 input_schema 校验尺寸与数量，前端按所选创作方式动态渲染比例（1:1 / 3:4 / 4:3 / 9:16 / 16:9 / 2:3 / 3:2）与生成数量，避免"只能 1 张却可选 4 张"。
+- **登录态**：创作工作台改为通过 `/api/me/session` 判定登录，计费接口不可用时不再把登录用户显示成游客；账户卡片区分游客 / 已登录 / 余额暂不可用三种状态。
+- **首页精简**：移除"平台级安全边界"说明与冗长占位文案，未生成时仅显示"生成结果将显示在这里"；工作流加载失败时显示中文提示并提供"重试"按钮。
+- **错误文案本地化**：`GalleryClientError` 与 BFF 代理的英文报错统一改为中文，覆盖画廊、作品详情、账单、后台等所有会把错误透出给用户的页面。
+
+验证：Generation Service typecheck + 66 项测试。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
+
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。

@@ -23,6 +23,8 @@ export interface GenerationWorkflowView {
     readonly count: number;
     readonly visibility: GenerationVisibility;
   };
+  readonly countRange: { readonly min: number; readonly max: number };
+  readonly sizes: readonly { readonly width: number; readonly height: number }[];
   readonly creditCost: string;
 }
 

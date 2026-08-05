@@ -558,16 +558,6 @@ select:focus-visible {
 .task-strip strong { font-size: 12px; }
 .task-strip small { margin-top: 4px; color: var(--ink-muted); font-size: 11px; }
 
-.privacy-assurance {
-  margin: 10px 0 0;
-  padding: 14px;
-  border-radius: var(--radius-control);
-  background: #f1f5f9;
-}
-
-.privacy-assurance strong { font-size: 12px; }
-.privacy-assurance p { margin: 5px 0 0; color: var(--ink-muted); font-size: 11px; line-height: 1.6; }
-
 .workflow-loading,
 .inline-error {
   padding: 18px;
@@ -577,6 +567,9 @@ select:focus-visible {
 
 .workflow-loading { color: var(--ink-muted); background: #f1f5f9; }
 .inline-error { margin: 14px 0; color: var(--error); background: var(--error-soft); }
+.inline-error-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.inline-error-row .inline-error { margin: 0; flex: 1; }
+.inline-error-row .button { flex: 0 0 auto; }
 
 .advanced-prompt { margin-top: 12px; }
 .advanced-prompt summary { color: var(--ink-muted); cursor: pointer; font-size: 12px; font-weight: 700; }

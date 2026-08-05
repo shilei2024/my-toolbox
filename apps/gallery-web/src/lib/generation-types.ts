@@ -7,6 +7,8 @@ export interface GenerationWorkflow {
   readonly description: string;
   readonly category: string;
   readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility };
+  readonly countRange: { readonly min: number; readonly max: number };
+  readonly sizes: readonly { readonly width: number; readonly height: number }[];
   readonly creditCost: string;
 }
 

@@ -3,8 +3,9 @@ import type { DecodedCursor } from "../gallery/cursor.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
 import type { CancelGenerationResult, CreateGenerationInput, GenerationPageResult, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
+import { clampToBounds, workflowBounds, workflowSizePresets } from "./workflow-options.ts";
 
-interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown> }
+interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown>; input_schema: unknown }
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
   prompt: string; negative_prompt: string;
@@ -17,7 +18,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
   constructor(pool: Pool) { this.#pool = pool; }
 
   async listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
-    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, v.defaults
+    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, v.defaults, v.input_schema
       FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
       WHERE w.is_enabled AND EXISTS (
         SELECT 1 FROM ai.workflow_provider_bindings b JOIN ai.providers p ON p.id = b.provider_id
@@ -32,7 +33,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
       await client.query("BEGIN");
       const existing = await this.findByIdempotency(client, input.userId, input.idempotencyKey);
       if (existing) { await client.query("COMMIT"); return existing; }
-      const workflowResult = await client.query<WorkflowRow>(`SELECT v.id, w.slug, w.name, w.description, w.category, v.defaults
+      const workflowResult = await client.query<WorkflowRow>(`SELECT v.id, w.slug, w.name, w.description, w.category, v.defaults, v.input_schema
         FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
         WHERE w.slug = $1 AND w.is_enabled AND EXISTS (
           SELECT 1 FROM ai.workflow_provider_bindings b JOIN ai.providers p ON p.id = b.provider_id
@@ -40,6 +41,11 @@ export class PostgresGenerationRepository implements GenerationRepository {
         ) FOR SHARE`, [input.workflowSlug]);
       const workflow = workflowResult.rows[0];
       if (!workflow) throw new GenerationError("workflow_unavailable", "所选创作方式当前不可用。", 409);
+      const bounds = workflowBounds(workflow.input_schema);
+      if (input.width < bounds.width.min || input.width > bounds.width.max || input.height < bounds.height.min || input.height > bounds.height.max
+        || input.count < bounds.count.min || input.count > bounds.count.max) {
+        throw new GenerationError("invalid_request", "所选创作方式不支持该画面尺寸或数量，请按选项调整。", 400);
+      }
       const cost = (Number(workflowCreditCost(workflow.defaults, defaultCreditCost)) * input.count).toFixed(4);
       const inserted = await client.query<{ id: string }>(`INSERT INTO ai.generation_jobs (
           user_id, workflow_version_id, idempotency_key, prompt, negative_prompt, input_params,
@@ -151,12 +157,18 @@ export class PostgresGenerationRepository implements GenerationRepository {
 }
 
 function workflowView(row: WorkflowRow, defaultCreditCost: string): GenerationWorkflowView {
+  const bounds = workflowBounds(row.input_schema);
+  const defaults = {
+    width: boundedInteger(row.defaults.width, 1024, 64, 8192),
+    height: boundedInteger(row.defaults.height, 1024, 64, 8192),
+    count: boundedInteger(row.defaults.count, 1, 1, 8),
+    visibility: visibility(row.defaults.visibility),
+  };
   return {
     slug: row.slug, name: row.name, description: row.description, category: row.category,
-    defaults: {
-      width: boundedInteger(row.defaults.width, 1024, 64, 8192), height: boundedInteger(row.defaults.height, 1024, 64, 8192),
-      count: boundedInteger(row.defaults.count, 1, 1, 8), visibility: visibility(row.defaults.visibility),
-    },
+    defaults: { ...defaults, count: clampToBounds(defaults.count, bounds.count) },
+    countRange: { min: bounds.count.min, max: bounds.count.max },
+    sizes: workflowSizePresets(bounds, defaults),
     creditCost: workflowCreditCost(row.defaults, defaultCreditCost),
   };
 }

@@ -123,6 +123,20 @@ components:
             height: { type: integer }
             count: { type: integer }
             visibility: { enum: [public, private] }
+        countRange:
+          type: object
+          required: [min, max]
+          properties:
+            min: { type: integer }
+            max: { type: integer }
+        sizes:
+          type: array
+          items:
+            type: object
+            required: [width, height]
+            properties:
+              width: { type: integer }
+              height: { type: integer }
         creditCost: { type: string, pattern: "^\\d+\\.\\d{4}$" }
     CreateGeneration:
       type: object
