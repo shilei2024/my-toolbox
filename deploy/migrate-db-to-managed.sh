@@ -6,10 +6,10 @@
 # Usage:
 #   export OLD_DB_URL='postgresql://...'   # current local database
 #   export NEW_DB_URL='postgresql://...'   # empty managed database
-#   sh deploy/migrate-db-to-managed.sh
+#   bash deploy/migrate-db-to-managed.sh
 #
 # Retry on a failed/empty target:
-#   CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
+#   CLEAN_TARGET=1 bash deploy/migrate-db-to-managed.sh
 #
 set -euo pipefail
 

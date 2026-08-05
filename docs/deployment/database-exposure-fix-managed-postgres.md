@@ -90,7 +90,7 @@ git pull
 export OLD_DB_URL="$(grep '^DATABASE_URL=' /etc/mindfulpenpal.production.env | cut -d= -f2- | sed 's|host.docker.internal|127.0.0.1|')"
 export NEW_DB_URL='postgres://<用户名>:<密码>@db.prisma.io:5432/postgres?sslmode=require'
 psql "$NEW_DB_URL" -c "SELECT version();"
-sh deploy/migrate-db-to-managed.sh
+bash deploy/migrate-db-to-managed.sh
 ```
 
 预期输出（数字可能不同，但结构一致）：
@@ -122,7 +122,7 @@ sh deploy/migrate-db-to-managed.sh
 可以带 `CLEAN_TARGET=1` 重跑：
 
 ```bash
-CLEAN_TARGET=1 sh deploy/migrate-db-to-managed.sh
+CLEAN_TARGET=1 bash deploy/migrate-db-to-managed.sh
 ```
 
 ## 5. 第 3 步：切换 Vercel 主站到托管库
