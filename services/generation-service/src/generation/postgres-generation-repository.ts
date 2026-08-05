@@ -1,11 +1,13 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
+import type { DecodedCursor } from "../gallery/cursor.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
-import type { CancelGenerationResult, CreateGenerationInput, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
+import type { CancelGenerationResult, CreateGenerationInput, GenerationPageResult, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
 
 interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown> }
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
+  prompt: string; negative_prompt: string;
   visibility: GenerationVisibility; prompt_visibility: PromptVisibility; credits_reserved: string; credits_charged: string; cancel_requested_at: Date | null;
   created_at: Date; updated_at: Date; finished_at: Date | null; error_code: string | null; error_message: string | null; images: unknown;
 }
@@ -69,6 +71,34 @@ export class PostgresGenerationRepository implements GenerationRepository {
 
   findForViewer(id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> { return this.findById(this.#pool, id, userId, isAdmin); }
 
+  async listForViewer(userId: number, cursor: DecodedCursor | undefined, limit: number, status?: GenerationStatus): Promise<GenerationPageResult> {
+    const values: unknown[] = [userId, limit + 1];
+    const conditions = ["j.user_id = $1"];
+    if (status) {
+      values.push(status);
+      conditions.push(`j.status = $${values.length}`);
+    }
+    if (cursor) {
+      values.push(cursor.at, cursor.id);
+      conditions.push(`(j.created_at, j.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
+    }
+    const result = await this.#pool.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
+        j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count,
+        j.visibility, j.prompt_visibility, j.credits_reserved, j.credits_charged, j.cancel_requested_at,
+        j.created_at, j.updated_at, j.finished_at, j.error_code, j.error_message,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
+          FROM ai.images i WHERE i.job_id = j.id AND i.deleted_at IS NULL), '[]'::jsonb) AS images
+      FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY j.created_at DESC, j.id DESC
+      LIMIT $2`, values);
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    return { items: items.map(jobView), ...(hasMore && last ? { next: { at: last.created_at.toISOString(), id: last.id } } : {}) };
+  }
+
   async requestCancellation(id: string, userId: number, isAdmin: boolean): Promise<CancelGenerationResult | undefined> {
     const client = await this.#pool.connect();
     try {
@@ -109,7 +139,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
 
   private async findById(client: Pick<Pool, "query"> | PoolClient, id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> {
     const result = await client.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
-        j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
+        j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
         j.credits_reserved, j.credits_charged, j.cancel_requested_at, j.created_at, j.updated_at, j.finished_at,
         j.error_code, j.error_message,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
@@ -141,6 +171,7 @@ function jobView(row: JobRow): GenerationView {
   const safeMessage = row.error_message?.replace(/[\r\n]/g, " ").slice(0, 240);
   return {
     id: row.id, status: row.status, workflowSlug: row.workflow_slug, workflowName: row.workflow_name,
+    prompt: row.prompt, negativePrompt: row.negative_prompt,
     width: row.requested_width, height: row.requested_height, count: row.requested_count,
     visibility: row.visibility, promptVisibility: row.prompt_visibility,
     creditsReserved: row.credits_reserved, creditsCharged: row.credits_charged,

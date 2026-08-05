@@ -20,6 +20,28 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/Workflow" } }
   /v1/generations:
+    get:
+      operationId: listGenerations
+      parameters:
+        - in: query
+          name: cursor
+          required: false
+          schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50 }
+        - in: query
+          name: status
+          required: false
+          schema: { $ref: "#/components/schemas/GenerationStatus" }
+      responses:
+        "200":
+          description: Viewer-scoped recent generation tasks with an optional signed next cursor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationPage" }
+        "401": { $ref: "#/components/responses/Error" }
     post:
       operationId: createGeneration
       parameters:
@@ -118,12 +140,14 @@ components:
         parameters: { type: object }
     Generation:
       type: object
-      required: [id, status, workflowSlug, workflowName, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images]
+      required: [id, status, workflowSlug, workflowName, prompt, negativePrompt, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images]
       properties:
         id: { type: string }
-        status: { enum: [pending, running, completed, failed, cancelled] }
+        status: { $ref: "#/components/schemas/GenerationStatus" }
         workflowSlug: { type: string }
         workflowName: { type: string }
+        prompt: { type: string }
+        negativePrompt: { type: string }
         width: { type: integer }
         height: { type: integer }
         count: { type: integer }
@@ -141,3 +165,14 @@ components:
             type: object
             required: [id, slug]
             properties: { id: { type: string }, slug: { type: string } }
+    GenerationStatus:
+      type: string
+      enum: [pending, running, completed, failed, cancelled]
+    GenerationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Generation" }
+        nextCursor: { type: string }

@@ -46,6 +46,8 @@ export interface GenerationView {
   readonly status: GenerationStatus;
   readonly workflowSlug: string;
   readonly workflowName: string;
+  readonly prompt: string;
+  readonly negativePrompt: string;
   readonly width: number;
   readonly height: number;
   readonly count: number;
@@ -59,6 +61,22 @@ export interface GenerationView {
   readonly finishedAt?: string;
   readonly error?: { readonly code: string; readonly message: string };
   readonly images: readonly { readonly id: string; readonly slug: string }[];
+}
+
+export interface GenerationListRequest {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: GenerationStatus;
+}
+
+export interface GenerationPageResult {
+  readonly items: readonly GenerationView[];
+  readonly next?: { readonly at: string; readonly id: string };
+}
+
+export interface GenerationPage {
+  readonly items: readonly GenerationView[];
+  readonly nextCursor?: string;
 }
 
 export interface CancelGenerationResult {

@@ -6,6 +6,7 @@ import type { BillingService } from "../billing/billing-service.ts";
 import { BillingError } from "../billing/errors.ts";
 import type { GenerationService } from "../generation/generation-service.ts";
 import { GenerationError, normalizeGenerationError } from "../generation/errors.ts";
+import type { GenerationListRequest, GenerationStatus } from "../generation/types.ts";
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
 import { GalleryError, normalizeGalleryError } from "./errors.ts";
 import type { GalleryService } from "./gallery-service.ts";
@@ -47,6 +48,9 @@ export async function createGalleryHttpServer(options: {
     app.get("/v1/generation/workflows", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       viewer(request, options.auth);
       return { items: await options.generation!.listWorkflows() };
+    });
+    app.get("/v1/generations", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+      return options.generation!.list(parseGenerationListRequest(request.query), viewer(request, options.auth));
     });
     app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
       const result = await options.generation!.create(request.body, scalarHeader(request.headers["idempotency-key"]), viewer(request, options.auth));
@@ -131,6 +135,18 @@ function parsePageRequest(value: unknown): GalleryPageRequest {
     ...(tag ? { tag } : {}),
     ...(workflow ? { workflow } : {}),
     ...(orientation ? { orientation: orientation as "portrait" | "square" | "landscape" } : {}),
+  };
+}
+
+function parseGenerationListRequest(value: unknown): GenerationListRequest {
+  const query = record(value);
+  const cursor = scalar(query.cursor);
+  const limit = scalar(query.limit);
+  const status = scalar(query.status);
+  return {
+    ...(cursor ? { cursor } : {}),
+    ...(limit ? { limit: Number(limit) } : {}),
+    ...(status ? { status: status as GenerationStatus } : {}),
   };
 }
 

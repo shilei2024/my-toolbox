@@ -1,16 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BillingSummary } from "@/lib/billing-types";
-import type { GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
+import type { GenerationPage, GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
 
 type LoadState = "loading" | "ready" | "error";
 const terminal = new Set(["completed", "failed", "cancelled"]);
+const RECENT_LIMIT = 8;
 
 export function GenerationWorkbench() {
   const [workflows, setWorkflows] = useState<readonly GenerationWorkflow[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [recent, setRecent] = useState<readonly GenerationView[]>([]);
+  const [recentState, setRecentState] = useState<LoadState>("loading");
+  const [previewUrls, setPreviewUrls] = useState<Readonly<Record<string, string>>>({});
   const [selected, setSelected] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -24,6 +28,32 @@ export function GenerationWorkbench() {
   const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef<{ readonly timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const creationAttemptRef = useRef<{ readonly payload: string; readonly key: string } | undefined>(undefined);
+
+  const refreshRecent = useCallback(async () => {
+    try {
+      const body = await fetch(`/api/generations?limit=${RECENT_LIMIT}`, { cache: "no-store" }).then(readJson) as GenerationPage;
+      if (Array.isArray(body.items)) {
+        setRecent(body.items);
+        setRecentState("ready");
+      }
+    } catch {
+      setRecentState("error");
+    }
+  }, []);
+
+  const loadPreviews = useCallback(async (slugs: readonly string[]) => {
+    const entries = await Promise.all(slugs.map(async (slug) => {
+      try {
+        const detail = await fetch(`/api/gallery/${encodeURIComponent(slug)}`, { cache: "no-store" }).then(readJson) as { asset?: { url?: unknown } };
+        return typeof detail.asset?.url === "string" ? [slug, detail.asset.url] as const : undefined;
+      } catch { return undefined; }
+    }));
+    setPreviewUrls((current) => {
+      const next = { ...current };
+      for (const entry of entries) if (entry) next[entry[0]] = entry[1];
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -44,6 +74,16 @@ export function GenerationWorkbench() {
       setBilling(billingBody);
       setLoadState("ready");
     }).catch((error) => { if (active) { setLoadState("error"); setMessage(error instanceof Error ? error.message : "创作服务暂时不可用。"); } });
+    fetch(`/api/generations?limit=${RECENT_LIMIT}`, { cache: "no-store" })
+      .then(readJson)
+      .then((body) => {
+        const items = (body as { items?: unknown }).items;
+        if (active && Array.isArray(items)) {
+          setRecent(items as GenerationView[]);
+          setRecentState("ready");
+        }
+      })
+      .catch(() => { if (active) setRecentState("error"); });
     return () => { active = false; if (pollRef.current?.timer) clearTimeout(pollRef.current.timer); };
   }, []);
 
@@ -66,6 +106,7 @@ export function GenerationWorkbench() {
       const created = await readJson(response) as GenerationView;
       creationAttemptRef.current = undefined;
       setGeneration(created);
+      void refreshRecent();
       schedulePoll(created.id);
     } catch (error) { setMessage(error instanceof Error ? error.message : "任务创建失败，请稍后重试。"); }
     finally { setSubmitting(false); }
@@ -77,6 +118,10 @@ export function GenerationWorkbench() {
       try {
         const current = await fetch(`/api/generations/${encodeURIComponent(id)}`, { cache: "no-store" }).then(readJson) as GenerationView;
         setGeneration(current);
+        if (current.status === "completed" && current.images.length > 0) {
+          void loadPreviews(current.images.map((image) => image.slug));
+          void refreshRecent();
+        }
         if (!terminal.has(current.status)) schedulePoll(id, 2000);
       } catch (error) {
         // Transient failures must not silently stop progress updates; back off
@@ -94,8 +139,41 @@ export function GenerationWorkbench() {
     try {
       const result = await fetch(`/api/generations/${encodeURIComponent(generation.id)}`, { method: "DELETE" }).then(readJson) as { generation: GenerationView; accepted: boolean };
       setGeneration(result.generation);
+      void refreshRecent();
       if (!terminal.has(result.generation.status)) schedulePoll(result.generation.id);
     } catch (error) { setMessage(error instanceof Error ? error.message : "取消请求失败。"); }
+  }
+
+  function selectTask(item: GenerationView) {
+    setGeneration(item);
+    if (!terminal.has(item.status)) schedulePoll(item.id);
+    if (item.status === "completed") void loadPreviews(item.images.map((image) => image.slug));
+  }
+
+  async function cancelTask(item: GenerationView) {
+    if (terminal.has(item.status)) return;
+    setMessage("");
+    try {
+      const result = await fetch(`/api/generations/${encodeURIComponent(item.id)}`, { method: "DELETE" }).then(readJson) as { generation: GenerationView; accepted: boolean };
+      setRecent((current) => current.map((entry) => entry.id === item.id ? result.generation : entry));
+      if (generation?.id === item.id) setGeneration(result.generation);
+      void refreshRecent();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "取消请求失败。"); }
+  }
+
+  function retryTask(item: GenerationView) {
+    if (!workflows.some((entry) => entry.slug === item.workflowSlug)) {
+      setMessage("该创作方式当前不可用，无法回填重试。");
+      return;
+    }
+    setSelected(item.workflowSlug);
+    setSize(`${item.width}x${item.height}`);
+    setCount(item.count);
+    setVisibility(item.visibility);
+    setPromptVisibility(item.promptVisibility);
+    setPrompt(item.prompt);
+    setNegativePrompt(item.negativePrompt);
+    setMessage("已回填上次参数，可修改后点击“开始生成”重新创作。");
   }
 
   return <main className="create-shell">
@@ -129,11 +207,43 @@ export function GenerationWorkbench() {
       </form>
 
       <aside className="creation-preview" aria-labelledby="preview-title">
-        <div className={`preview-stage${generation ? ` task-${generation.status}` : ""}`}><div className="preview-orbit" aria-hidden="true"><span /><span /><span /></div><div className="preview-copy"><span className="preview-kicker">{generation ? statusLabel(generation.status).toUpperCase() : "PREVIEW"}</span><h2 id="preview-title">{generation ? taskTitle(generation.status) : "画面将在这里生长"}</h2><p>{generation ? taskDescription(generation) : "提交后可以离开此页。任务会继续运行，并保存在“我的图片”中。"}</p>{generation?.images.length ? <div className="generated-links">{generation.images.map((image, index) => <Link key={image.id} href={`/gallery/${image.slug}`}>查看作品 {index + 1}</Link>)}</div> : null}</div></div>
+        <div className={`preview-stage${generation ? ` task-${generation.status}` : ""}`}>
+          {generation?.status === "completed" && generation.images.length > 0 ? (
+            <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}>
+              {generation.images.map((image, index) => {
+                const url = previewUrls[image.slug];
+                return <Link className={`preview-image${url ? "" : " pending"}`} key={image.id} href={`/gallery/${image.slug}`} aria-label={`查看作品 ${index + 1}`}>{url ? <img src={url} alt={`作品 ${index + 1}`} loading="lazy" /> : <span>作品 {index + 1}</span>}</Link>;
+              })}
+            </div>
+          ) : (<><div className="preview-orbit" aria-hidden="true"><span /><span /><span /></div><div className="preview-copy"><span className="preview-kicker">{generation ? statusLabel(generation.status).toUpperCase() : "PREVIEW"}</span><h2 id="preview-title">{generation ? taskTitle(generation.status) : "画面将在这里生长"}</h2><p>{generation ? taskDescription(generation) : "提交后可以离开此页。任务会继续运行，并保存在“我的图片”中。"}</p></div></>)}
+          {generation?.images.length ? <div className="generated-links">{generation.images.map((image, index) => <Link key={image.id} href={`/gallery/${image.slug}`}>查看作品 {index + 1}</Link>)}</div> : null}
+        </div>
         <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
-        <div className="privacy-assurance"><strong>平台级安全边界</strong><p>浏览器不会接触 Provider 密钥、内部工作流文件或对象存储凭据。</p></div>
+        <div className="privacy-assurance"><strong>平台级安全边界</strong><p>浏览器不会接触 Provider 密钥、内部工作流文件或对象存储凭证。</p></div>
       </aside>
     </div>
+
+    <section className="recent-panel" aria-labelledby="recent-title">
+      <div className="panel-heading compact"><div><span className="step-index">04</span><h2 id="recent-title">最近创作</h2></div><span className="panel-hint">点击任务查看状态与结果，失败任务可回填重新创作</span></div>
+      {recentState === "loading" ? <div className="workflow-loading">正在读取最近任务…</div>
+        : recent.length === 0 ? <div className="recent-empty">最近任务会显示在这里。</div>
+        : <div className="recent-list">{recent.map((item) => {
+          const first = item.images[0];
+          const firstUrl = first ? previewUrls[first.slug] : undefined;
+          return <div className="recent-item" key={item.id}>
+            <button className="recent-select" type="button" onClick={() => selectTask(item)}>
+              <span className={`task-indicator ${item.status}`} />
+              <span className="recent-thumb">{firstUrl ? <img src={firstUrl} alt="" loading="lazy" /> : <span>{item.status === "failed" ? "失败" : item.images.length ? `${item.images.length} 张` : "…"}</span>}</span>
+              <span className="recent-main"><strong>{item.workflowName}</strong><small>{promptSummary(item.prompt)}</small></span>
+              <span className="recent-meta"><em>{statusLabel(item.status)}</em><time>{formatTime(item.createdAt)}</time></span>
+            </button>
+            <div className="recent-actions">
+              {!terminal.has(item.status) ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
+              {item.status === "failed" ? <button className="button primary recent-action" type="button" onClick={() => retryTask(item)}>重新创作</button> : null}
+            </div>
+          </div>;
+        })}</div>}
+    </section>
   </main>;
 }
 
@@ -151,4 +261,12 @@ function taskDescription(generation: GenerationView): string {
   if (generation.status === "running") return generation.cancelRequested ? "已收到取消请求，正在安全停止任务。" : "Provider 正在生成并持久化图片，请稍候。";
   if (generation.status === "completed") return "图片已保存到对象存储，并加入你的创作历史。";
   return generation.status === "cancelled" ? "未消耗的预留积分会自动释放。" : "可以调整描述后重新尝试。";
+}
+function promptSummary(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 72 ? `${normalized.slice(0, 72)}…` : normalized || "未填写描述";
+}
+function formatTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }

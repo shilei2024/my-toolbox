@@ -29,7 +29,7 @@ MindfulPenPal 不再按单一 AI 图片生成器演进，而是面向未来五�
 
 | 里程碑 | 交付内容 | 依赖 | 风险 |
 | --- | --- | --- | --- |
-| M1 生产闭环 | Generation API、Dispatcher/Worker 入口、积分原子预占/结算、统一 Admin 路由 | Phase 1–10 | 代码完成（含 M1.1 首次积分、远端绑定、发布策略与登录入口）；待 Staging 基础设施与 Vercel Preview 验收 |
+| M1 生产闭环 | Generation API、Dispatcher/Worker 入口、积分原子预占/结算、统一 Admin 路由 | Phase 1–10 | 代码完成（含 M1.1 可用性补充与 M1.2 创作反馈闭环）；待 Staging 基础设施与 Vercel Preview 验收 |
 | M2 国内支付 | Payment Provider 契约固化、微信支付、支付宝、退款与对账 | M1 | 商户资质、回调幂等、财务合规 |
 | M3 平台任务中心 | 通用 Task Schema、跨模块历史、通知、成本与 SLA | M1 | 过度抽象、迁移复杂度 |
 | M4 AI 视频/OCR | 复用任务、积分、存储、Provider Registry 接入两个新模块 | M3 | 大文件、长任务、成本失控 |

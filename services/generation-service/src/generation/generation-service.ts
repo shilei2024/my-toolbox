@@ -1,8 +1,9 @@
+import { GalleryCursorCodec, type DecodedCursor } from "../gallery/cursor.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { JsonObject } from "../providers/types.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
-import type { GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
+import type { GenerationListRequest, GenerationPage, GenerationStatus, GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
 
 export interface GenerationCancellationPort {
   requestCancellation(jobId: string, reason?: string): Promise<unknown>;
@@ -13,12 +14,14 @@ export class GenerationService {
   readonly #defaultCreditCost: string;
   readonly #cancellation: GenerationCancellationPort | undefined;
   readonly #ready: boolean;
+  readonly #cursor: GalleryCursorCodec | undefined;
 
-  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort; readonly ready?: boolean }) {
+  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort; readonly ready?: boolean; readonly cursor?: GalleryCursorCodec }) {
     this.#repository = options.repository;
     this.#defaultCreditCost = creditAmount(options.defaultCreditCost ?? "1.0000");
     this.#cancellation = options.cancellation;
     this.#ready = options.ready ?? true;
+    this.#cursor = options.cursor;
   }
 
   listWorkflows() { return this.#repository.listWorkflows(this.#defaultCreditCost); }
@@ -47,6 +50,16 @@ export class GenerationService {
     const generation = await this.#repository.findForViewer(identifier(id), userId, viewer.role === "admin");
     if (!generation) throw new GenerationError("generation_not_found", "未找到该创作任务。", 404);
     return generation;
+  }
+
+  async list(query: GenerationListRequest, viewer: ViewerContext): Promise<GenerationPage> {
+    const userId = requireUser(viewer);
+    const limit = boundedLimit(query.limit);
+    const status = query.status === undefined ? undefined : statusValue(query.status);
+    const scope = `generations:${userId}`;
+    const cursor = this.#cursor ? decodeCursor(this.#cursor, scope, query.cursor) : undefined;
+    const page = await this.#repository.listForViewer(userId, cursor, limit, status);
+    return { items: page.items, ...(page.next && this.#cursor ? { nextCursor: this.#cursor.encode(scope, page.next) } : {}) };
   }
 
   async cancel(id: string, viewer: ViewerContext): Promise<{ readonly generation: GenerationView; readonly accepted: boolean }> {
@@ -79,6 +92,23 @@ function token(value: unknown, field: string, max: number): string {
   return value;
 }
 function identifier(value: string): string { return token(value, "generationId", 128); }
+function boundedLimit(value: number | undefined): number {
+  if (value === undefined) return 24;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 50) throw new GenerationError("invalid_request", "limit 必须是 1 到 50 之间的整数。", 400);
+  return value;
+}
+function statusValue(value: GenerationStatus): GenerationStatus {
+  if (!new Set<GenerationStatus>(["pending", "running", "completed", "failed", "cancelled"]).has(value)) throw new GenerationError("invalid_request", "status 格式不正确。", 400);
+  return value;
+}
+function decodeCursor(codec: GalleryCursorCodec, scope: string, token: string | undefined): DecodedCursor | undefined {
+  if (token === undefined) return undefined;
+  try {
+    return codec.decode(scope, token);
+  } catch {
+    throw new GenerationError("invalid_cursor", "分页游标无效，请刷新后重试。", 400);
+  }
+}
 function integer(value: unknown, field: string, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw new GenerationError("invalid_request", `${field} 超出允许范围。`, 400);
   return Number(value);

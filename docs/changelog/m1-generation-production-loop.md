@@ -26,6 +26,19 @@
 
 验证：Generation Service typecheck + 62 项测试、Gallery Web ESLint + SEO 测试 + 生产构建、Python 迁移契约测试 14 项全部通过。
 
+## M1.2 创作工作台反馈闭环
+
+解决"生成完成后只能看外链、失败后只能重填表单"的两个体验缺口：
+
+- **最近任务列表**：`GET /v1/generations` 返回当前用户的最近生成任务（默认 24，最大 50），支持签名 keyset 游标分页与可选 `status` 过滤；任务只按 owner 可见，游标带 scope 与 HMAC，防跨用户遍历与篡改。
+- **Prompt 回填**：`GenerationView` 增加 `prompt` / `negativePrompt`（仅用户本人与管理员可见），失败任务可在工作台一键回填原参数后重新创作，避免手工复制丢失参数。
+- **内嵌预览**：任务完成后工作台直接通过既有 Gallery BFF（`/api/gallery/{slug}`）获取资产 URL 并内嵌展示图片，不再只有"查看作品"外链；最近任务面板同时显示完成缩略图。
+- **历史任务操作**：最近任务面板支持点击查看状态、对排队/运行中任务发起取消、对失败任务回填重试；取消仍走原有幂等协作取消链路，积分释放逻辑不变。
+
+实现边界：列表查询直接落在 `ai.generation_jobs`（PostgreSQL 事实源），不新增表、不引入新基础设施；游标复用 Gallery 签名编解码器，BFF 仅透传。该能力是未来 M3 平台任务中心在生成模块内的模块级前身，暂不做跨模块抽象。
+
+验证：Generation Service typecheck + 65 项测试（新增列表权限/校验/游标/HTTP 契约）。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
+
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。

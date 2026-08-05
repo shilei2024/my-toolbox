@@ -56,6 +56,12 @@ M1 adds the production loop and operational defaults:
 - `GALLERY_DEFAULT_MODERATION` controlling immediate public publish vs. pending admin review;
 - Next.js login/logout redirects through `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`.
 
+M1.2 adds the creation-workbench feedback loop:
+
+- `GET /v1/generations` viewer-scoped recent task list with signed keyset cursors and an optional status filter;
+- `GenerationView` now includes the owner's `prompt`/`negativePrompt` so the workbench can restore parameters after a failure;
+- the Next.js workbench renders inline completed-image previews through the existing Gallery BFF, a recent-tasks panel, per-task cancellation, and one-click parameter restore for failed tasks.
+
 ## Run tests
 
 ```powershell
