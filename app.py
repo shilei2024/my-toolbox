@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 from flask import (
@@ -385,9 +386,19 @@ def _init_extensions(app: Flask) -> None:
     def _ensure_anon_id():  # noqa: ANN202
         from auth.decorators import ensure_anon_id
 
-        # Keep all workers in sync with settings saved from the admin panel.
-        apply_runtime_settings(app)
-        g.anon_id = ensure_anon_id()
+        try:
+            # Keep all workers in sync with settings saved from the admin panel.
+            apply_runtime_settings(app)
+            g.anon_id = ensure_anon_id()
+        except Exception:  # noqa: BLE001
+            # DB-backed request setup must never take the whole site down.
+            if not app.config.get("_REQUEST_DB_FAILURE_LOGGED"):
+                app.logger.warning(
+                    "Database unavailable during request setup; continuing with defaults",
+                    exc_info=True,
+                )
+                app.config["_REQUEST_DB_FAILURE_LOGGED"] = True
+            g.anon_id = uuid.uuid4().hex
 
 
 def _register_blueprints(app: Flask) -> None:

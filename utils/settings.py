@@ -48,11 +48,17 @@ def validate_site_settings(values: dict[str, str]) -> dict[str, Any]:
 
 def apply_runtime_settings(app: Flask) -> None:
     """Refresh effective site settings from the DB for this worker."""
-    rows = (
-        db.session.query(Setting)
-        .filter(Setting.key.in_(tuple(RUNTIME_SETTING_KEYS)))
-        .all()
-    )
+    try:
+        rows = (
+            db.session.query(Setting)
+            .filter(Setting.key.in_(tuple(RUNTIME_SETTING_KEYS)))
+            .all()
+        )
+    except Exception:  # noqa: BLE001
+        # A dead database must not turn every request into a 500; keep the
+        # process defaults and let the boot log carry the full traceback.
+        app.logger.warning("Runtime settings refresh skipped: database unavailable")
+        return
     raw = {row.key: row.value or "" for row in rows}
     if not raw:
         return
