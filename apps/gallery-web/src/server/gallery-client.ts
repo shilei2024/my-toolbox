@@ -42,7 +42,7 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
   const response = await fetch(new URL(path, base), {
     ...init,
     cache: "no-store",
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(serviceTimeoutMs()),
     headers: {
       Accept: "application/json",
       "X-Mavis-User-Context": context,
@@ -82,6 +82,12 @@ function internalSecret(): string {
   const secret = process.env.GALLERY_INTERNAL_HMAC_SECRET?.trim() ?? "";
   if (Buffer.byteLength(secret, "utf8") < 32) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   return secret;
+}
+
+function serviceTimeoutMs(): number {
+  const raw = process.env.GALLERY_SERVICE_TIMEOUT_MS?.trim();
+  const value = raw ? Number(raw) : 30_000;
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= 120_000 ? value : 30_000;
 }
 
 function queryString(query: GalleryQuery): string {
