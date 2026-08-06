@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 · Gallery 登录跨域修复 / 2026-08-06
+- **修复 Gallery 登录跨域（CORS）**：主站 Flask 对受信任的 Gallery 来源（默认取
+  `AI_IMAGE_EXTERNAL_URL`，可用 `GALLERY_CORS_ORIGINS` 追加）返回
+  `Access-Control-Allow-Origin` / `Allow-Credentials` 并正确处理 OPTIONS 预检；
+  修复从 gallery.mindfulpenpal.com 跳转 mindfulpenpal.com/login 被浏览器拦截的问题。
+- **回归测试**：新增 `tests/test_gallery_cors.py`，覆盖可信来源、预检、未知来源拒绝
+  与环境变量扩展来源四类场景。
+
 ## 0.5.1 · 即梦全链路优化 / 2026-08-05
 - **即梦多张生成**：Seedream 单次只返回一张，Adapter 对 `count>1` 逐张扇出调用，
   用户 seed 依次递增（seed + index），平台 1–8 张契约全部可用；新增契约测试。
