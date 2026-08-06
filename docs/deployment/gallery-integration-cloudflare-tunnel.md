@@ -5,6 +5,15 @@
 > **Error 525（TLS 握手失败）**。说明海外大型云网络直连上海服务器不稳定，需要用
 > Cloudflare Tunnel 让服务器主动外连。
 
+## 0.5 重要前提（先读，避免被误导）
+
+- **Worker ≠ 站点**：只创建 Worker（`xxx.workers.dev`）并没有把域名加入 Cloudflare。
+  Worker 仍是从 Cloudflare 边缘访问上海服务器，遇到 525 时 Worker 一样会失败，
+  所以 **Worker 转发解决不了 525**；
+- **快速隧道（第 2 节）不需要站点、不需要改 DNS**，现在就能验证；
+- **正式命名隧道（第 3 节）才需要把 `mindfulpenpal.com` 加入 Cloudflare（免费站点）**，
+  由 Cloudflare 管理 DNS 并给 `api-ai` 提供稳定 CNAME。
+
 ## 0. 已经完成、不需要重做的部分
 
 - 服务器 `DATABASE_URL` 已切换到 Prisma（含 `uselibpqcompat=true&sslmode=require`）；
@@ -16,7 +25,18 @@
   - Gallery BFF 超时 8s → 30s（可配置）+ 底层错误原因日志；
   - Cloudflare Worker 转发（备用）和隧道文档。
 
-## 1. Cloudflare 基础设置（先在网页控制台做）
+## 1. 把域名加入 Cloudflare（创建站点）——正式方案才需要
+
+如果只是想先验证隧道能不能通，直接跳到第 2 节，这一节不用做。
+
+1. Cloudflare 控制台 → **Add a site** → 输入 `mindfulpenpal.com` → 选 **Free** 套餐；
+2. Cloudflare 给出两个 nameserver（形如 `xxx.ns.cloudflare.com`、
+   `yyy.ns.cloudflare.com`），记下来；
+3. 打开 Namecheap → Domain List → Manage → **Nameservers** → 改成这两个 → 保存；
+4. 等待几分钟到几小时，Cloudflare 站点状态变为 **Active**；
+5. 站点 Active 后再做下面的 SSL 和 DNS 设置。
+
+### 1.1 SSL 模式与 DNS 记录（站点 Active 后）
 
 1. 打开 Cloudflare Dashboard → 你的站点 → **SSL/TLS → Overview**：
    加密模式设为 **Full (strict)**，保存；
@@ -31,7 +51,7 @@
 3. 保存后立即确认 https://mindfulpenpal.com 和 https://gallery.mindfulpenpal.com
    都能打开（防止 DNS 迁移把主站弄挂）。
 
-## 2. 快速验证隧道（临时地址，10 分钟）
+## 2. 快速验证隧道（临时地址，10 分钟，零配置）
 
 SSH 登录服务器：
 
@@ -62,6 +82,8 @@ docker rm -f cloudflared-test
 ```
 
 ## 3. 正式命名隧道（长期稳定地址）
+
+> 前提：已经完成第 1 节（域名已加入 Cloudflare 且 Active）。
 
 ### 3.1 准备目录和登录
 
@@ -101,7 +123,7 @@ ingress:
 
 ### 3.4 绑定域名
 
-先到 Cloudflare Dashboard → DNS，**删除 `api-ai` 的 A 记录**（第 1 步做过就跳过），然后：
+先到 Cloudflare Dashboard → DNS，**删除 `api-ai` 的 A 记录**（第 1.1 步做过就跳过），然后：
 
 ```bash
 docker run --rm -v /opt/mindfulpenpal/cloudflared:/etc/cloudflared \

@@ -1,5 +1,10 @@
 # Cloudflare Worker API 转发（备用方案）
 
+> ⚠️ 重要：Worker 无法解决 Error 525。如果 Cloudflare 边缘无法与上海服务器完成
+> TLS 握手（525），Worker 转发一样会失败。这个方案只在"Vercel 直连不稳定、但
+> Cloudflare 能访问源站"时才有效。遇到 525 请改用 Cloudflare 隧道（见
+> [完整手册](../docs/deployment/gallery-integration-cloudflare-tunnel.md)）。
+
 ## 什么时候用
 
 当 Vercel 的 Gallery 直接访问 `api-ai.mindfulpenpal.com` 持续超时/连接失败，
@@ -17,7 +22,7 @@ Vercel Gallery -> Cloudflare Worker（边缘节点）-> api-ai.mindfulpenpal.com
 
 1. 注册/登录 Cloudflare（免费）：https://dash.cloudflare.com
 2. 左侧菜单 → **Workers & Pages** → **Create** → **Create Worker**
-3. 名称随意（例如 `mindfulpenpal-api-relay`），把 `worker.js` 的内容全部粘贴进去
+3. 名称随意（例如 ``），把 `worker.js` 的内容全部粘贴进去
 4. **Deploy** 部署
 5. 复制 Worker 的访问地址，形如：
 
