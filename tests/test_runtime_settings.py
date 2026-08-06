@@ -55,7 +55,7 @@ class RuntimeSettingsTests(unittest.TestCase):
             ANON_FREE_LIMIT=1,
         )
         with self.app.app_context():
-            apply_runtime_settings(self.app)
+            apply_runtime_settings(self.app, force=True)
         self.assertEqual(self.app.config["SITE_NAME"], "中国时间工具箱")
         self.assertEqual(self.app.config["DAILY_FREE_LIMIT"], 18)
 

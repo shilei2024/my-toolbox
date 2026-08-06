@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.10 · 数据库操作量优化（避免打满托管库免费额度）/ 2026-08-06
+- **Dispatcher 出站队列空闲退避**：连续空转时轮询间隔从 1 秒指数退避到
+  `GENERATION_OUTBOX_IDLE_MAX_MS`（默认 30 秒），队列出现消息时立即恢复；
+  空闲查询量从约 8.6 万次/天降到约 2,900 次/天。
+- **主站运行设置 TTL 缓存**：`apply_runtime_settings` 从“每个请求查一次库”
+  改为进程内缓存（`RUNTIME_SETTINGS_TTL_SECONDS` 默认 30 秒），管理员保存后
+  强制立即刷新；数据库不可用时也不再每请求重试。
+- **冷启动 schema 探针**：schema 已存在时跳过 `db.create_all()` 的反射检查
+  （生产可设 `AUTO_CREATE_SCHEMA=false` 完全跳过），每次冷启动减少 10–30 次
+  查询；库不可用时仍按既有兜底继续启动。
+
 ## 0.5.9 · 主站 Vercel 崩溃加固 / 2026-08-06
 - **根因**：`mindfulpenpal.com` 全部路由 500（`FUNCTION_INVOCATION_FAILED`）——
   Flask 在 Vercel 冷启动时执行 `_seed_admin` 等初始化，若 `DATABASE_URL` /

@@ -359,9 +359,17 @@ def _init_extensions(app: Flask) -> None:
     db.init_app(app)
     try:
         with app.app_context():
-            db.create_all()
+            if app.config.get("AUTO_CREATE_SCHEMA", True):
+                from sqlalchemy import text  # noqa: PLC0415
+
+                try:
+                    # Cheap existence probe: avoids create_all() reflection on
+                    # every cold start when the schema is already present.
+                    db.session.execute(text("SELECT 1 FROM users LIMIT 1")).scalar()
+                except Exception:  # noqa: BLE001
+                    db.create_all()
             _ensure_tool_external_url_column(app)
-            apply_runtime_settings(app)
+            apply_runtime_settings(app, force=True)
     except Exception:
         app.logger.warning(
             "Database unavailable at boot; continuing without schema/runtime settings",

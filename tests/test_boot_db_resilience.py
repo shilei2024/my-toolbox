@@ -57,6 +57,26 @@ class BootDbResilienceTests(unittest.TestCase):
             # Must not raise; process defaults stay in effect.
             apply_runtime_settings(flask_app)
 
+    def test_runtime_settings_are_cached_within_ttl_and_force_refreshes(self) -> None:
+        from flask import Flask
+
+        from utils.settings import apply_runtime_settings
+
+        flask_app = Flask(__name__)
+        flask_app.config["RUNTIME_SETTINGS_TTL_SECONDS"] = 30
+        calls = {"n": 0}
+
+        def fake_query(*_args, **_kwargs):  # noqa: ANN002, ANN003
+            calls["n"] += 1
+            return []
+
+        with mock.patch("utils.settings.db.session.query", side_effect=fake_query):
+            apply_runtime_settings(flask_app)
+            apply_runtime_settings(flask_app)
+            self.assertEqual(calls["n"], 1)
+            apply_runtime_settings(flask_app, force=True)
+            self.assertEqual(calls["n"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

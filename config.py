@@ -115,6 +115,16 @@ class Config:
     RATELIMIT_TOOL: str = os.environ.get("RATELIMIT_TOOL", "20/minute")
     RATELIMIT_STORAGE_URI: str = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
 
+    # --- Database operation budget ---
+    # Refresh database-backed site settings at most once per interval instead
+    # of on every request (keeps managed PostgreSQL operation counts low).
+    RUNTIME_SETTINGS_TTL_SECONDS: int = int(
+        os.environ.get("RUNTIME_SETTINGS_TTL_SECONDS", "30")
+    )
+    # Set false when the schema is migration-managed (production) to skip the
+    # cold-start schema probe and db.create_all() reflection entirely.
+    AUTO_CREATE_SCHEMA: bool = _bool(os.environ.get("AUTO_CREATE_SCHEMA"), default=True)
+
     # --- Misc ---
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://localhost:8000")
     APP_VERSION: str = os.environ.get("APP_VERSION", "0.4.3")
