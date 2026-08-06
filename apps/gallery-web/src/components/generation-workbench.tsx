@@ -143,9 +143,9 @@ export function GenerationWorkbench() {
         setGeneration(current);
         if (current.status === "completed" && current.images.length > 0) {
           void loadPreviews(current.images.map((image) => image.slug));
-          void refreshRecent();
         }
         if (!terminal.has(current.status)) schedulePoll(id, 2000);
+        else void refreshRecent();
       } catch (error) {
         // Transient failures must not silently stop progress updates; back off
         // and keep polling so the task can still reach its terminal state.
@@ -180,6 +180,7 @@ export function GenerationWorkbench() {
       const result = await fetch(`/api/generations/${encodeURIComponent(item.id)}`, { method: "DELETE" }).then(readJson) as { generation: GenerationView; accepted: boolean };
       setRecent((current) => current.map((entry) => entry.id === item.id ? result.generation : entry));
       if (generation?.id === item.id) setGeneration(result.generation);
+      if (!terminal.has(result.generation.status)) schedulePoll(result.generation.id);
       void refreshRecent();
     } catch (error) { setMessage(error instanceof Error ? error.message : "取消请求失败。"); }
   }

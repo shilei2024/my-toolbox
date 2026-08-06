@@ -30,7 +30,10 @@ export class ImagePersistenceService {
           const extension = extensionFor(output.mimeType);
           const key = `images/jobs/${safeJobId}/${index}${extension}`;
           const sha256 = await digestFile(local);
-          const stored = await this.#storage.upload({ objectKey: key, body: createReadStream(local), contentType: output.mimeType, contentLength: info.size, metadata: { job_id: jobId, output_index: String(index) } });
+          // Do not send x-cos-meta-* headers: the object key already embeds
+          // the job id and output index, and signing custom metadata headers
+          // has caused SignatureDoesNotMatch on Tencent COS uploads.
+          const stored = await this.#storage.upload({ objectKey: key, body: createReadStream(local), contentType: output.mimeType, contentLength: info.size });
           assets.push({ ...stored, mimeType: output.mimeType, byteSize: info.size, width: output.width, height: output.height, sha256 });
         } finally { await rm(local, { force: true }); }
       }
