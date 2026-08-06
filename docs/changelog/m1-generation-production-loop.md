@@ -78,6 +78,11 @@
 - ✅ 主站 `mindfulpenpal.com` 与 `/login` 正常（含 CSRF token）。
 - ⚠️ `api-ai.mindfulpenpal.com` 从国内网络直连 TLS 握手失败（curl 35），
   Vercel 边缘经 BFF 可达后端；正式命名隧道（Cloudflare 站点 + CNAME）待配置。
+- ⚠️ 统一后台 `/admin/gallery` 曾报“缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”：
+  根因是 Vercel 原 Flask 项目（my-toolbox）Production 未配置
+  `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`（DEPLOY_GUIDE §8.1
+  此前漏列）。已补齐文档、报错引导与治理测试；生产需在 Vercel my-toolbox 补这两个
+  变量（与 my-toolbox-gallery 完全一致）并重新部署后，后台即可显示待审核队列。
 - ⏳ 未完成：带登录态的完整任务闭环（注册/登录 → 积分发放 → 创建 →
   即梦生成 → COS 持久化 → 最近任务/内嵌预览 → 失败回填重试）需测试账号在
   Preview/线上环境人工验收；生产发布仍为 No-Go。

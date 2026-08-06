@@ -35,5 +35,7 @@
 ## 验收后开关
 
 1. 确认全部通过后，把 `PRODUCTION_RELEASE_APPROVED=true` 写入服务器环境文件并重启后端。
-2. 在 Vercel 原站项目设置 `AI_IMAGE_EXTERNAL_URL` 与 `SESSION_COOKIE_DOMAIN`，触发一次生产部署。
+2. 在 Vercel 原站项目设置 `AI_IMAGE_EXTERNAL_URL`、`SESSION_COOKIE_DOMAIN`、
+   `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`（后两项与 Gallery Web
+   完全一致），触发一次生产部署。
 3. 复测第 1-3 项与登录；异常时按回滚指南恢复，不要继续扩大流量。

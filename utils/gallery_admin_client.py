@@ -177,7 +177,9 @@ def _endpoint_config() -> tuple[str, str]:
     if len(secret.encode("utf-8")) < 32:
         raise GalleryAdminError(
             "unconfigured",
-            "Gallery 管理后台未配置：缺少有效的 GALLERY_INTERNAL_HMAC_SECRET。",
+            "Gallery 管理后台未配置：缺少有效的 GALLERY_INTERNAL_HMAC_SECRET。请在 Vercel "
+            "my-toolbox 项目 Production 环境配置，值须与 my-toolbox-gallery / Generation "
+            "Service 完全一致（至少 32 字节），保存后重新部署。",
             503,
         )
     parsed = urlparse(base_url)
@@ -186,7 +188,9 @@ def _endpoint_config() -> tuple[str, str]:
     ):
         raise GalleryAdminError(
             "unconfigured",
-            "Gallery 管理后台未配置：GALLERY_SERVICE_BASE_URL 必须是 HTTPS 地址。",
+            "Gallery 管理后台未配置：GALLERY_SERVICE_BASE_URL 必须是 HTTPS 地址。请在 "
+            "Vercel my-toolbox 项目 Production 环境配置为 Generation Service 公网 API "
+            "Origin（如 https://api-ai.mindfulpenpal.com），保存后重新部署。",
             503,
         )
     return base_url.rstrip("/"), secret

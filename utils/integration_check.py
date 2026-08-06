@@ -27,8 +27,8 @@ def gallery_integration_checks(app: Flask) -> list[IntegrationCheck]:
         IntegrationCheck("gallery_url", bool(gallery and _safe_web_url(gallery)), "AI_IMAGE_EXTERNAL_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
         IntegrationCheck("app_base_url", bool(toolbox and _safe_web_url(toolbox)), "APP_BASE_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
         IntegrationCheck("introspection_secret", len(secret.encode("utf-8")) >= 32, "GALLERY_INTROSPECTION_SECRET must contain at least 32 UTF-8 bytes"),
-        IntegrationCheck("gallery_service_url", bool(service_url and _safe_web_url(service_url)), "GALLERY_SERVICE_BASE_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback)"),
-        IntegrationCheck("gallery_hmac_secret", len(hmac_secret.encode("utf-8")) >= 32, "GALLERY_INTERNAL_HMAC_SECRET must contain at least 32 UTF-8 bytes"),
+        IntegrationCheck("gallery_service_url", bool(service_url and _safe_web_url(service_url)), "GALLERY_SERVICE_BASE_URL must be an absolute HTTPS URL (HTTP is allowed only on loopback); configure it in Vercel my-toolbox Production and redeploy"),
+        IntegrationCheck("gallery_hmac_secret", len(hmac_secret.encode("utf-8")) >= 32, "GALLERY_INTERNAL_HMAC_SECRET must contain at least 32 UTF-8 bytes and match my-toolbox-gallery; configure it in Vercel my-toolbox Production and redeploy"),
         IntegrationCheck("secure_cookie", not production_https or bool(app.config.get("SESSION_COOKIE_SECURE")), "SESSION_COOKIE_SECURE must be true when Gallery uses HTTPS"),
         IntegrationCheck("cookie_domain", bool(cookie_domain), "SESSION_COOKIE_DOMAIN is required so both sites receive the Flask session cookie"),
     ]

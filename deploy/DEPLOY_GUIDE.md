@@ -249,8 +249,13 @@ curl https://<api-ai域名>/health
 | `SESSION_COOKIE_DOMAIN` | `.mindfulpenpal.com`（注意开头的点；只有确认共享父域才设置） |
 | `SESSION_COOKIE_SECURE` | `true` |
 | `AI_IMAGE_EXTERNAL_URL` | `https://<gallery域名>/create` |
+| `GALLERY_SERVICE_BASE_URL` | `https://<api-ai域名>`（与 8.2 Gallery Web 项目完全一致） |
+| `GALLERY_INTERNAL_HMAC_SECRET` | 与 my-toolbox-gallery / 服务器完全一致（至少 32 字节） |
 
 > 风险提示：`SESSION_COOKIE_DOMAIN` 配置错误会让整个站点的登录 Cookie 失效。先在 staging 子域验证，再上生产。
+>
+> 统一后台 `/admin/gallery` 依赖最后两项：漏配或与 Gallery Web 不一致时，页面会显示
+> “缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”，且无法读取待审核队列。保存后 Vercel 会自动重新部署。
 
 ### 8.2 Gallery Web 项目（apps/gallery-web）
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.8 · 统一后台配置缺口修复 / 2026-08-06
+- **修复生产 `/admin/gallery` 报“缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”**：根因是
+  `deploy/DEPLOY_GUIDE.md` §8.1 的 Vercel 原 Flask 项目配置清单漏掉
+  `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`，导致生产主站未配置
+  统一后台所需变量、无法读取待审核队列。
+- **补齐部署文档**：DEPLOY_GUIDE §8.1、部署检查清单与上线验收开关均加入这两个变量
+  （值须与 my-toolbox-gallery / Generation Service 完全一致，至少 32 字节）；
+  新增 `tests/test_deploy_governance.py` 治理测试，防止文档再次漏配。
+- **报错与预检更可操作**：后台未配置错误与 `flask --app app check-gallery-integration`
+  预检现在直接提示“在 Vercel my-toolbox Production 配置并重新部署”。
+
 ## 0.5.7 · 集成分支同步与真实联调基线 / 2026-08-06
 - **同步生产修复到集成分支**：`codex/frontend-backend-integration` 并入 main
   0.5.2–0.5.6 的全部生产修复（COS 上传签名、取消兜底落库、Jimeng Seedream 4.5
