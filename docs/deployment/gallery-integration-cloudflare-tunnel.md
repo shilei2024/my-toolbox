@@ -14,6 +14,14 @@
 - **正式命名隧道（第 3 节）才需要把 `mindfulpenpal.com` 加入 Cloudflare（免费站点）**，
   由 Cloudflare 管理 DNS 并给 `api-ai` 提供稳定 CNAME。
 
+## 0.6 当前进度（2026-08-06）
+
+- ✅ 快速隧道已验证：`trycloudflare.com` 地址访问 `/v1/generation/workflows` 返回 401，
+  说明隧道方案有效；
+- ❌ Gallery 线上 `/api/generations` 返回 404：原因是线上部署跑的是旧版本代码
+  （Production Branch 不是 main，或最新部署未成功）；
+- ✅ 下一步：先修 Vercel 部署版本（见第 5 节第 0 条），再建站点、配正式命名隧道。
+
 ## 0. 已经完成、不需要重做的部分
 
 - 服务器 `DATABASE_URL` 已切换到 Prisma（含 `uselibpqcompat=true&sslmode=require`）；
@@ -165,6 +173,8 @@ https://api-ai.mindfulpenpal.com/v1/generation/workflows
 
 集成分支 `codex/frontend-backend-integration` 已包含全部最新修复。上线方式：
 
+0. **先确认 my-toolbox-gallery 的 Production Branch = main**（Settings → Git），
+   否则线上会一直跑旧版本（`/api/generations` 返回 404）；
 1. 打开 PR：https://github.com/shilei2024/my-toolbox/pull/new/codex/frontend-backend-integration
 2. 让 Vercel 为 **my-toolbox** 和 **my-toolbox-gallery** 生成 Preview；
 3. 在 Preview 的 Gallery 环境变量里配上 `GALLERY_SERVICE_BASE_URL`、
