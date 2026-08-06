@@ -51,7 +51,8 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
       ...(init.headers ?? {}),
     },
   }).catch((reason: unknown) => {
-    console.info(`[gallery] service request failed ${path}: ${String(reason)}`);
+    const cause = reason instanceof Error && reason.cause instanceof Error ? reason.cause.message : "";
+    console.info(`[gallery] service request failed ${path}: ${String(reason)}${cause ? ` cause=${cause}` : ""}`);
     throw new GalleryClientError("service_unavailable", "创作服务暂时不可用，请稍后重试。", 503);
   });
 
