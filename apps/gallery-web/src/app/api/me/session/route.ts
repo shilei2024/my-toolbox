@@ -8,6 +8,7 @@ export async function GET() {
     role: viewer.role,
     bridge: viewer.bridge ?? "unconfigured",
     ...(viewer.userId ? { userId: viewer.userId } : {}),
+    ...(viewer.email ? { email: viewer.email } : {}),
   }, {
     headers: { "Cache-Control": "no-store" },
   });

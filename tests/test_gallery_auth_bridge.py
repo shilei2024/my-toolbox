@@ -14,9 +14,10 @@ BRIDGE_SECRET = "gallery-introspection-test-secret-123456789"
 
 
 class _TestUser(UserMixin):
-    def __init__(self, user_id: int, is_admin: bool = False) -> None:
+    def __init__(self, user_id: int, is_admin: bool = False, email: str = "admin@example.com") -> None:
         self.id = user_id
         self.is_admin = is_admin
+        self.email = email
 
 
 class GalleryAuthBridgeTests(unittest.TestCase):
@@ -63,7 +64,24 @@ class GalleryAuthBridgeTests(unittest.TestCase):
             headers={"X-Mavis-Introspection-Secret": BRIDGE_SECRET},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"role": "admin", "userId": 1})
+        self.assertEqual(
+            response.get_json(),
+            {"role": "admin", "userId": 1, "email": "admin@example.com"},
+        )
+
+    def test_bridge_includes_email_for_authenticated_user(self):
+        with self.client.session_transaction() as session:
+            session["_user_id"] = "2"
+            session["_fresh"] = True
+        response = self.client.get(
+            "/internal/gallery/session",
+            headers={"X-Mavis-Introspection-Secret": BRIDGE_SECRET},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {"role": "user", "userId": 2, "email": "admin@example.com"},
+        )
 
     def test_gallery_return_url_allows_only_configured_https_origin(self):
         gallery = "https://gallery.example.com/create"

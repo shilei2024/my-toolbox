@@ -142,10 +142,14 @@ def gallery_session():
     if not current_user.is_authenticated:
         response = jsonify(role="guest")
     else:
-        response = jsonify(
-            role="admin" if bool(getattr(current_user, "is_admin", False)) else "user",
-            userId=int(current_user.get_id()),
-        )
+        payload = {
+            "role": "admin" if bool(getattr(current_user, "is_admin", False)) else "user",
+            "userId": int(current_user.get_id()),
+        }
+        email = str(getattr(current_user, "email", "") or "")
+        if email:
+            payload["email"] = email
+        response = jsonify(payload)
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Cookie"
     return response
