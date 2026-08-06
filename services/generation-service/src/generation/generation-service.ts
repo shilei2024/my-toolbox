@@ -6,7 +6,7 @@ import type { GenerationRepository } from "./repository.ts";
 import type { GenerationListRequest, GenerationPage, GenerationStatus, GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
 
 export interface GenerationCancellationPort {
-  requestCancellation(jobId: string, reason?: string): Promise<unknown>;
+  requestCancellation(jobId: string, reason?: string): Promise<{ readonly mode: "removed" | "signalled" | "terminal" | "missing" } | undefined>;
 }
 
 export class GenerationService {
@@ -66,7 +66,17 @@ export class GenerationService {
     const userId = requireUser(viewer);
     const result = await this.#repository.requestCancellation(identifier(id), userId, viewer.role === "admin");
     if (!result) throw new GenerationError("generation_not_found", "未找到该创作任务。", 404);
-    if (result.signalWorker && this.#cancellation) await this.#cancellation.requestCancellation(result.generation.id, "user_requested").catch(() => undefined);
+    const receipt = result.signalWorker && this.#cancellation
+      ? await this.#cancellation.requestCancellation(result.generation.id, "user_requested").catch(() => undefined)
+      : undefined;
+    // When the queue has no live job left (worker restart, stall, retention or
+    // an already terminal BullMQ job), nobody will finalize the cancellation,
+    // so the database state must be flipped here; otherwise the task would
+    // stay "running" forever and the UI would keep polling.
+    if (result.signalWorker && receipt && (receipt.mode === "terminal" || receipt.mode === "missing")) {
+      const finalized = await this.#repository.finalizeCancellation(result.generation.id, userId, viewer.role === "admin");
+      if (finalized) return { generation: finalized, accepted: true };
+    }
     return { generation: result.generation, accepted: result.accepted };
   }
 }

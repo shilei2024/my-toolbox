@@ -19,6 +19,7 @@ const generation: GenerationView = {
 class FakeRepository implements GenerationRepository {
   created?: CreateGenerationInput;
   cancelled?: string;
+  finalized?: string;
   page: GenerationPageResult = { items: [] };
   listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
     return Promise.resolve([{
@@ -36,6 +37,7 @@ class FakeRepository implements GenerationRepository {
   findForViewer(id: string): Promise<GenerationView | undefined> { return Promise.resolve(id === generation.id ? generation : undefined); }
   listForViewer(_userId: number, cursor: DecodedCursor | undefined, _limit: number): Promise<GenerationPageResult> { return Promise.resolve(cursor ? { items: [] } : this.page); }
   requestCancellation(id: string): Promise<CancelGenerationResult | undefined> { this.cancelled = id; return Promise.resolve(id === generation.id ? { generation: { ...generation, status: "cancelled" }, accepted: true, signalWorker: false } : undefined); }
+  finalizeCancellation(id: string): Promise<GenerationView | undefined> { this.finalized = id; return Promise.resolve(id === generation.id ? { ...generation, status: "cancelled" } : undefined); }
 }
 
 const viewer = { role: "user" as const, userId: 7, requestId: "00000000-0000-4000-8000-000000000007" };
@@ -65,6 +67,34 @@ describe("M1 generation API domain", () => {
     assert.equal((await service.cancel("job-1", viewer)).accepted, true);
     assert.equal(repository.cancelled, "job-1");
     await assert.rejects(service.get("job-missing", viewer), (error) => error instanceof GenerationError && error.statusCode === 404);
+  });
+
+  it("finalizes cancellation when the queue has no live job left", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({
+      repository,
+      cancellation: { requestCancellation: () => Promise.resolve({ mode: "terminal" }) },
+    });
+    const running = { ...generation, status: "running" as const };
+    repository.requestCancellation = () => Promise.resolve({ generation: running, accepted: true, signalWorker: true });
+    const result = await service.cancel("job-1", viewer);
+    assert.equal(result.accepted, true);
+    assert.equal(result.generation.status, "cancelled");
+    assert.equal(repository.finalized, "job-1");
+  });
+
+  it("does not finalize while the worker is still signalled", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({
+      repository,
+      cancellation: { requestCancellation: () => Promise.resolve({ mode: "signalled" }) },
+    });
+    const running = { ...generation, status: "running" as const, cancelRequested: true };
+    repository.requestCancellation = () => Promise.resolve({ generation: running, accepted: true, signalWorker: true });
+    const result = await service.cancel("job-1", viewer);
+    assert.equal(result.accepted, true);
+    assert.equal(result.generation.status, "running");
+    assert.equal(repository.finalized, undefined);
   });
 
   it("lists viewer-scoped tasks with signed cursor pagination and strict query validation", async () => {

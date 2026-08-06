@@ -137,6 +137,28 @@ export class PostgresGenerationRepository implements GenerationRepository {
     } finally { client.release(); }
   }
 
+  async finalizeCancellation(id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query("BEGIN");
+      const locked = await client.query<{ status: GenerationStatus; user_id: number | null; credits_reserved: string }>("SELECT status, user_id, credits_reserved FROM ai.generation_jobs WHERE id = $1 FOR UPDATE", [id]);
+      const job = locked.rows[0];
+      if (!job || (!isAdmin && job.user_id !== userId)) { await client.query("ROLLBACK"); return undefined; }
+      if (job.status === "running" || job.status === "pending") {
+        await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1", [id]);
+        if (Number(job.credits_reserved) > 0) await client.query("SELECT * FROM ai.release_generation_credits($1, $2)", [id, `generation-release:${id}`]);
+        await client.query("INSERT INTO ai.audit_logs (actor_user_id, actor_type, action, resource_type, resource_id) VALUES ($1, $2, 'generation.cancelled', 'generation_job', $3)", [userId, isAdmin ? "admin" : "user", id]);
+      }
+      const generation = await this.findById(client, id, userId, isAdmin);
+      if (!generation) throw new Error("cancelled_generation_missing");
+      await client.query("COMMIT");
+      return generation;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
+  }
+
   private async findByIdempotency(client: PoolClient, userId: number, idempotencyKey: string): Promise<GenerationView | undefined> {
     const result = await client.query<{ id: string }>("SELECT id FROM ai.generation_jobs WHERE user_id = $1 AND idempotency_key = $2", [userId, idempotencyKey]);
     const id = result.rows[0]?.id;
