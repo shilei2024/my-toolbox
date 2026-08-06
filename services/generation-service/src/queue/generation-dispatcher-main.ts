@@ -1,5 +1,5 @@
-import { Pool } from "pg";
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
+import { createDatabasePool } from "../database/pool.ts";
 import { loadGenerationQueueConfig } from "./config.ts";
 import { createGenerationQueue, GenerationQueueService } from "./generation-queue-service.ts";
 import { GenerationOutboxDispatcher } from "./outbox-dispatcher.ts";
@@ -11,7 +11,7 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const pollMs = positiveInteger(process.env.GENERATION_OUTBOX_POLL_MS, 1000, "GENERATION_OUTBOX_POLL_MS");
 const config = loadGenerationQueueConfig();
 const logger = new ConsoleStructuredLogger();
-const pool = new Pool({ connectionString: databaseUrl, max: 5, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+const pool = createDatabasePool(databaseUrl, { max: 5 });
 const redis = createGenerationRedisConnections(config, logger);
 const queue = createGenerationQueue(redis.producer, config, logger);
 const queueService = new GenerationQueueService(queue, redis.publisher, config);
@@ -19,14 +19,28 @@ const dispatcher = new GenerationOutboxDispatcher(new PostgresGenerationOutboxRe
   batchSize: config.outboxBatchSize, retryBaseMs: config.outboxRetryBaseMs, retryMaxMs: config.outboxRetryMaxMs,
 }, logger);
 let stopping = false;
+let consecutiveFailures = 0;
 
 const stop = () => { stopping = true; };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 logger.info("queue.dispatcher_started", { pollMs, batchSize: config.outboxBatchSize });
 while (!stopping) {
-  const result = await dispatcher.runOnce();
-  if (result.claimed === 0) await delay(pollMs);
+  try {
+    const result = await dispatcher.runOnce();
+    consecutiveFailures = 0;
+    if (result.claimed === 0) await delay(pollMs);
+  } catch (error) {
+    consecutiveFailures += 1;
+    const backoffMs = Math.min(30_000, 1_000 * 2 ** Math.min(consecutiveFailures - 1, 5));
+    logger.error("queue.dispatcher_run_failed", {
+      failureReason: "database_error",
+      errorMessage: String(error).slice(0, 300),
+      backoffMs,
+      consecutiveFailures,
+    });
+    await delay(backoffMs);
+  }
 }
 await queueService.close();
 await redis.producer.quit();

@@ -1,5 +1,5 @@
-import { Pool } from "pg";
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
+import { createDatabasePool } from "../database/pool.ts";
 import { BillingService, BillingWebhookProcessor } from "./billing-service.ts";
 import { loadBillingConfig } from "./config.ts";
 import { PaymentProviderRegistry } from "./payment-provider.ts";
@@ -12,7 +12,7 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const config = loadBillingConfig();
 if (!config.stripe) throw new Error("No payment provider is enabled");
 const logger = new ConsoleStructuredLogger();
-const pool = new Pool({ connectionString: databaseUrl, max: 6, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+const pool = createDatabasePool(databaseUrl, { max: 6 });
 const repository = new PostgresBillingRepository(pool);
 const providers = new PaymentProviderRegistry();
 providers.register(new StripePaymentProvider(config.stripe.webhookSecret, config.stripe.secretKey));
