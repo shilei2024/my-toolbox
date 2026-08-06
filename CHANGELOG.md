@@ -10,6 +10,9 @@
 - **冷启动 schema 探针**：schema 已存在时跳过 `db.create_all()` 的反射检查
   （生产可设 `AUTO_CREATE_SCHEMA=false` 完全跳过），每次冷启动减少 10–30 次
   查询；库不可用时仍按既有兜底继续启动。
+- **回迁服务器本地库脚本**：新增 `deploy/switch-back-to-local-db.sh`，一键把
+  主站 Flask 与 Generation Service 切回腾讯云本机 PostgreSQL、跑幂等迁移、
+  重启服务并关闭 5432 公网监听；自带双环境文件备份，不打印任何密码。
 
 ## 0.5.9 · 主站 Vercel 崩溃加固 / 2026-08-06
 - **根因**：`mindfulpenpal.com` 全部路由 500（`FUNCTION_INVOCATION_FAILED`）——
