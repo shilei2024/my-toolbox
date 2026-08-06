@@ -61,7 +61,7 @@ import os
 pw = os.environ["LOCAL_PW"]
 targets = [
     ("/etc/mindfulpenpal.production.env",
-     f"postgresql://mavis:{pw}@host.docker.internal:5432/mindfulpenpal?sslmode=require",
+     f"postgresql://mavis:{pw}@host.docker.internal:5432/mindfulpenpal?uselibpqcompat=true&sslmode=require",
      0o600),
     ("/opt/mytoolbox/.env",
      f"postgresql://mavis:{pw}@127.0.0.1:5432/mindfulpenpal",
