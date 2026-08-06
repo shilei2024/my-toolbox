@@ -157,9 +157,9 @@ def create_app() -> Flask:
         register_tools(app)
         _log("  ok")
     except Exception:
-        _log("  FATAL")
+        _log("  WARN: boot DB/tool init failed; continuing so the function can serve requests")
         traceback.print_exc(file=sys.stderr)
-        raise
+        app.config["_BOOT_DB_FAILED"] = True
 
     # background cleanup (skipped on read-only filesystem — no threads in Serverless)
     if not _is_readonly_fs:
@@ -358,10 +358,17 @@ def _init_extensions(app: Flask) -> None:
         app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{target.as_posix()}"
 
     db.init_app(app)
-    with app.app_context():
-        db.create_all()
-        _ensure_tool_external_url_column(app)
-        apply_runtime_settings(app)
+    try:
+        with app.app_context():
+            db.create_all()
+            _ensure_tool_external_url_column(app)
+            apply_runtime_settings(app)
+    except Exception:
+        app.logger.warning(
+            "Database unavailable at boot; continuing without schema/runtime settings",
+            exc_info=True,
+        )
+        app.config["_BOOT_DB_FAILED"] = True
 
     login_manager.init_app(app)
 

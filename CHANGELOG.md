@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.9 · 主站 Vercel 崩溃加固 / 2026-08-06
+- **根因**：`mindfulpenpal.com` 全部路由 500（`FUNCTION_INVOCATION_FAILED`）——
+  Flask 在 Vercel 冷启动时执行 `_seed_admin` 等初始化，若 `DATABASE_URL` /
+  `POSTGRES_URL_*` 指向不可达数据库（localhost、已停用旧库、暂停的 Prisma
+  Postgres），连接异常会让整个 serverless 函数无法启动。
+- **加固**：启动阶段的数据库/工具初始化失败不再让函数崩溃，改为记录完整
+  traceback 后继续启动；PostgreSQL 连接增加 5 秒 `connect_timeout`，冷启动
+  失败快速返回而不是长时间挂起。
+- **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
+  步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
+- **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；
+  代码修复合入 main 后同样需要一次新部署生效。
+
 ## 0.5.8 · 统一后台配置缺口修复 / 2026-08-06
 - **修复生产 `/admin/gallery` 报“缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”**：根因是
   `deploy/DEPLOY_GUIDE.md` §8.1 的 Vercel 原 Flask 项目配置清单漏掉

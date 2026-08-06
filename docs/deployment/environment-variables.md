@@ -22,6 +22,13 @@
 
 Vercel 变量变更只应用于之后的新 deployment，不会修改已经存在的 deployment。[Vercel Environment Variables](https://vercel.com/docs/environment-variables)
 
+> **主站 500 排查**：若 `mindfulpenpal.com` 所有路由返回 500，且 Vercel 错误为
+> `FUNCTION_INVOCATION_FAILED`，先看 Vercel → my-toolbox → Deployments → 最新
+> Production → Runtime Logs。常见根因是 `DATABASE_URL` / `POSTGRES_URL_*` 指向
+> 不可达数据库（例如 `127.0.0.1` 本地库、已停用旧库、或已暂停的 Vercel Prisma
+> Postgres），Flask 冷启动建管理员时连接失败导致整个函数崩溃。修复环境变量后
+> 重新部署，并用 `https://mindfulpenpal.com/healthz` 验证。
+
 ## 分类规则
 
 公开变量仅限明确允许进入浏览器的信息。任何以 `NEXT_PUBLIC_` 开头的变量都会进入前端 bundle，禁止存放：

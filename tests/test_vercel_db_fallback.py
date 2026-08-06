@@ -51,5 +51,19 @@ class VercelDatabaseFallbackTests(unittest.TestCase):
         self.assertFalse(_has_external_database())
 
 
+class EngineOptionsTests(unittest.TestCase):
+    def test_postgres_engine_options_include_short_connect_timeout(self) -> None:
+        from config import engine_options_for
+
+        options = engine_options_for("postgresql://u:p@host/db")
+        self.assertEqual(options["connect_args"]["connect_timeout"], 5)
+
+    def test_sqlite_engine_options_have_no_connect_args(self) -> None:
+        from config import engine_options_for
+
+        options = engine_options_for("sqlite:///app.db")
+        self.assertNotIn("connect_args", options)
+
+
 if __name__ == "__main__":
     unittest.main()

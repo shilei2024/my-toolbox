@@ -42,6 +42,18 @@ def _bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def engine_options_for(database_url: str) -> dict:
+    """SQLAlchemy engine options for a detected database URL.
+
+    PostgreSQL gets a short connect timeout so a dead or paused database
+    fails fast at cold start instead of hanging the whole Vercel function.
+    """
+    options = {"pool_pre_ping": True}
+    if database_url.startswith(("postgres://", "postgresql://")):
+        options["connect_args"] = {"connect_timeout": 5}
+    return options
+
+
 class Config:
     # --- Flask ---
     SECRET_KEY: str = os.environ.get("SECRET_KEY", "dev-only-change-me")
@@ -58,7 +70,7 @@ class Config:
     # Default is relative to Flask's instance/ directory.
     SQLALCHEMY_DATABASE_URI: str = _auto_db_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
+    SQLALCHEMY_ENGINE_OPTIONS: dict = engine_options_for(_auto_db_url())
 
     # --- Bootstrap admin ---
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@example.com")
