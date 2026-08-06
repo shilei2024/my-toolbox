@@ -9,14 +9,15 @@
 // Deploy: Cloudflare dashboard -> Workers & Pages -> Create Worker -> paste
 // this file, then set GALLERY_SERVICE_BASE_URL to the workers.dev URL.
 
-const ORIGIN = "https://api-ai.mindfulpenpal.com";
+const DEFAULT_ORIGIN = "https://api-ai.mindfulpenpal.com";
 const MAX_ATTEMPTS = 3;
 const TIMEOUT_MS = 20_000;
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
+    const origin = (env.API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, "");
     const url = new URL(request.url);
-    const target = new URL(url.pathname + url.search, ORIGIN);
+    const target = new URL(url.pathname + url.search, origin);
     const headers = new Headers(request.headers);
     headers.delete("host");
     headers.set("x-forwarded-host", url.host);

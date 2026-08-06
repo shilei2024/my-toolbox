@@ -32,14 +32,24 @@ Vercel Gallery -> Cloudflare Worker（边缘节点）-> api-ai.mindfulpenpal.com
 
 6. 验证：浏览器打开
    `<Worker地址>/v1/generation/workflows`，预期返回 401 JSON（说明转发成功）；
-7. 打开 Vercel → **my-toolbox-gallery** → Settings → Environment Variables →
+7. 如果需要转发到 Cloudflare 隧道（快速隧道地址），在 Worker 的 **Settings →
+   Variables** 里加一个环境变量：
+
+   ```text
+   API_ORIGIN = https://xxx.trycloudflare.com
+   ```
+
+   然后 **Save and deploy**。这样链路变成：
+   `Vercel → Worker(workers.dev) → 隧道 → 服务器`；
+8. 打开 Vercel → **my-toolbox-gallery** → Settings → Environment Variables →
    Production 和 Preview，把 `GALLERY_SERVICE_BASE_URL` 改成 Worker 地址；
-8. 重新部署 Gallery，刷新 create 页面验证。
+9. 重新部署 Gallery，刷新 create 页面验证。
 
 ## 说明
 
 - Worker 会原样转发方法和请求头（包括 `X-Mavis-User-Context` /
   `X-Mavis-User-Signature`），不需要改 Gallery 代码；
 - 免费额度 10 万次请求/天，对当前规模足够；
+- `API_ORIGIN` 不设置时默认转发到 `https://api-ai.mindfulpenpal.com`；
 - 如果以后 Vercel 到上海直连恢复稳定，把 `GALLERY_SERVICE_BASE_URL`
   改回 `https://api-ai.mindfulpenpal.com` 即可回退。
