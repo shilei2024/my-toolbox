@@ -42,6 +42,7 @@ from config import get_config
 from extensions import csrf, db, limiter, login_manager
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
+from utils.gallery_cors import apply_gallery_cors
 from utils.helpers import china_now, get_client_ip, to_china_time, utc_today_str
 from utils.settings import apply_runtime_settings
 
@@ -141,6 +142,7 @@ def create_app() -> Flask:
         _register_blueprints(app)
         _register_error_handlers(app)
         _register_context(app)
+        apply_gallery_cors(app)
         _register_cli(app)
         _log("  ok")
     except Exception:
