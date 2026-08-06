@@ -1,5 +1,7 @@
 # Cloudflare Tunnel 快速验证（525 错误根治）
 
+> 完整手册见 [docs/deployment/gallery-integration-cloudflare-tunnel.md](../docs/deployment/gallery-integration-cloudflare-tunnel.md)。
+
 ## 为什么用隧道
 
 Cloudflare 边缘直连上海服务器时 TLS 握手失败（Error 525），说明"海外大云网络 → 大陆
