@@ -16,6 +16,9 @@
   `Can't load plugin` 秒崩；程序现在跳过它并按
   `POSTGRES_URL_NON_POOLING → POSTGRES_URL → DATABASE_URL → SQLite` 选择
   第一个可用的 `postgresql://` 地址。
+- **Suspended 恢复说明**：Vercel Prisma Postgres 免费档闲置会进入
+  Suspended 状态，连接快速失败导致主站 500；排查文档补充 Resume /
+  查询唤醒与 Redeploy 步骤。
 - **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
   步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
 - **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；
