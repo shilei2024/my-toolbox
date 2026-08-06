@@ -16,6 +16,8 @@ PROD_ENV=/etc/mindfulpenpal.production.env
 MAIN_ENV=/opt/mytoolbox/.env
 DOCKER_IP="$(ip -4 addr show docker0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 || true)"
 DOCKER_IP="${DOCKER_IP:-172.17.0.1}"
+NET_GW="$(docker network inspect mindfulpenpal-ai-production_mindfulpenpal-ai \
+  --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)"
 
 echo "[1/9] backup environment files"
 sudo cp "$PROD_ENV" "$PROD_ENV.bak-$BACKUP_SUFFIX"
@@ -109,7 +111,13 @@ sudo ufw delete allow 5432/tcp >/dev/null 2>&1 || true
 # Allow Docker containers (172.16.0.0/12) to reach the main site on 8000 only.
 sudo ufw allow from 172.16.0.0/12 to any port 8000 proto tcp >/dev/null 2>&1 || true
 PG_CONF="$(sudo -u postgres psql -tAc 'SHOW config_file')"
-echo "listen_addresses = '127.0.0.1,${DOCKER_IP}'" | sudo tee -a "$PG_CONF" >/dev/null
+LISTEN_IPS="127.0.0.1"
+[ -n "$DOCKER_IP" ] && LISTEN_IPS="$LISTEN_IPS,$DOCKER_IP"
+[ -n "$NET_GW" ] && LISTEN_IPS="$LISTEN_IPS,$NET_GW"
+# Remove any earlier uncommented listen_addresses so the appended value wins,
+# then listen on loopback + every docker bridge gateway used by app containers.
+sudo sed -i '/^listen_addresses/d' "$PG_CONF"
+echo "listen_addresses = '$LISTEN_IPS'" | sudo tee -a "$PG_CONF" >/dev/null
 sudo systemctl restart postgresql
 
 echo "[9/9] verification"
@@ -124,6 +132,8 @@ echo "--- main site listener (must be 0.0.0.0:8000) ---"
 sudo ss -tlnp | grep 8000 || echo "no 8000 listener"
 echo "--- port 5432 listeners (must be loopback/docker only) ---"
 sudo ss -tlnp | grep 5432 || echo "no 5432 listener"
+echo "--- postgres listen_addresses ---"
+sudo -u postgres psql -tAc 'SHOW listen_addresses' || true
 
 echo
 echo "Done. Remaining manual step: delete the TCP 5432 inbound rule in the"
