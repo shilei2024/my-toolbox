@@ -18,9 +18,17 @@
 
 - ✅ 快速隧道已验证：`trycloudflare.com` 地址访问 `/v1/generation/workflows` 返回 401，
   说明隧道方案有效；
-- ❌ Gallery 线上 `/api/generations` 返回 404：原因是线上部署跑的是旧版本代码
-  （Production Branch 不是 main，或最新部署未成功）；
-- ✅ 下一步：先修 Vercel 部署版本（见第 5 节第 0 条），再建站点、配正式命名隧道。
+- ✅ 线上 Gallery 已运行包含 M1.2/M1.3 的新代码：`/api/me/session` 200、
+  `/api/generation/workflows` 200（含 countRange/尺寸约束）、`/api/generations`
+  返回 401 未登录鉴权（不再是旧版本 404）、`/create` 200；主站登录页正常。
+- ✅ 集成分支已并入本地登录桥/COS 修复，并同步 main 0.5.2–0.5.6 全部生产修复；
+  本机 Generation typecheck + 70 项测试、Gallery lint + 11 项测试 + 生产构建、
+  Python 26 项测试全部通过。
+- ⚠️ `api-ai.mindfulpenpal.com` 从国内本机直连仍 TLS 握手失败（curl 35），
+  但 Vercel 边缘经 BFF 可正常到达后端；正式命名隧道仍是让直连稳定的下一步。
+- ⏭️ 下一步：合入本分支 0.5.7 差异后重新生成 Preview → 用测试账号完成
+  登录 → 创建 → 即梦 → COS → 最近任务/内嵌预览的真实任务闭环验收 →
+  建 Cloudflare 站点并配置正式命名隧道。
 
 ## 0. 已经完成、不需要重做的部分
 

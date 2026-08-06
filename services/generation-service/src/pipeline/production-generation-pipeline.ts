@@ -38,13 +38,14 @@ export class ProductionGenerationPipeline {
       this.#logger.info("generation.completed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: finished - started, uploadDurationMs: finished - generatedAt, outputCount: assets.length });
       return { externalRequestId: status.externalRequestId, assets, providerCode: provider.descriptor.code, providerMetadata: status.providerMetadata, ...(status.actualCost === undefined ? {} : { actualCost: status.actualCost }), generationDurationMs: generatedAt - started, storageDurationMs: finished - generatedAt };
     } catch (error) {
+      const detail = errorDetail(error);
       this.#logger.error("generation.failed", {
         generationId: request.jobId,
         provider: provider.descriptor.code,
         workflow: request.workflow.workflowId,
         durationMs: Date.now() - started,
         failureReason: error instanceof ProviderError ? error.code : "internal_error",
-        ...(errorDetail(error) ? { failureDetail: errorDetail(error) } : {}),
+        ...(detail ? { failureDetail: detail } : {}),
       });
       throw error;
     } finally {

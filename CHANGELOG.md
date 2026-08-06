@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.7 · 集成分支同步与真实联调基线 / 2026-08-06
+- **同步生产修复到集成分支**：`codex/frontend-backend-integration` 并入 main
+  0.5.2–0.5.6 的全部生产修复（COS 上传签名、取消兜底落库、Jimeng Seedream 4.5
+  合法尺寸缩放、Provider 失败详情安全日志、Gallery 登录预取 CORS），并并入
+  ai-image 本地登录桥与一键开发链路（COS 存储层元数据键名规范化作为防御兜底）。
+- **修复合入后的类型错误**：`failureDetail` 改为先提取局部常量再条件展开，
+  使 Generation Service `tsc --noEmit` 通过；phase4 契约测试与线上 COS
+  “不发送自定义元数据头”行为对齐。
+- **真实联调基线（线上实测）**：`gallery.mindfulpenpal.com/api/me/session` 200、
+  `/api/generation/workflows` 200、`/api/generations` 401（未登录鉴权，不再是
+  旧版本 404）、`/create` 200、主站登录页正常；`api-ai.mindfulpenpal.com`
+  从国内网络直连仍 TLS 握手失败（curl 35），但 Vercel 边缘经 BFF 可正常到达
+  后端，正式命名隧道仍是让直连稳定的下一步。
+
 ## 0.5.6 · 修复 COS 上传签名错误与取消后列表不刷新 / 2026-08-06
 - **修复 COS 上传 403 SignatureDoesNotMatch**：上传图片时不再发送
   `x-cos-meta-job_id` / `x-cos-meta-output_index` 自定义元数据头

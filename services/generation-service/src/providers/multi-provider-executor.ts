@@ -57,6 +57,7 @@ export class MultiProviderExecutor {
         try { return await this.#pipeline.execute(candidate.provider, request, candidate.binding, attemptContext); }
         catch (error) {
           lastError = normalizeProviderError(error, candidate.provider.descriptor.code);
+          const detail = errorDetail(lastError);
           this.#logger.error("provider.attempt_failed", {
             generationId: request.jobId,
             provider: candidate.provider.descriptor.code,
@@ -64,7 +65,7 @@ export class MultiProviderExecutor {
             totalCall,
             failureReason: lastError.code,
             retryable: lastError.retryable,
-            ...(errorDetail(lastError) ? { failureDetail: errorDetail(lastError) } : {}),
+            ...(detail ? { failureDetail: detail } : {}),
           });
           if (!lastError.retryable || providerAttempt >= attempts) break;
           const delay = Math.min(this.#retryBaseMs * 2 ** (providerAttempt - 1), 30_000);

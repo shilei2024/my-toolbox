@@ -140,9 +140,10 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
     assert.equal(uploads.length, 1);
     assert.equal(deletes.length, 0);
     const headers = uploads[0]?.Headers as Record<string, unknown> | undefined;
-    assert.equal(headers?.["x-cos-meta-job-id"], "job-phase4");
-    assert.equal(headers?.["x-cos-meta-output-index"], "0");
-    assert.equal("x-cos-meta-job_id" in (headers ?? {}), false);
+    // Production intentionally does not send x-cos-meta-* headers: the object
+    // key already embeds the job id and output index, and signing custom
+    // metadata headers caused SignatureDoesNotMatch on Tencent COS uploads.
+    assert.equal(headers, undefined);
     assert.deepEqual(requests, ["POST /prompt", "GET /history/prompt-e2e", "GET /view"]);
     assert.equal(logs.some((entry) => entry.event === "generation.completed" && !("prompt" in entry.fields)), true);
     await assert.rejects(access(path.join(root, "attempt-phase4-0.png")));
