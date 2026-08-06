@@ -1,5 +1,4 @@
 import path from "node:path";
-import { Pool } from "pg";
 import { ComfyUIClient } from "../comfyui/client.ts";
 import { ComfyUIProvider } from "../comfyui/provider.ts";
 import { loadPhase4Config } from "../config.ts";
@@ -21,11 +20,12 @@ import { GenerationWorkerRuntime } from "./generation-worker.ts";
 import { PostgresGenerationJobRepository } from "./postgres-generation-job-repository.ts";
 import { createGenerationRedisConnections } from "./redis-connections.ts";
 import { parseDefaultModeration } from "../generation/types.ts";
+import { createDatabasePool } from "../database/pool.ts";
 
 const databaseUrl = required("DATABASE_URL");
 const queueConfig = loadGenerationQueueConfig();
 const logger = new ConsoleStructuredLogger();
-const pool = new Pool({ connectionString: databaseUrl, max: 10, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+const pool = createDatabasePool(databaseUrl, { max: 10 });
 const registry = new ProviderRegistry();
 
 if (process.env.COMFYUI_BASE_URL?.trim()) {

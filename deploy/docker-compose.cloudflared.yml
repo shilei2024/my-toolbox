@@ -1,0 +1,16 @@
+name: mindfulpenpal-ai-production
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /opt/mindfulpenpal/cloudflared:/etc/cloudflared:ro
+    networks:
+      - default
+
+networks:
+  default:
+    external: true
+    name: mindfulpenpal-ai-production_mindfulpenpal-ai

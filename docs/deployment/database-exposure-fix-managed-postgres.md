@@ -198,6 +198,12 @@ sudoedit /etc/mindfulpenpal.production.env
 **其他行（Redis、COS、Provider 等）一律不动。**
 保存退出（nano 是 Ctrl+O 回车，再 Ctrl+X）。
 
+> 注意：如果连接串以 `?sslmode=require` 结尾，请在它前面加上 `uselibpqcompat=true&`，
+> 变成 `?uselibpqcompat=true&sslmode=require`。这是 node-postgres 的兼容参数（之前本机库
+> 就是这么配置的）；缺少它时新版 pg 会把 `require` 当作严格证书校验，跨公网连接更容易超时。
+> `pg_dump`/`psql` 等命令行工具不认这个参数，所以只在服务器 AI 服务的环境变量里加，
+> 不要加到 Vercel 主站的变量里。
+
 然后重启 AI 相关容器：
 
 ```bash

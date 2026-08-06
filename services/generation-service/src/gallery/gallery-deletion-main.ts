@@ -1,5 +1,5 @@
-import { Pool } from "pg";
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
+import { createDatabasePool } from "../database/pool.ts";
 import { TencentCosStorage } from "../storage/tencent-cos.storage.ts";
 import { GalleryAssetDeletionWorker } from "./asset-deletion-worker.ts";
 import { TencentCosGalleryAssetUrlResolver } from "./asset-url.ts";
@@ -8,7 +8,7 @@ import { PostgresGalleryRepository } from "./postgres-gallery-repository.ts";
 
 const config = loadGalleryConfig();
 const logger = new ConsoleStructuredLogger();
-const pool = new Pool({ connectionString: config.databaseUrl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+const pool = createDatabasePool(config.databaseUrl, { max: 3 });
 const assets = new TencentCosGalleryAssetUrlResolver({ ...config.cos, allowedPublicHosts: config.assetHosts, privateUrlTtlSeconds: config.privateUrlTtlSeconds });
 const repository = new PostgresGalleryRepository(pool, assets);
 const cos = new TencentCosStorage(config.cos);
