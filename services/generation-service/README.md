@@ -67,6 +67,12 @@ M1.3 fixes creation-homepage feedback and workflow constraints:
 - `GenerationWorkflowView` exposes schema-derived `countRange`/`sizes`; `create` now rejects dimensions or counts outside the workflow `input_schema`;
 - the workbench derives login state from the session route instead of billing, localizes all user-facing service errors, and removes non-essential homepage copy.
 
+M1.4 adds local development tooling and fixes a production-blocking COS issue:
+
+- npm run scripts load `./.env` automatically via `--env-file-if-exists=.env`;
+- `TencentCosStorage` normalizes custom metadata header names (`job_id` -> `job-id`); Tencent COS rejects underscore metadata headers with `SignatureDoesNotMatch`;
+- repository root `scripts/dev/*.ps1` provide one-command local stack setup/start/health/stop.
+
 ## Run tests
 
 ```powershell

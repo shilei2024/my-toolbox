@@ -9,6 +9,17 @@ npm.cmd install
 npm.cmd run dev
 ```
 
+完整本地链路（Flask 主站 + Gallery + Generation API/Dispatcher/Worker）请使用仓库根目录脚本：
+
+```powershell
+.\scripts\dev\setup-local-env.ps1   # 补齐三份 .env（幂等，不覆盖已有值）
+.\scripts\dev\dev-up.ps1            # 启动全部服务
+.\scripts\dev\dev-health.ps1        # 健康检查（含登录桥）
+.\scripts\dev\dev-down.ps1          # 停止全部服务
+```
+
+详细说明与端口规划见 [`docs/deployment/local-development-bridge.md`](../../docs/deployment/local-development-bridge.md)。
+
 运行前配置：
 
 - `GALLERY_SERVICE_BASE_URL`

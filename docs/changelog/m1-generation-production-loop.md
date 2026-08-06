@@ -50,6 +50,18 @@
 
 验证：Generation Service typecheck + 66 项测试。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
 
+## M1.4 本地开发环境与登录桥修复
+
+解决"主站登录后跳到 Gallery 仍显示游客"与"其他服务没有起来"两类问题：
+
+- **本地一键链路**：新增 `scripts/dev/setup-local-env.ps1`（幂等补齐三份 `.env`，不打印密钥）、`dev-up.ps1`（Flask 8100 / Gallery 3000 / Generation API 3101 / Dispatcher / Worker + Redis）、`dev-health.ps1`（端点、introspection、工作流列表、进程检查）、`dev-down.ps1`。
+- **Generation Service 自动加载 .env**：npm run 脚本加入 `--env-file-if-exists=.env`，本地启动不再需要手工导环境变量；补 `apps/gallery-web/.env.example` 与 `services/generation-service/.env.example`。
+- **外链本地开发支持**：`tools/__init__.py` 允许 loopback HTTP 的 `AI_IMAGE_EXTERNAL_URL`（生产仍强制 HTTPS），本地首页可显示 AI 作图卡片。
+- **COS 上传签名修复**：腾讯 COS 拒绝含下划线的 `x-cos-meta-*` 自定义头（`SignatureDoesNotMatch`），`TencentCosStorage` 现规范化为连字符小写键（`job_id` → `job-id`），并补回归测试。这是此前"任务 failed/internal_error"的真实根因之一。
+- **本地数据库**：开发环境切换到本机 PostgreSQL（5433，`mavis_dev`），避免本地进程指向不可达的远端库；文档给出建库、迁移、启用 Mock Provider 的完整步骤。
+
+验证：Generation Service typecheck + 67 项测试；Python 新增 `test_tools_external_url.py` 3 项通过；本地端到端冒烟（登录 → 积分 → 创建 → completed → 画廊取图）通过。
+
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。
