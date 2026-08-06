@@ -5,7 +5,7 @@ Run locally:
     python app.py
 
 Run in production:
-    gunicorn -w 2 -b 127.0.0.1:8000 'app:create_app()'
+    gunicorn -w 2 -b 0.0.0.0:8000 'app:create_app()'
 
 Vercel (auto-detected via VERCEL env var):
     - Uses /tmp for writable directories (uploads, instance)
@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 from flask import (
@@ -38,7 +39,7 @@ from flask_login import current_user
 
 from admin import admin_bp
 from auth.routes import auth_bp
-from config import get_config
+from config import _auto_db_url, get_config
 from extensions import csrf, db, limiter, login_manager
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
@@ -57,13 +58,11 @@ def _has_external_database() -> bool:
     standalone deployments (e.g. Tencent Cloud PostgreSQL) use DATABASE_URL.
     Without any of these the read-only Vercel filesystem falls back to an
     empty in-memory SQLite, which makes every stored account disappear.
+    Prisma-pooler-only URLs (``prisma://`` or ``uselibpqcompat``) are not
+    usable by psycopg2 and are treated as missing so boot never crashes on
+    an unparseable DSN.
     """
-    database_url = os.environ.get("DATABASE_URL", "")
-    return bool(
-        os.environ.get("POSTGRES_URL_NON_POOLING")
-        or os.environ.get("POSTGRES_URL")
-        or database_url.startswith(("postgres://", "postgresql://"))
-    )
+    return _auto_db_url().startswith(("postgres://", "postgresql://"))
 
 
 def create_app() -> Flask:
@@ -360,9 +359,17 @@ def _init_extensions(app: Flask) -> None:
     db.init_app(app)
     try:
         with app.app_context():
-            db.create_all()
+            if app.config.get("AUTO_CREATE_SCHEMA", True):
+                from sqlalchemy import text  # noqa: PLC0415
+
+                try:
+                    # Cheap existence probe: avoids create_all() reflection on
+                    # every cold start when the schema is already present.
+                    db.session.execute(text("SELECT 1 FROM users LIMIT 1")).scalar()
+                except Exception:  # noqa: BLE001
+                    db.create_all()
             _ensure_tool_external_url_column(app)
-            apply_runtime_settings(app)
+            apply_runtime_settings(app, force=True)
     except Exception:
         app.logger.warning(
             "Database unavailable at boot; continuing without schema/runtime settings",
@@ -387,9 +394,19 @@ def _init_extensions(app: Flask) -> None:
     def _ensure_anon_id():  # noqa: ANN202
         from auth.decorators import ensure_anon_id
 
-        # Keep all workers in sync with settings saved from the admin panel.
-        apply_runtime_settings(app)
-        g.anon_id = ensure_anon_id()
+        try:
+            # Keep all workers in sync with settings saved from the admin panel.
+            apply_runtime_settings(app)
+            g.anon_id = ensure_anon_id()
+        except Exception:  # noqa: BLE001
+            # DB-backed request setup must never take the whole site down.
+            if not app.config.get("_REQUEST_DB_FAILURE_LOGGED"):
+                app.logger.warning(
+                    "Database unavailable during request setup; continuing with defaults",
+                    exc_info=True,
+                )
+                app.config["_REQUEST_DB_FAILURE_LOGGED"] = True
+            g.anon_id = uuid.uuid4().hex
 
 
 def _register_blueprints(app: Flask) -> None:

@@ -48,11 +48,13 @@ export async function resolveViewerFromCookieHeader(cookieHeader: string): Promi
     if (!body || typeof body !== "object" || Array.isArray(body)) return fallback("error");
     const role = (body as { role?: unknown }).role;
     const userId = (body as { userId?: unknown }).userId;
+    const emailValue = (body as { email?: unknown }).email;
     if (!isRole(role)) return fallback("error");
     if (role === "guest") return fallback("guest");
     if (!Number.isInteger(userId) || Number(userId) <= 0) return fallback("error");
-    console.info(`[viewer] introspection ok role=${role} userId=${Number(userId)}`);
-    return { role, userId: Number(userId), requestId, bridge: "ok" };
+    const email = typeof emailValue === "string" && emailValue.trim() ? emailValue.trim().slice(0, 255) : undefined;
+    console.info(`[viewer] introspection ok role=${role} userId=${Number(userId)}${email ? ` email=${email}` : ""}`);
+    return { role, userId: Number(userId), ...(email ? { email } : {}), requestId, bridge: "ok" };
   } catch (reason) {
     console.info(`[viewer] introspection exception ${String(reason)}`);
     return fallback("error");

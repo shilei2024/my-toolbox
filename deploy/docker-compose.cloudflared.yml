@@ -5,6 +5,8 @@ services:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /opt/mindfulpenpal/cloudflared:/etc/cloudflared:ro
     networks:

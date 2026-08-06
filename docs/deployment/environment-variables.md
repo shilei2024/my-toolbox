@@ -34,6 +34,17 @@ Vercel 变量变更只应用于之后的新 deployment，不会修改已经存�
 > 在连网前直接报 `invalid URI query parameter "uselibpqcompat"`，同样导致冷启动
 > 崩溃。应使用 `POSTGRES_URL_NON_POOLING` 的直连地址，或去掉该参数。程序现在会
 > 自动剥离这两个参数，但生产环境仍应配置直连地址。
+>
+> `prisma://` 开头的地址是 Prisma 专用协议，psycopg2/SQLAlchemy 无法使用
+> （`Can't load plugin: sqlalchemy.dialects:prisma`），也会秒崩且不产生外呼。
+> 请确保 `POSTGRES_URL_NON_POOLING` 是 `postgresql://` 直连地址；程序现在会
+> 跳过 `prisma://` 并回退到下一个可用地址。
+>
+> **Suspended 状态**：Vercel Storage 中 Prisma Postgres 显示 **Suspended** 时
+> （免费档闲置后自动暂停），所有连接会快速失败，表现与“数据库不可达”相同。
+> 恢复：Vercel → Storage → 该数据库 → 点击 **Resume**（若没有按钮，打开查询
+> 控制台执行 `SELECT 1;` 唤醒），等状态变为 **Running** 后再验证站点；如仍 500，
+> 对最新部署执行 Redeploy 让函数冷启动重试。
 
 ## 分类规则
 

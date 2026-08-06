@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.10 · 数据库操作量优化（避免打满托管库免费额度）/ 2026-08-06
+- **Dispatcher 出站队列空闲退避**：连续空转时轮询间隔从 1 秒指数退避到
+  `GENERATION_OUTBOX_IDLE_MAX_MS`（默认 30 秒），队列出现消息时立即恢复；
+  空闲查询量从约 8.6 万次/天降到约 2,900 次/天。
+- **主站运行设置 TTL 缓存**：`apply_runtime_settings` 从“每个请求查一次库”
+  改为进程内缓存（`RUNTIME_SETTINGS_TTL_SECONDS` 默认 30 秒），管理员保存后
+  强制立即刷新；数据库不可用时也不再每请求重试。
+- **冷启动 schema 探针**：schema 已存在时跳过 `db.create_all()` 的反射检查
+  （生产可设 `AUTO_CREATE_SCHEMA=false` 完全跳过），每次冷启动减少 10–30 次
+  查询；库不可用时仍按既有兜底继续启动。
+- **回迁服务器本地库脚本**：新增 `deploy/switch-back-to-local-db.sh`，一键把
+  主站 Flask 与 Generation Service 切回腾讯云本机 PostgreSQL、跑幂等迁移、
+  重启服务并关闭 5432 公网监听；自带双环境文件备份，不打印任何密码。
+
 ## 0.5.9 · 主站 Vercel 崩溃加固 / 2026-08-06
 - **根因**：`mindfulpenpal.com` 全部路由 500（`FUNCTION_INVOCATION_FAILED`）——
   Flask 在 Vercel 冷启动时执行 `_seed_admin` 等初始化，若 `DATABASE_URL` /
@@ -12,6 +26,13 @@
   `uselibpqcompat` / `pgbouncer` 查询参数——psycopg2 会以
   `invalid URI query parameter` 拒绝这类 Vercel Prisma 池化地址，导致冷启动
   直接崩溃。
+- **prisma:// 协议回退**：`prisma://` 地址没有 SQLAlchemy 方言，会导致
+  `Can't load plugin` 秒崩；程序现在跳过它并按
+  `POSTGRES_URL_NON_POOLING → POSTGRES_URL → DATABASE_URL → SQLite` 选择
+  第一个可用的 `postgresql://` 地址。
+- **Suspended 恢复说明**：Vercel Prisma Postgres 免费档闲置会进入
+  Suspended 状态，连接快速失败导致主站 500；排查文档补充 Resume /
+  查询唤醒与 Redeploy 步骤。
 - **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
   步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
 - **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；

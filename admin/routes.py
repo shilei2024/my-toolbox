@@ -347,7 +347,7 @@ def settings():
             else:
                 row.value = value
         db.session.commit()
-        apply_runtime_settings(current_app)
+        apply_runtime_settings(current_app, force=True)
         flash("设置已保存。", "success")
         return redirect(url_for("admin.settings"))
 

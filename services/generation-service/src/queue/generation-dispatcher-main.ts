@@ -5,10 +5,12 @@ import { createGenerationQueue, GenerationQueueService } from "./generation-queu
 import { GenerationOutboxDispatcher } from "./outbox-dispatcher.ts";
 import { PostgresGenerationOutboxRepository } from "./postgres-outbox-repository.ts";
 import { createGenerationRedisConnections } from "./redis-connections.ts";
+import { idleBackoffDelayMs } from "./idle-backoff.ts";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const pollMs = positiveInteger(process.env.GENERATION_OUTBOX_POLL_MS, 1000, "GENERATION_OUTBOX_POLL_MS");
+const idleMaxMs = positiveInteger(process.env.GENERATION_OUTBOX_IDLE_MAX_MS, 30_000, "GENERATION_OUTBOX_IDLE_MAX_MS");
 const config = loadGenerationQueueConfig();
 const logger = new ConsoleStructuredLogger();
 const pool = createDatabasePool(databaseUrl, { max: 5 });
@@ -20,16 +22,22 @@ const dispatcher = new GenerationOutboxDispatcher(new PostgresGenerationOutboxRe
 }, logger);
 let stopping = false;
 let consecutiveFailures = 0;
+let consecutiveIdle = 0;
 
 const stop = () => { stopping = true; };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
-logger.info("queue.dispatcher_started", { pollMs, batchSize: config.outboxBatchSize });
+logger.info("queue.dispatcher_started", { pollMs, idleMaxMs, batchSize: config.outboxBatchSize });
 while (!stopping) {
   try {
     const result = await dispatcher.runOnce();
     consecutiveFailures = 0;
-    if (result.claimed === 0) await delay(pollMs);
+    if (result.claimed === 0) {
+      consecutiveIdle += 1;
+      await delay(idleBackoffDelayMs(pollMs, idleMaxMs, consecutiveIdle));
+    } else {
+      consecutiveIdle = 0;
+    }
   } catch (error) {
     consecutiveFailures += 1;
     const backoffMs = Math.min(30_000, 1_000 * 2 ** Math.min(consecutiveFailures - 1, 5));

@@ -134,19 +134,36 @@ credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
 ingress:
   - hostname: api-ai.mindfulpenpal.com
     service: http://api:3101
+  - hostname: mindfulpenpal.com
+    service: http://host.docker.internal:8000
   - service: http_status:404
 ```
 
+> 主站（Flask）运行在宿主机 systemd，不是容器。cloudflared 容器通过
+> `host.docker.internal:8000` 访问宿主时，gunicorn 必须监听 `0.0.0.0:8000`
+> （不能只监听 `127.0.0.1:8000`，否则容器连不上，Cloudflare 返回 502）。
+> 同时确保 `deploy/docker-compose.cloudflared.yml` 里有：
+> ```yaml
+> extra_hosts:
+>   - "host.docker.internal:host-gateway"
+> ```
+> 公网安全：8000 不要加入腾讯云安全组；若启用 ufw，只需放行 Docker 网段：
+> `sudo ufw allow from 172.16.0.0/12 to any port 8000 proto tcp`。
+
 ### 3.4 绑定域名
 
-先到 Cloudflare Dashboard → DNS，**删除 `api-ai` 的 A 记录**（第 1.1 步做过就跳过），然后：
+先到 Cloudflare Dashboard → DNS，**删除 `api-ai`、`mindfulpenpal.com` 的 A 记录**
+（第 1.1 步做过就跳过），然后为两个主机名都执行：
 
 ```bash
 docker run --rm -v /opt/mindfulpenpal/cloudflared:/etc/cloudflared \
   cloudflare/cloudflared tunnel route dns mindfulpenpal-api api-ai.mindfulpenpal.com
+docker run --rm -v /opt/mindfulpenpal/cloudflared:/etc/cloudflared \
+  cloudflare/cloudflared tunnel route dns mindfulpenpal-api mindfulpenpal.com
 ```
 
-这会在 Cloudflare 自动创建一条 CNAME（`api-ai` → `<tunnel-id>.cfargotunnel.com`）。
+这会为每个主机名在 Cloudflare 自动创建一条 CNAME（→ `<tunnel-id>.cfargotunnel.com`）。
+如果提示 “record already exists”，先在 Cloudflare DNS 里删除同名 A/CNAME 记录再重试。
 
 ### 3.5 启动隧道服务
 
@@ -167,6 +184,15 @@ https://api-ai.mindfulpenpal.com/v1/generation/workflows
 ```
 
 预期返回 401 JSON（说明隧道已通、鉴权正常）。
+
+主站健康检查：
+
+```bash
+curl -s https://mindfulpenpal.com/healthz
+```
+
+预期返回 `{"status":"ok",...}`。如果返回 502，按“故障排查”一节检查
+`host.docker.internal:8000` 是否可达。
 
 ## 4. Vercel 最终配置
 

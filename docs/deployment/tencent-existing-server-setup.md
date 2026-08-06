@@ -216,7 +216,7 @@ sudo nano /etc/mindfulpenpal.production.env
 | `CADDY_IMAGE` | `caddy:2.10-alpine` |
 | `ALLOW_LOCAL_IMAGE_TAGS` | `true`（本机构建镜像时使用；有镜像仓库建议用 digest 并保持 `false`） |
 | `GENERATION_API_DOMAIN` | `api-ai.mindfulpenpal.com` |
-| `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?sslmode=require` |
+| `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?uselibpqcompat=true&sslmode=require` |
 | `REDIS_URL` | `redis://redis:6379`（compose 内网 Redis） |
 | `ALLOW_PLAINTEXT_REDIS` | `true`（Redis 只在 Docker 内网，不发布公网端口） |
 | `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
@@ -231,6 +231,11 @@ sudo nano /etc/mindfulpenpal.production.env
 > 注意：`GALLERY_INTROSPECTION_SECRET` 不属于服务器环境文件，它是 Vercel 主站（Flask）与
 > Gallery Web 两个项目之间共享的独立密钥（至少 32 字节）。Generation Service 不使用它，
 > 服务器上这一项留空不会影响任何功能；必须配置在 Vercel 的两个项目里且两边完全一致。
+
+> 注意：本地 PostgreSQL 使用自签名证书，Generation Service 的 Node `pg` 驱动默认把
+> `sslmode=require` 当作 `verify-full`，会导致 worker 启动时报 `self-signed certificate`
+> 崩溃。必须在连接串里加 `uselibpqcompat=true&`（node pg 兼容 libpq 语义：加密但不校验
+> 证书）。主站 Flask（psycopg2）连 `127.0.0.1` 时不需要这个参数。
 
 生成随机值的命令：
 

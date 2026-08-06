@@ -73,6 +73,23 @@ class VercelDatabaseFallbackTests(unittest.TestCase):
             "postgresql://u:p@host/db?connect_timeout=10",
         )
 
+    def test_prisma_pooled_url_falls_back_to_sqlite(self) -> None:
+        os.environ.pop("POSTGRES_URL_NON_POOLING", None)
+        os.environ.pop("DATABASE_URL", None)
+        os.environ["POSTGRES_URL"] = "prisma://u:p@host/db"
+        self.assertEqual(_auto_db_url(), "sqlite:///app.db")
+        self.assertFalse(_has_external_database())
+
+    def test_prisma_pooled_url_falls_back_to_database_url(self) -> None:
+        os.environ.pop("POSTGRES_URL_NON_POOLING", None)
+        os.environ["POSTGRES_URL"] = "prisma://u:p@host/db"
+        os.environ["DATABASE_URL"] = "postgresql://u:p@direct/db?sslmode=require"
+        self.assertEqual(
+            _auto_db_url(),
+            "postgresql://u:p@direct/db?sslmode=require",
+        )
+        self.assertTrue(_has_external_database())
+
 
 class EngineOptionsTests(unittest.TestCase):
     def test_postgres_engine_options_include_short_connect_timeout(self) -> None:
