@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.5.9 · 主站 Vercel 崩溃加固 / 2026-08-06
+- **根因**：`mindfulpenpal.com` 全部路由 500（`FUNCTION_INVOCATION_FAILED`）——
+  Flask 在 Vercel 冷启动时执行 `_seed_admin` 等初始化，若 `DATABASE_URL` /
+  `POSTGRES_URL_*` 指向不可达数据库（localhost、已停用旧库、暂停的 Prisma
+  Postgres），连接异常会让整个 serverless 函数无法启动。
+- **加固**：启动阶段的数据库/工具初始化失败不再让函数崩溃，改为记录完整
+  traceback 后继续启动；PostgreSQL 连接增加 5 秒 `connect_timeout`，冷启动
+  失败快速返回而不是长时间挂起。
+- **Prisma 池化参数兼容**：自动剥离 `DATABASE_URL` / `POSTGRES_URL_*` 中的
+  `uselibpqcompat` / `pgbouncer` 查询参数——psycopg2 会以
+  `invalid URI query parameter` 拒绝这类 Vercel Prisma 池化地址，导致冷启动
+  直接崩溃。
+- **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
+  步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
+- **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；
+  代码修复合入 main 后同样需要一次新部署生效。
+
+## 0.5.8 · 统一后台配置缺口修复 / 2026-08-06
+- **修复生产 `/admin/gallery` 报“缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”**：根因是
+  `deploy/DEPLOY_GUIDE.md` §8.1 的 Vercel 原 Flask 项目配置清单漏掉
+  `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`，导致生产主站未配置
+  统一后台所需变量、无法读取待审核队列。
+- **补齐部署文档**：DEPLOY_GUIDE §8.1、部署检查清单与上线验收开关均加入这两个变量
+  （值须与 my-toolbox-gallery / Generation Service 完全一致，至少 32 字节）；
+  新增 `tests/test_deploy_governance.py` 治理测试，防止文档再次漏配。
+- **报错与预检更可操作**：后台未配置错误与 `flask --app app check-gallery-integration`
+  预检现在直接提示“在 Vercel my-toolbox Production 配置并重新部署”。
+
+## 0.5.7 · 集成分支同步与真实联调基线 / 2026-08-06
+- **同步生产修复到集成分支**：`codex/frontend-backend-integration` 并入 main
+  0.5.2–0.5.6 的全部生产修复（COS 上传签名、取消兜底落库、Jimeng Seedream 4.5
+  合法尺寸缩放、Provider 失败详情安全日志、Gallery 登录预取 CORS），并并入
+  ai-image 本地登录桥与一键开发链路（COS 存储层元数据键名规范化作为防御兜底）。
+- **修复合入后的类型错误**：`failureDetail` 改为先提取局部常量再条件展开，
+  使 Generation Service `tsc --noEmit` 通过；phase4 契约测试与线上 COS
+  “不发送自定义元数据头”行为对齐。
+- **真实联调基线（线上实测）**：`gallery.mindfulpenpal.com/api/me/session` 200、
+  `/api/generation/workflows` 200、`/api/generations` 401（未登录鉴权，不再是
+  旧版本 404）、`/create` 200、主站登录页正常；`api-ai.mindfulpenpal.com`
+  从国内网络直连仍 TLS 握手失败（curl 35），但 Vercel 边缘经 BFF 可正常到达
+  后端，正式命名隧道仍是让直连稳定的下一步。
+
 ## 0.5.6 · 修复 COS 上传签名错误与取消后列表不刷新 / 2026-08-06
 - **修复 COS 上传 403 SignatureDoesNotMatch**：上传图片时不再发送
   `x-cos-meta-job_id` / `x-cos-meta-output_index` 自定义元数据头

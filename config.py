@@ -16,6 +16,24 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _strip_prisma_pool_params(url: str) -> str:
+    """Remove Prisma-pooler-only query parameters libpq/psycopg2 rejects.
+
+    Vercel Prisma Postgres pooled URLs carry ``uselibpqcompat=true`` (and
+    sometimes ``pgbouncer=true``) for Prisma clients; psycopg2 fails the DSN
+    with ``invalid URI query parameter`` before any network connection.
+    """
+    if "?" not in url:
+        return url
+    base, _, query = url.partition("?")
+    kept = [
+        part
+        for part in query.split("&")
+        if part and part.split("=", 1)[0].lower() not in {"uselibpqcompat", "pgbouncer"}
+    ]
+    return base if not kept else f"{base}?{'&'.join(kept)}"
+
+
 def _auto_db_url() -> str:
     """Auto-detect external database (Vercel Postgres) or default to SQLite.
 
@@ -28,11 +46,11 @@ def _auto_db_url() -> str:
     vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
     if vercel:
         # SQLAlchemy 2.x requires postgresql:// not postgres://
-        return vercel.replace("postgres://", "postgresql://")
+        return _strip_prisma_pool_params(vercel.replace("postgres://", "postgresql://"))
     explicit = os.environ.get("DATABASE_URL")
     if explicit:
         # Also normalize in case user supplies postgres://
-        return explicit.replace("postgres://", "postgresql://")
+        return _strip_prisma_pool_params(explicit.replace("postgres://", "postgresql://"))
     return "sqlite:///app.db"
 
 
@@ -40,6 +58,18 @@ def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def engine_options_for(database_url: str) -> dict:
+    """SQLAlchemy engine options for a detected database URL.
+
+    PostgreSQL gets a short connect timeout so a dead or paused database
+    fails fast at cold start instead of hanging the whole Vercel function.
+    """
+    options = {"pool_pre_ping": True}
+    if database_url.startswith(("postgres://", "postgresql://")):
+        options["connect_args"] = {"connect_timeout": 5}
+    return options
 
 
 class Config:
@@ -58,7 +88,7 @@ class Config:
     # Default is relative to Flask's instance/ directory.
     SQLALCHEMY_DATABASE_URI: str = _auto_db_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
+    SQLALCHEMY_ENGINE_OPTIONS: dict = engine_options_for(_auto_db_url())
 
     # --- Bootstrap admin ---
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@example.com")
