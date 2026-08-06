@@ -57,7 +57,15 @@ export class MultiProviderExecutor {
         try { return await this.#pipeline.execute(candidate.provider, request, candidate.binding, attemptContext); }
         catch (error) {
           lastError = normalizeProviderError(error, candidate.provider.descriptor.code);
-          this.#logger.error("provider.attempt_failed", { generationId: request.jobId, provider: candidate.provider.descriptor.code, providerAttempt, totalCall, failureReason: lastError.code, retryable: lastError.retryable });
+          this.#logger.error("provider.attempt_failed", {
+            generationId: request.jobId,
+            provider: candidate.provider.descriptor.code,
+            providerAttempt,
+            totalCall,
+            failureReason: lastError.code,
+            retryable: lastError.retryable,
+            ...(errorDetail(lastError) ? { failureDetail: errorDetail(lastError) } : {}),
+          });
           if (!lastError.retryable || providerAttempt >= attempts) break;
           const delay = Math.min(this.#retryBaseMs * 2 ** (providerAttempt - 1), 30_000);
           if (delay > 0) await this.#sleep(delay);
@@ -86,3 +94,17 @@ function mayFallback(error: ProviderError): boolean {
 function cancelled(candidate: ProviderCandidate): ProviderError { return new ProviderError({ providerCode: candidate.provider.descriptor.code, category: "cancelled", code: "request_aborted", message: "Provider request was cancelled", retryable: false }); }
 function nextCode(candidates: readonly ProviderCandidate[], current: ProviderCandidate): string | undefined { const index = candidates.indexOf(current); return candidates[index + 1]?.provider.descriptor.code; }
 function childAttemptId(base: string, providerCode: string, providerAttempt: number, totalCall: number): string { return `${base}-${providerCode}-${providerAttempt}-${totalCall}`.slice(0, 128); }
+
+function errorDetail(error: unknown): string | undefined {
+  const messages: string[] = [];
+  const seen = new Set<Error>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const message = current.message.trim();
+    if (message) messages.push(message);
+    current = current.cause;
+  }
+  const detail = messages.join(" | ").trim();
+  return detail ? detail.slice(0, 500) : undefined;
+}

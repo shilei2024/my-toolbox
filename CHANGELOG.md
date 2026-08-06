@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4 · 日志增加失败详情 / 2026-08-06
+- **可观测性**：`generation.failed` 与 `provider.attempt_failed` 日志新增
+  `failureDetail` 字段（截断的错误消息链，不含密钥与请求体），生产排查时
+  不再只能看到 `internal_error` / `provider_unknown_error` 这类笼统代码。
+
 ## 0.5.3 · 修复 即梦 Seedream 4.5 尺寸参数 / 2026-08-06
 - **修复 400 InvalidParameter**：Seedream 4.5 不再支持 1K（1024x1024），
   火山方舟 API 要求总像素范围在 [2560x1440, 4096x4096] 之间；

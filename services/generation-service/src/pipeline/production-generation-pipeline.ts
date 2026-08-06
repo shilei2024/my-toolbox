@@ -38,11 +38,32 @@ export class ProductionGenerationPipeline {
       this.#logger.info("generation.completed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: finished - started, uploadDurationMs: finished - generatedAt, outputCount: assets.length });
       return { externalRequestId: status.externalRequestId, assets, providerCode: provider.descriptor.code, providerMetadata: status.providerMetadata, ...(status.actualCost === undefined ? {} : { actualCost: status.actualCost }), generationDurationMs: generatedAt - started, storageDurationMs: finished - generatedAt };
     } catch (error) {
-      this.#logger.error("generation.failed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: Date.now() - started, failureReason: error instanceof ProviderError ? error.code : "internal_error" });
+      this.#logger.error("generation.failed", {
+        generationId: request.jobId,
+        provider: provider.descriptor.code,
+        workflow: request.workflow.workflowId,
+        durationMs: Date.now() - started,
+        failureReason: error instanceof ProviderError ? error.code : "internal_error",
+        ...(errorDetail(error) ? { failureDetail: errorDetail(error) } : {}),
+      });
       throw error;
     } finally {
       context.signal?.removeEventListener("abort", cancelUpstream);
       if (cancellation) await cancellation;
     }
   }
+}
+
+function errorDetail(error: unknown): string | undefined {
+  const messages: string[] = [];
+  const seen = new Set<Error>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const message = current.message.trim();
+    if (message) messages.push(message);
+    current = current.cause;
+  }
+  const detail = messages.join(" | ").trim();
+  return detail ? detail.slice(0, 500) : undefined;
 }
