@@ -44,8 +44,11 @@ case "$OLD_URL" in
 esac
 if [ -z "$LOCAL_PW" ]; then
   LOCAL_PW="$(openssl rand -hex 24)"
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -v pw="$LOCAL_PW" \
-    -c "ALTER USER mavis WITH PASSWORD :'pw'"
+  # psql -c does not interpolate variables; pipe the statement via stdin so
+  # :'pw' is quoted safely without exposing the password in argv.
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -v pw="$LOCAL_PW" <<'SQL'
+ALTER USER mavis WITH PASSWORD :'pw';
+SQL
   echo "mavis password reset to a fresh random value (stored only in env files)"
 fi
 
