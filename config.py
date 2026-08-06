@@ -42,15 +42,24 @@ def _auto_db_url() -> str:
       2. POSTGRES_URL              — Vercel Postgres pooled (fallback)
       3. DATABASE_URL              — explicit override by user (for non-Vercel envs)
       4. sqlite:///app.db          — local default
+
+    Prisma-pooler-only values are rejected: ``prisma://`` URLs have no
+    SQLAlchemy dialect and pooled URLs may carry ``uselibpqcompat`` /
+    ``pgbouncer`` query parameters that psycopg2 refuses to parse.
     """
-    vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
-    if vercel:
+    for candidate in (
+        os.environ.get("POSTGRES_URL_NON_POOLING", ""),
+        os.environ.get("POSTGRES_URL", ""),
+        os.environ.get("DATABASE_URL", ""),
+    ):
+        if not candidate:
+            continue
         # SQLAlchemy 2.x requires postgresql:// not postgres://
-        return _strip_prisma_pool_params(vercel.replace("postgres://", "postgresql://"))
-    explicit = os.environ.get("DATABASE_URL")
-    if explicit:
-        # Also normalize in case user supplies postgres://
-        return _strip_prisma_pool_params(explicit.replace("postgres://", "postgresql://"))
+        normalized = _strip_prisma_pool_params(
+            candidate.replace("postgres://", "postgresql://")
+        )
+        if normalized.startswith(("postgres://", "postgresql://")):
+            return normalized
     return "sqlite:///app.db"
 
 

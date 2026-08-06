@@ -38,7 +38,7 @@ from flask_login import current_user
 
 from admin import admin_bp
 from auth.routes import auth_bp
-from config import get_config
+from config import _auto_db_url, get_config
 from extensions import csrf, db, limiter, login_manager
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
@@ -57,13 +57,11 @@ def _has_external_database() -> bool:
     standalone deployments (e.g. Tencent Cloud PostgreSQL) use DATABASE_URL.
     Without any of these the read-only Vercel filesystem falls back to an
     empty in-memory SQLite, which makes every stored account disappear.
+    Prisma-pooler-only URLs (``prisma://`` or ``uselibpqcompat``) are not
+    usable by psycopg2 and are treated as missing so boot never crashes on
+    an unparseable DSN.
     """
-    database_url = os.environ.get("DATABASE_URL", "")
-    return bool(
-        os.environ.get("POSTGRES_URL_NON_POOLING")
-        or os.environ.get("POSTGRES_URL")
-        or database_url.startswith(("postgres://", "postgresql://"))
-    )
+    return _auto_db_url().startswith(("postgres://", "postgresql://"))
 
 
 def create_app() -> Flask:

@@ -12,6 +12,10 @@
   `uselibpqcompat` / `pgbouncer` 查询参数——psycopg2 会以
   `invalid URI query parameter` 拒绝这类 Vercel Prisma 池化地址，导致冷启动
   直接崩溃。
+- **prisma:// 协议回退**：`prisma://` 地址没有 SQLAlchemy 方言，会导致
+  `Can't load plugin` 秒崩；程序现在跳过它并按
+  `POSTGRES_URL_NON_POOLING → POSTGRES_URL → DATABASE_URL → SQLite` 选择
+  第一个可用的 `postgresql://` 地址。
 - **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
   步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
 - **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；

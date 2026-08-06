@@ -34,6 +34,11 @@ Vercel 变量变更只应用于之后的新 deployment，不会修改已经存�
 > 在连网前直接报 `invalid URI query parameter "uselibpqcompat"`，同样导致冷启动
 > 崩溃。应使用 `POSTGRES_URL_NON_POOLING` 的直连地址，或去掉该参数。程序现在会
 > 自动剥离这两个参数，但生产环境仍应配置直连地址。
+>
+> `prisma://` 开头的地址是 Prisma 专用协议，psycopg2/SQLAlchemy 无法使用
+> （`Can't load plugin: sqlalchemy.dialects:prisma`），也会秒崩且不产生外呼。
+> 请确保 `POSTGRES_URL_NON_POOLING` 是 `postgresql://` 直连地址；程序现在会
+> 跳过 `prisma://` 并回退到下一个可用地址。
 
 ## 分类规则
 
