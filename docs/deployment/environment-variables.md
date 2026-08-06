@@ -28,6 +28,12 @@ Vercel 变量变更只应用于之后的新 deployment，不会修改已经存�
 > 不可达数据库（例如 `127.0.0.1` 本地库、已停用旧库、或已暂停的 Vercel Prisma
 > Postgres），Flask 冷启动建管理员时连接失败导致整个函数崩溃。修复环境变量后
 > 重新部署，并用 `https://mindfulpenpal.com/healthz` 验证。
+>
+> **特别注意 Prisma 池化地址**：`DATABASE_URL` 不要使用带
+> `uselibpqcompat=true` / `pgbouncer=true` 的 Prisma 池化连接串——psycopg2 会
+> 在连网前直接报 `invalid URI query parameter "uselibpqcompat"`，同样导致冷启动
+> 崩溃。应使用 `POSTGRES_URL_NON_POOLING` 的直连地址，或去掉该参数。程序现在会
+> 自动剥离这两个参数，但生产环境仍应配置直连地址。
 
 ## 分类规则
 

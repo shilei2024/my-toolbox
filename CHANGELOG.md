@@ -8,6 +8,10 @@
 - **加固**：启动阶段的数据库/工具初始化失败不再让函数崩溃，改为记录完整
   traceback 后继续启动；PostgreSQL 连接增加 5 秒 `connect_timeout`，冷启动
   失败快速返回而不是长时间挂起。
+- **Prisma 池化参数兼容**：自动剥离 `DATABASE_URL` / `POSTGRES_URL_*` 中的
+  `uselibpqcompat` / `pgbouncer` 查询参数——psycopg2 会以
+  `invalid URI query parameter` 拒绝这类 Vercel Prisma 池化地址，导致冷启动
+  直接崩溃。
 - **排查文档**：`docs/deployment/environment-variables.md` 增加主站 500 排查
   步骤（Runtime Logs → 数据库地址 → 重新部署 → `/healthz` 验证）。
 - **恢复**：生产环境需在 Vercel my-toolbox 检查并修正数据库变量后重新部署；
