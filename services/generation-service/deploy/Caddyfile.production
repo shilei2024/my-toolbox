@@ -12,7 +12,8 @@
   reverse_proxy api:3101
 }
 
-# Main site Flask (systemd on the host, gunicorn 127.0.0.1:8000).
+# Main site Flask (systemd on the host, gunicorn 0.0.0.0:8000; containers reach
+# it through host.docker.internal:8000).
 mindfulpenpal.com {
   encode zstd gzip
 

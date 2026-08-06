@@ -5,7 +5,7 @@ Run locally:
     python app.py
 
 Run in production:
-    gunicorn -w 2 -b 127.0.0.1:8000 'app:create_app()'
+    gunicorn -w 2 -b 0.0.0.0:8000 'app:create_app()'
 
 Vercel (auto-detected via VERCEL env var):
     - Uses /tmp for writable directories (uploads, instance)

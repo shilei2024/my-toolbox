@@ -96,11 +96,18 @@ docker compose --env-file "$PROD_ENV" \
 
 echo "[7/9] restart main site (systemd)"
 if systemctl list-unit-files --type=service | grep -q '^mytoolbox.service'; then
+  # Containers (Caddy/cloudflared) reach the host Flask via host.docker.internal,
+  # which resolves to the docker bridge gateway, not 127.0.0.1. Listen on
+  # 0.0.0.0 instead; public access is blocked by the security group and ufw.
+  sudo sed -i 's/-b 127\.0\.0\.1:8000/-b 0.0.0.0:8000/' /etc/systemd/system/mytoolbox.service
+  sudo systemctl daemon-reload
   sudo systemctl restart mytoolbox
 fi
 
 echo "[8/9] close public 5432 (host firewall + PostgreSQL listen addresses)"
 sudo ufw delete allow 5432/tcp >/dev/null 2>&1 || true
+# Allow Docker containers (172.16.0.0/12) to reach the main site on 8000 only.
+sudo ufw allow from 172.16.0.0/12 to any port 8000 proto tcp >/dev/null 2>&1 || true
 PG_CONF="$(sudo -u postgres psql -tAc 'SHOW config_file')"
 echo "listen_addresses = '127.0.0.1,${DOCKER_IP}'" | sudo tee -a "$PG_CONF" >/dev/null
 sudo systemctl restart postgresql
@@ -113,6 +120,8 @@ echo
 echo "--- generation api (container) ---"
 docker compose --env-file "$PROD_ENV" -f deploy/docker-compose.production.yml \
   exec -T api node -e "fetch('http://127.0.0.1:3101/health').then(r=>console.log(r.status, r.ok)).catch(e=>console.log('ERR', e.message))" || true
+echo "--- main site listener (must be 0.0.0.0:8000) ---"
+sudo ss -tlnp | grep 8000 || echo "no 8000 listener"
 echo "--- port 5432 listeners (must be loopback/docker only) ---"
 sudo ss -tlnp | grep 5432 || echo "no 5432 listener"
 
