@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.6 · 修复 COS 上传签名错误与取消后列表不刷新 / 2026-08-06
+- **修复 COS 上传 403 SignatureDoesNotMatch**：上传图片时不再发送
+  `x-cos-meta-job_id` / `x-cos-meta-output_index` 自定义元数据头
+  （对象键本身已包含任务 ID 与序号，元数据无业务用途），消除
+  “The Signature you specified is invalid” 签名校验失败。
+- **修复取消后页面不更新**：任务轮询到达终态（已取消/失败）时自动刷新
+  “最近创作”列表；从列表点击取消且任务仍在运行时会继续轮询，直到状态
+  变为终态，不再出现“显示已取消但列表卡住”的现象。
+
+## 0.5.5 · 修复生成任务取消失效 / 2026-08-06
+- **取消兜底落库**：当任务处于“生成中”但队列里已没有活跃任务（worker 重启、
+  任务停滞或 BullMQ 记录已过期）时，点击取消会直接把数据库状态改为
+  `cancelled` 并释放预留积分，页面不再永远停在“正在停止任务…”。
+- **重拾任务先落库**：worker 重新领取到已请求取消的任务时，先完成取消落库
+  与积分释放，再短路跳过执行。
+- **取消后防复活**：任务被取消后即使 Provider 调用已返回，也禁止被
+  `markCompleted` 翻回“已完成”并二次扣费（避免用户同时得到图片和积分）。
+- **测试**：新增取消兜底与“仍在信号中不兜底”两类契约测试。
+
+## 0.5.4 · 日志增加失败详情 / 2026-08-06
+- **可观测性**：`generation.failed` 与 `provider.attempt_failed` 日志新增
+  `failureDetail` 字段（截断的错误消息链，不含密钥与请求体），生产排查时
+  不再只能看到 `internal_error` / `provider_unknown_error` 这类笼统代码。
+
+## 0.5.3 · 修复 即梦 Seedream 4.5 尺寸参数 / 2026-08-06
+- **修复 400 InvalidParameter**：Seedream 4.5 不再支持 1K（1024x1024），
+  火山方舟 API 要求总像素范围在 [2560x1440, 4096x4096] 之间；
+  适配器现在会按比例保持用户选择的宽高比，自动升档到合法尺寸
+  （1024x1024 → 1920x1920，768x1024 → 1664x2216）。
+- **测试**：新增尺寸升档契约测试，覆盖常见预设与极端尺寸。
+
+## 0.5.2 · Gallery 登录跨域修复 / 2026-08-06
+- **修复 Gallery 登录跨域（CORS）**：主站 Flask 对受信任的 Gallery 来源（默认取
+  `AI_IMAGE_EXTERNAL_URL`，可用 `GALLERY_CORS_ORIGINS` 追加）返回
+  `Access-Control-Allow-Origin` / `Allow-Credentials` 并正确处理 OPTIONS 预检；
+  修复从 gallery.mindfulpenpal.com 跳转 mindfulpenpal.com/login 被浏览器拦截的问题。
+- **回归测试**：新增 `tests/test_gallery_cors.py`，覆盖可信来源、预检、未知来源拒绝
+  与环境变量扩展来源四类场景。
+
 ## 0.5.1 · 即梦全链路优化 / 2026-08-05
 - **即梦多张生成**：Seedream 单次只返回一张，Adapter 对 `count>1` 逐张扇出调用，
   用户 seed 依次递增（seed + index），平台 1–8 张契约全部可用；新增契约测试。

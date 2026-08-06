@@ -8,7 +8,7 @@ import type { GenerationRequest, JsonObject } from "../providers/types.ts";
 import type { GenerationJobClaim, GenerationJobRepository, QueueAttemptDescriptor, SafeQueueFailure } from "./types.ts";
 
 interface ClaimRow extends QueryResultRow {
-  id: string; status: "pending" | "running" | "completed" | "failed" | "cancelled"; cancel_requested_at: Date | null;
+  id: string; status: "pending" | "running" | "completed" | "failed" | "cancelled"; cancel_requested_at: Date | null; credits_reserved: string;
   workflow_version_id: string; workflow_id: string; workflow_version: number; workflow_kind: string;
   prompt: string; negative_prompt: string; input_params: JsonObject; requested_width: number; requested_height: number; requested_count: number;
   request_id: string | null;
@@ -29,7 +29,7 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     let row: ClaimRow | undefined;
     try {
       await client.query("BEGIN");
-      const result = await client.query<ClaimRow>(`SELECT j.id, j.status, j.cancel_requested_at, j.workflow_version_id,
+      const result = await client.query<ClaimRow>(`SELECT j.id, j.status, j.cancel_requested_at, j.credits_reserved, j.workflow_version_id,
           w.id AS workflow_id, v.version AS workflow_version, w.category AS workflow_kind,
           j.prompt, j.negative_prompt, j.input_params, j.requested_width, j.requested_height, j.requested_count,
           (SELECT payload->>'requestId' FROM ai.outbox_events WHERE aggregate_id = j.id AND event_type = 'generation.requested' ORDER BY created_at LIMIT 1) AS request_id
@@ -44,7 +44,17 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
         await client.query("COMMIT");
         return { kind: "completed", assetUrls: assets.rows.map((item) => item.url).filter(Boolean), ...(provider.rows[0]?.code ? { providerCode: provider.rows[0].code } : {}) };
       }
-      if (row.status === "cancelled" || row.cancel_requested_at) { await client.query("COMMIT"); return { kind: "cancelled" }; }
+      if (row.status === "cancelled" || row.cancel_requested_at) {
+        // A cancelled request may be reclaimed after a worker restart or stall.
+        // Finalize the database state here so the task cannot stay "running"
+        // forever and reserved credits are always released.
+        if (row.status !== "cancelled") {
+          await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1", [jobId]);
+          if (Number(row.credits_reserved) > 0) await releaseCredits(client, jobId);
+        }
+        await client.query("COMMIT");
+        return { kind: "cancelled" };
+      }
       await client.query("UPDATE ai.generation_jobs SET status = 'running', started_at = COALESCE(started_at, now()), error_code = NULL, error_message = NULL WHERE id = $1", [jobId]);
       await client.query("COMMIT");
     } catch (error) {
@@ -99,7 +109,11 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
         FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id WHERE j.id = $1 FOR UPDATE OF j`, [jobId]);
       const job = jobResult.rows[0];
       if (!job) throw new Error("generation_job_not_found");
-      if ((await client.query<{ status: string }>("SELECT status FROM ai.generation_jobs WHERE id = $1", [jobId])).rows[0]?.status === "completed") { await client.query("COMMIT"); return; }
+      const currentStatus = (await client.query<{ status: string }>("SELECT status FROM ai.generation_jobs WHERE id = $1", [jobId])).rows[0]?.status;
+      // A cancelled job must never be flipped back to completed (this can race
+      // with a cancellation signal when the provider call already finished),
+      // otherwise the user would keep the image and get a credit refund too.
+      if (currentStatus === "completed" || currentStatus === "cancelled") { await client.query("COMMIT"); return; }
       const provider = await client.query<{ id: string }>("SELECT id FROM ai.providers WHERE code = $1", [result.providerCode]);
       const providerId = provider.rows[0]?.id;
       if (!providerId) throw new Error("generation_provider_not_found");

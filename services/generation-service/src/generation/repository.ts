@@ -7,4 +7,5 @@ export interface GenerationRepository {
   findForViewer(id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined>;
   listForViewer(userId: number, cursor: DecodedCursor | undefined, limit: number, status?: GenerationStatus): Promise<GenerationPageResult>;
   requestCancellation(id: string, userId: number, isAdmin: boolean): Promise<CancelGenerationResult | undefined>;
+  finalizeCancellation(id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined>;
 }

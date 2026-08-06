@@ -82,10 +82,35 @@ test("Jimeng adapter uses Seedream synchronous Base64 mode with seed and bounded
   });
   const result = await provider.generate({ ...request, seed: 42 }, binding("jimeng", "doubao-seedream-4-5-251128", { watermark: false, guidanceScale: 2.5 }), context);
   assert.equal(result.externalRequestId, "jimeng-request-1");
+  assert.equal(body.size, "1920x1920");
   assert.equal(body.response_format, "b64_json");
   assert.equal(body.sequential_image_generation, "disabled");
   assert.equal(body.seed, 42);
   assert.equal(body.watermark, false);
+});
+
+test("Jimeng adapter scales small sizes up to the Seedream 4.5 legal minimum while preserving aspect ratio", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const provider = new JimengImageProvider(httpConfig("jimeng"), async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ model: "doubao-seedream-4-5-251128", data: [{ b64_json: PNG }] });
+  });
+  const sizes: readonly (readonly [number, number, string])[] = [
+    [1024, 1024, "1920x1920"],
+    [768, 1024, "1664x2216"],
+    [1024, 768, "2216x1664"],
+    [2048, 2048, "2048x2048"],
+    [4096, 512, "4096x904"],
+  ];
+  for (const [width, height, expected] of sizes) {
+    await provider.generate({ ...request, width, height }, binding("jimeng", "doubao-seedream-4-5-251128"), context);
+    const body = calls[calls.length - 1]!;
+    assert.equal(body.size, expected);
+    const [w, h] = String(body.size).split("x").map(Number);
+    assert.ok(w! * h! >= 3_686_400, `${body.size} must meet the Seedream 4.5 pixel floor`);
+    assert.ok(w! * h! <= 16_777_216, `${body.size} must stay within the Seedream 4.5 pixel ceiling`);
+    assert.ok(w! <= 4096 && h! <= 4096, `${body.size} must not exceed the 4096px edge limit`);
+  }
 });
 
 test("Jimeng adapter fans out count>1 into one API call per image with distinct seeds", async () => {

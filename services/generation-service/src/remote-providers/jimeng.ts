@@ -6,6 +6,15 @@ import { isObject, mapRemoteHttpError, requestRemoteJson, type RemoteProviderHtt
 import { base64ImageOutput, combinedPrompt } from "./image-output.ts";
 import { bindingCost, callSignal, configBoolean, configNumber, configString, modelFrom, synchronousCancellation, synchronousStatus } from "./synchronous.ts";
 
+// Seedream 4.x no longer accepts 1K images: the Ark API requires the total
+// pixel count to stay inside [2560x1440, 4096x4096] while the aspect ratio
+// remains within [1/16, 16]. Requests below the floor are scaled up
+// proportionally so the user-chosen aspect ratio is preserved.
+const SEEDREAM_MIN_TOTAL_PIXELS = 3_686_400; // 2560x1440
+const SEEDREAM_MAX_TOTAL_PIXELS = 16_777_216; // 4096x4096
+const SEEDREAM_MAX_EDGE = 4096;
+const SEEDREAM_GRID = 8;
+
 export class JimengImageProvider implements ImageProvider {
   readonly descriptor: ProviderDescriptor = {
     code: "jimeng", displayName: "即梦 / Seedream", availability: "active", priority: 30,
@@ -35,7 +44,7 @@ export class JimengImageProvider implements ImageProvider {
         const body = {
           model,
           prompt: combinedPrompt(request.prompt, request.negativePrompt),
-          size: `${request.width}x${request.height}`,
+          size: seedreamSize(request.width, request.height),
           sequential_image_generation: "disabled",
           stream: false,
           response_format: "b64_json",
@@ -77,3 +86,37 @@ export class JimengImageProvider implements ImageProvider {
 function jimengImages(value: unknown): string[] { if (!isObject(value) || !Array.isArray(value.data)) return []; return value.data.flatMap((item) => isObject(item) && typeof item.b64_json === "string" ? [item.b64_json] : []); }
 function jimengContentPolicy(value: unknown): boolean { if (!isObject(value)) return false; const error = isObject(value.error) ? value.error : value; return typeof error.code === "string" && /risk|safety|moderation|content.*policy/i.test(error.code); }
 function configuration(code: string, message: string): ProviderError { return new ProviderError({ providerCode: "jimeng", category: "configuration", code, message, retryable: false }); }
+
+function seedreamSize(width: number, height: number): string {
+  let w = width;
+  let h = height;
+  const area = w * h;
+  if (area < SEEDREAM_MIN_TOTAL_PIXELS || area > SEEDREAM_MAX_TOTAL_PIXELS) {
+    const target = area < SEEDREAM_MIN_TOTAL_PIXELS ? SEEDREAM_MIN_TOTAL_PIXELS : SEEDREAM_MAX_TOTAL_PIXELS;
+    const scale = Math.sqrt(target / area);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+  const longEdge = Math.max(w, h);
+  if (longEdge > SEEDREAM_MAX_EDGE) {
+    const shortRatio = Math.min(w, h) / longEdge;
+    if (w > h) {
+      w = SEEDREAM_MAX_EDGE;
+      h = Math.round(w * shortRatio);
+    } else {
+      h = SEEDREAM_MAX_EDGE;
+      w = Math.round(h * shortRatio);
+    }
+  }
+  w = Math.round(w / SEEDREAM_GRID) * SEEDREAM_GRID;
+  h = Math.round(h / SEEDREAM_GRID) * SEEDREAM_GRID;
+  if (w * h < SEEDREAM_MIN_TOTAL_PIXELS) {
+    const needed = Math.ceil(SEEDREAM_MIN_TOTAL_PIXELS / Math.max(w, h) / SEEDREAM_GRID) * SEEDREAM_GRID;
+    if (w < h) w = needed; else h = needed;
+  }
+  if (w * h > SEEDREAM_MAX_TOTAL_PIXELS) {
+    const allowed = Math.floor(SEEDREAM_MAX_TOTAL_PIXELS / Math.max(w, h) / SEEDREAM_GRID) * SEEDREAM_GRID;
+    if (w > h) h = allowed; else w = allowed;
+  }
+  return `${Math.min(w, SEEDREAM_MAX_EDGE)}x${Math.min(h, SEEDREAM_MAX_EDGE)}`;
+}
