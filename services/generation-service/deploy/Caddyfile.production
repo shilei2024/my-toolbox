@@ -11,3 +11,18 @@
 
   reverse_proxy api:3101
 }
+
+# Main site Flask (systemd on the host, gunicorn 127.0.0.1:8000).
+mindfulpenpal.com {
+  encode zstd gzip
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    -Server
+  }
+
+  reverse_proxy host.docker.internal:8000
+}
