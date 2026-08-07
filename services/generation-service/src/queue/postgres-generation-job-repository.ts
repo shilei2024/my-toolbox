@@ -54,7 +54,7 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
         // forever and reserved credits are always released.
         if (row.status !== "cancelled") {
           await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1", [jobId]);
-          if (Number(row.credits_reserved) > 0) await releaseCredits(client, jobId);
+          if (Number(row.credits_reserved) > 0) await releaseCredits(client, jobId, row.credit_tier);
         }
         await client.query("COMMIT");
         return { kind: "cancelled" };
@@ -111,7 +111,7 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const jobResult = await client.query<{ user_id: number; workflow_version_id: string; prompt: string; negative_prompt: string; visibility: "public" | "private"; prompt_visibility: "public" | "hidden"; credits_reserved: string; workflow_name: string }>(`SELECT j.user_id, j.workflow_version_id, j.prompt, j.negative_prompt, j.visibility, j.prompt_visibility, j.credits_reserved, w.name AS workflow_name
+      const jobResult = await client.query<{ user_id: number; workflow_version_id: string; prompt: string; negative_prompt: string; visibility: "public" | "private"; prompt_visibility: "public" | "hidden"; credits_reserved: string; credit_tier: "free" | "member"; workflow_name: string }>(`SELECT j.user_id, j.workflow_version_id, j.prompt, j.negative_prompt, j.visibility, j.prompt_visibility, j.credits_reserved, j.credit_tier, w.name AS workflow_name
         FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id WHERE j.id = $1 FOR UPDATE OF j`, [jobId]);
       const job = jobResult.rows[0];
       if (!job) throw new Error("generation_job_not_found");
@@ -140,7 +140,10 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
           job.visibility === "public" ? asset.url : null, asset.mimeType, asset.byteSize, asset.width, asset.height, asset.sha256]);
       }
       await client.query("UPDATE ai.generation_jobs SET status = 'completed', selected_provider_id = $2, actual_cost = $3, finished_at = now(), error_code = NULL, error_message = NULL WHERE id = $1", [jobId, providerId, result.actualCost ?? 0]);
-      if (Number(job.credits_reserved) > 0) await client.query("SELECT * FROM ai.settle_generation_credits($1, $2, $3)", [jobId, job.credits_reserved, `generation-settle:${jobId}`]);
+      if (Number(job.credits_reserved) > 0) {
+        const fn = job.credit_tier === "member" ? "ai.settle_member_generation_credits" : "ai.settle_generation_credits";
+        await client.query(`SELECT * FROM ${fn}($1, $2, $3)`, [jobId, job.credits_reserved, `generation-settle:${jobId}`]);
+      }
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
     finally { client.release(); }
@@ -152,9 +155,9 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
       await client.query("BEGIN");
       await client.query(`UPDATE ai.generation_attempts SET status = 'failed', error_class = $2, error_code = $3, error_message = $4, retryable = $5, finished_at = now()
         WHERE id = $1 AND job_id = $6`, [attemptId, failure.category, failure.code, safeMessage(failure.message), failure.retryable, jobId]);
-      const job = await client.query<{ credits_reserved: string }>(`UPDATE ai.generation_jobs SET status = $2, error_code = $3, error_message = $4,
-        finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE NULL END WHERE id = $1 RETURNING credits_reserved`, [jobId, willRetry ? "pending" : "failed", failure.code, safeMessage(failure.message)]);
-      if (!willRetry && Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId);
+      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>(`UPDATE ai.generation_jobs SET status = $2, error_code = $3, error_message = $4,
+        finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE NULL END WHERE id = $1 RETURNING credits_reserved, credit_tier`, [jobId, willRetry ? "pending" : "failed", failure.code, safeMessage(failure.message)]);
+      if (!willRetry && Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId, job.rows[0]!.credit_tier);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
     finally { client.release(); }
@@ -165,17 +168,20 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     try {
       await client.query("BEGIN");
       await client.query("UPDATE ai.generation_attempts SET status = 'cancelled', error_code = $2, finished_at = now() WHERE id = $1 AND job_id = $3", [attemptId, reason.slice(0, 128), jobId]);
-      const job = await client.query<{ credits_reserved: string }>("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1 RETURNING credits_reserved", [jobId]);
-      if (Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId);
+      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1 RETURNING credits_reserved, credit_tier", [jobId]);
+      if (Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId, job.rows[0]!.credit_tier);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
     finally { client.release(); }
   }
 }
 
-async function releaseCredits(client: PoolClient, jobId: string): Promise<void> {
+async function releaseCredits(client: PoolClient, jobId: string, creditTier: "free" | "member"): Promise<void> {
   const active = await client.query("SELECT 1 FROM ai.credit_reservations WHERE generation_job_id = $1 AND status = 'active'", [jobId]);
-  if (active.rowCount) await client.query("SELECT * FROM ai.release_generation_credits($1, $2)", [jobId, `generation-release:${jobId}`]);
+  if (active.rowCount) {
+    const fn = creditTier === "member" ? "ai.release_member_generation_credits" : "ai.release_generation_credits";
+    await client.query(`SELECT * FROM ${fn}($1, $2)`, [jobId, `generation-release:${jobId}`]);
+  }
 }
 function safeMessage(value: string): string { return value.replace(/[\r\n]/g, " ").slice(0, 500); }
 function safeProviderMetadata(value: Readonly<Record<string, unknown>>): Record<string, unknown> {

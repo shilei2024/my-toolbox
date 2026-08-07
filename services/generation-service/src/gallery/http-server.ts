@@ -73,6 +73,10 @@ export async function createGalleryHttpServer(options: {
       const context = viewer(request, options.auth);
       return options.billing!.checkout(context.userId, request.body);
     });
+    app.post("/v1/billing/redeem", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
+      const context = viewer(request, options.auth);
+      return options.billing!.redeem(context.userId, request.body);
+    });
     app.post("/v1/billing/portal", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request) => {
       const context = viewer(request, options.auth);
       return options.billing!.portal(context.userId);

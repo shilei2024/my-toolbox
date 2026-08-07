@@ -1,8 +1,9 @@
-import type { BillingSummary, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent } from "./types.ts";
+import type { BillingSummary, CreditAccountView, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent } from "./types.ts";
 
 export interface BillingRepository {
   summary(userId?: number): Promise<BillingSummary>;
   ensureSignupGrant(userId: number, amount: string): Promise<void>;
+  redeemCode(userId: number, code: string): Promise<{ readonly amount: string; readonly memberAccount: CreditAccountView }>;
   createOrGetOrder(userId: number, planSlug: string, idempotencyKey: string): Promise<PaymentOrder>;
   customerReference(userId: number, provider: string): Promise<string | undefined>;
   markCheckoutOpen(orderId: string, externalCheckoutId: string, checkoutUrl: string, expiresAt?: string): Promise<void>;

@@ -1,7 +1,7 @@
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import { BillingError } from "./errors.ts";
 import type { BillingRepository } from "./repository.ts";
-import type { BillingPlan, BillingSummary, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent, SubscriptionStatus } from "./types.ts";
+import type { BillingPlan, BillingSummary, CreditAccountView, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent, SubscriptionStatus } from "./types.ts";
 
 interface PlanRow extends QueryResultRow {
   id: string; slug: string; display_name: string; description: string; kind: BillingPlan["kind"];
@@ -17,9 +17,11 @@ export class PostgresBillingRepository implements BillingRepository {
     const plans = (await this.#pool.query<PlanRow>(`${planSelect}
       WHERE is_enabled AND is_public ORDER BY sort_order, slug`)).rows.map(mapPlan);
     if (!userId) return { plans, ledger: [] };
-    const [account, subscription, ledger] = await Promise.all([
+    const [account, memberAccount, subscription, ledger] = await Promise.all([
       this.#pool.query<{ available_amount: string; reserved_amount: string; lifetime_granted: string; lifetime_spent: string }>(
         "SELECT available_amount, reserved_amount, lifetime_granted, lifetime_spent FROM ai.credit_accounts WHERE user_id = $1", [userId]),
+      this.#pool.query<{ available_amount: string; reserved_amount: string; lifetime_granted: string; lifetime_spent: string }>(
+        "SELECT available_amount, reserved_amount, lifetime_granted, lifetime_spent FROM ai.member_credit_accounts WHERE user_id = $1", [userId]),
       this.#pool.query<{ plan_slug: string; plan_name: string; payment_provider: string; status: SubscriptionStatus; cancel_at_period_end: boolean; current_period_end: Date | string | null }>(`SELECT p.slug AS plan_slug, p.display_name AS plan_name,
           s.payment_provider, s.status, s.cancel_at_period_end, s.current_period_end
         FROM ai.subscriptions s JOIN ai.billing_plans p ON p.id = s.plan_id
@@ -30,11 +32,15 @@ export class PostgresBillingRepository implements BillingRepository {
         FROM ai.credit_ledger_entries WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 30`, [userId]),
     ]);
     const accountRow = account.rows[0];
+    const memberAccountRow = memberAccount.rows[0];
     const subscriptionRow = subscription.rows[0];
     return {
       plans,
       account: accountRow
         ? { availableAmount: accountRow.available_amount, reservedAmount: accountRow.reserved_amount, lifetimeGranted: accountRow.lifetime_granted, lifetimeSpent: accountRow.lifetime_spent }
+        : { availableAmount: "0.0000", reservedAmount: "0.0000", lifetimeGranted: "0.0000", lifetimeSpent: "0.0000" },
+      memberAccount: memberAccountRow
+        ? { availableAmount: memberAccountRow.available_amount, reservedAmount: memberAccountRow.reserved_amount, lifetimeGranted: memberAccountRow.lifetime_granted, lifetimeSpent: memberAccountRow.lifetime_spent }
         : { availableAmount: "0.0000", reservedAmount: "0.0000", lifetimeGranted: "0.0000", lifetimeSpent: "0.0000" },
       ...(subscriptionRow ? { subscription: {
         planSlug: subscriptionRow.plan_slug,
@@ -70,6 +76,35 @@ export class PostgresBillingRepository implements BillingRepository {
     if (Number(effective) <= 0) return;
     await this.transaction(async (client) => {
       await grantCredits(client, userId, effective, "signup_grant", "system", "signup", `signup-grant:${userId}`);
+    });
+  }
+
+  async redeemCode(userId: number, code: string): Promise<{ readonly amount: string; readonly memberAccount: CreditAccountView }> {
+    return this.transaction(async (client) => {
+      let amount: string;
+      try {
+        const result = await client.query<{ redeem_redemption_code: string }>(
+          "SELECT * FROM ai.redeem_redemption_code($1, $2)",
+          [userId, code],
+        );
+        amount = result.rows[0]?.redeem_redemption_code ?? "0";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("redemption_code_not_found")) throw new BillingError("redemption_code_not_found", "兑换码不存在", 404);
+        if (message.includes("redemption_code_used")) throw new BillingError("redemption_code_used", "兑换码已被使用", 409);
+        if (message.includes("redemption_code_expired")) throw new BillingError("redemption_code_expired", "兑换码已过期", 409);
+        throw error;
+      }
+      const row = await client.query<{ available_amount: string; reserved_amount: string; lifetime_granted: string; lifetime_spent: string }>(
+        "SELECT available_amount, reserved_amount, lifetime_granted, lifetime_spent FROM ai.member_credit_accounts WHERE user_id = $1",
+        [userId],
+      );
+      return {
+        amount,
+        memberAccount: row.rows[0]
+          ? { availableAmount: row.rows[0].available_amount, reservedAmount: row.rows[0].reserved_amount, lifetimeGranted: row.rows[0].lifetime_granted, lifetimeSpent: row.rows[0].lifetime_spent }
+          : { availableAmount: "0.0000", reservedAmount: "0.0000", lifetimeGranted: "0.0000", lifetimeSpent: "0.0000" },
+      };
     });
   }
 

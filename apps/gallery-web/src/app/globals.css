@@ -2161,3 +2161,36 @@ select:focus-visible {
   .pricing-fineprint { gap: 20px; }
   .billing-heading { align-items: stretch; flex-direction: column; }
 }
+
+/* Phase 3: redemption code + member credit balance */
+.member-balance {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-overlay);
+  background: linear-gradient(180deg, rgb(109 92 255 / 6%), transparent 70%);
+}
+.redeem-card {
+  grid-column: 1 / -1;
+}
+.redeem-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 6px;
+}
+.redeem-form input {
+  min-width: 240px;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+.redeem-message {
+  width: 100%;
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+}

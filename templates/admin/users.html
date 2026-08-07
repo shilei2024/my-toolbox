@@ -90,6 +90,10 @@
                 <summary class="small text-primary" style="cursor: pointer;">调整</summary>
                 <form action="{{ url_for('admin.set_user_credits', user_id=u.id) }}" method="post" class="d-flex gap-1 mt-1">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <select name="account" class="form-select form-select-sm" style="width: auto;">
+                    <option value="free">免费积分</option>
+                    <option value="member">会员积分</option>
+                  </select>
                   <input type="text" name="delta" class="form-control form-control-sm" placeholder="如 +10 或 -5" required style="max-width: 110px;"/>
                   <button class="btn btn-sm btn-outline-primary">保存</button>
                 </form>

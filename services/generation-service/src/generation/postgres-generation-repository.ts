@@ -60,7 +60,10 @@ export class PostgresGenerationRepository implements GenerationRepository {
         await client.query("COMMIT");
         return raced;
       }
-      if (Number(cost) > 0) await client.query("SELECT * FROM ai.reserve_generation_credits($1, $2, $3, $4)", [input.userId, jobId, cost, `generation-reserve:${jobId}`]);
+      if (Number(cost) > 0) {
+        const fn = input.creditTier === "member" ? "ai.reserve_member_generation_credits" : "ai.reserve_generation_credits";
+        await client.query(`SELECT * FROM ${fn}($1, $2, $3, $4)`, [input.userId, jobId, cost, `generation-reserve:${jobId}`]);
+      }
       await client.query(`INSERT INTO ai.outbox_events (aggregate_type, aggregate_id, event_type, payload)
         VALUES ('generation_job', $1, 'generation.requested', jsonb_build_object('requestId', $2::text))`, [jobId, input.requestId]);
       await client.query(`INSERT INTO ai.audit_logs (request_id, actor_user_id, actor_type, action, resource_type, resource_id, metadata)
@@ -109,7 +112,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const locked = await client.query<{ status: GenerationStatus; user_id: number | null; credits_reserved: string }>("SELECT status, user_id, credits_reserved FROM ai.generation_jobs WHERE id = $1 FOR UPDATE", [id]);
+      const locked = await client.query<{ status: GenerationStatus; user_id: number | null; credits_reserved: string; credit_tier: "free" | "member" }>("SELECT status, user_id, credits_reserved, credit_tier FROM ai.generation_jobs WHERE id = $1 FOR UPDATE", [id]);
       const job = locked.rows[0];
       if (!job || (!isAdmin && job.user_id !== userId)) { await client.query("ROLLBACK"); return undefined; }
       const terminal = new Set<GenerationStatus>(["completed", "failed", "cancelled"]);
@@ -120,7 +123,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
         signalWorker = job.status === "running";
         if (job.status === "pending") {
           await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = now(), finished_at = now() WHERE id = $1", [id]);
-          if (Number(job.credits_reserved) > 0) await client.query("SELECT * FROM ai.release_generation_credits($1, $2)", [id, `generation-release:${id}`]);
+          if (Number(job.credits_reserved) > 0) await releaseCreditsById(client, id, job.credit_tier, `generation-release:${id}`);
         } else {
           await client.query("UPDATE ai.generation_jobs SET cancel_requested_at = COALESCE(cancel_requested_at, now()) WHERE id = $1", [id]);
         }
@@ -141,12 +144,12 @@ export class PostgresGenerationRepository implements GenerationRepository {
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const locked = await client.query<{ status: GenerationStatus; user_id: number | null; credits_reserved: string }>("SELECT status, user_id, credits_reserved FROM ai.generation_jobs WHERE id = $1 FOR UPDATE", [id]);
+      const locked = await client.query<{ status: GenerationStatus; user_id: number | null; credits_reserved: string; credit_tier: "free" | "member" }>("SELECT status, user_id, credits_reserved, credit_tier FROM ai.generation_jobs WHERE id = $1 FOR UPDATE", [id]);
       const job = locked.rows[0];
       if (!job || (!isAdmin && job.user_id !== userId)) { await client.query("ROLLBACK"); return undefined; }
       if (job.status === "running" || job.status === "pending") {
         await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1", [id]);
-        if (Number(job.credits_reserved) > 0) await client.query("SELECT * FROM ai.release_generation_credits($1, $2)", [id, `generation-release:${id}`]);
+        if (Number(job.credits_reserved) > 0) await releaseCreditsById(client, id, job.credit_tier, `generation-release:${id}`);
         await client.query("INSERT INTO ai.audit_logs (actor_user_id, actor_type, action, resource_type, resource_id) VALUES ($1, $2, 'generation.cancelled', 'generation_job', $3)", [userId, isAdmin ? "admin" : "user", id]);
       }
       const generation = await this.findById(client, id, userId, isAdmin);
@@ -227,3 +230,7 @@ function jobView(row: JobRow): GenerationView {
   };
 }
 function isImageLink(value: unknown): value is { id: string; slug: string } { return !!value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" && typeof (value as { slug?: unknown }).slug === "string"; }
+async function releaseCreditsById(client: PoolClient, jobId: string, creditTier: "free" | "member", idempotency: string): Promise<void> {
+  const fn = creditTier === "member" ? "ai.release_member_generation_credits" : "ai.release_generation_credits";
+  await client.query(`SELECT * FROM ${fn}($1, $2)`, [jobId, idempotency]);
+}

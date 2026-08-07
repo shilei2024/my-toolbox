@@ -23,6 +23,7 @@ export function GenerationWorkbench() {
   const [count, setCount] = useState(1);
   const [visibility, setVisibility] = useState<GenerationVisibility>("private");
   const [promptVisibility, setPromptVisibility] = useState<"public" | "hidden">("hidden");
+  const [creditTier, setCreditTier] = useState<"free" | "member">("free");
   const [generation, setGeneration] = useState<GenerationView>();
   const [billing, setBilling] = useState<BillingSummary>();
   const [session, setSession] = useState<SessionView>();
@@ -119,7 +120,7 @@ export function GenerationWorkbench() {
     setSubmitting(true); setMessage("");
     const [width, height] = size.split("x").map(Number) as [number, number];
     try {
-      const payload = JSON.stringify({ workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility, promptVisibility, parameters: {} });
+      const payload = JSON.stringify({ workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility, promptVisibility, creditTier, parameters: {} });
       if (creationAttemptRef.current?.payload !== payload) creationAttemptRef.current = { payload, key: crypto.randomUUID() };
       const response = await fetch("/api/generations", {
         method: "POST",
@@ -219,6 +220,7 @@ export function GenerationWorkbench() {
         </div>
 
         <div className="composer-section parameter-section"><div className="panel-heading compact"><div><span className="step-index">03</span><h2>画面设置</h2></div></div><div className="parameter-grid">
+          <label><span>积分档位</span><select value={creditTier} onChange={(event) => setCreditTier(event.target.value as "free" | "member")}><option value="free">免费积分</option><option value="member">会员积分</option></select></label>
           <label><span>画面比例</span><select value={size} onChange={(event) => setSize(event.target.value)}>{workflow?.sizes?.length ? workflow.sizes.map((item) => { const key = sizeKey(item); return <option key={key} value={key}>{sizeLabel(key)}</option>; }) : <option value={size}>加载中…</option>}</select></label>
           <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>
           <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>

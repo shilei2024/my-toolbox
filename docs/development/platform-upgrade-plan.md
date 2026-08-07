@@ -63,6 +63,17 @@
 
 ## Phase 3：会员与付费（#8）
 
+**已完成基础（0.7.1）**：
+- 双积分账本：ai.member_credit_accounts + 流水 account_type；任务按 credit_tier
+  从对应账本预留/结算/释放。
+- 积分兑换码：后台批量生成，Gallery 账单页兑换到会员账本（国内支付第一步）。
+- 创作页积分档位选择（免费/会员）；free 档仅可用 free 模型。
+
+**待办**：
+- 微信支付 Native / 支付宝电脑网站支付（需商户资质）；
+- 订阅会员（subscription）与会员到期自动降级；
+- 兑换码购买页（微信/支付宝收款码 + 填码）合并进 /pricing。
+
 - 用户维度：plan 字段扩展为 free / member，会员到期时间；
   免费积分（free_credits）与会员积分（member_credits）双账本。
 - **国内支付路径（按资质分档）**：

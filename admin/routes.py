@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -236,6 +237,10 @@ def set_user_credits(user_id: int):
 
     user = db.session.get(User, user_id) or abort(404)
     raw = request.form.get("delta", "").strip()
+    account = request.form.get("account", "free").strip().lower()
+    if account not in {"free", "member"}:
+        flash("账本类型必须是 free / member。", "danger")
+        return redirect(url_for("admin.users"))
     try:
         delta = round(float(raw), 4)
         if not (-1000000000 <= delta <= 1000000000):
@@ -248,10 +253,12 @@ def set_user_credits(user_id: int):
         return redirect(url_for("admin.users"))
 
     idempotency = f"admin-credit:{user.id}:{datetime.now(timezone.utc).isoformat()}"
+    table = "ai.member_credit_accounts" if account == "member" else "ai.credit_accounts"
+    account_type = "member" if account == "member" else "free"
     try:
         with db.engine.begin() as conn:
             current = conn.execute(
-                text("SELECT available_amount FROM ai.credit_accounts WHERE user_id = :uid FOR UPDATE"),
+                text(f"SELECT available_amount FROM {table} WHERE user_id = :uid FOR UPDATE"),
                 {"uid": user.id},
             ).scalar() or 0
             new_available = round(float(current) + delta, 4)
@@ -260,21 +267,21 @@ def set_user_credits(user_id: int):
                 return redirect(url_for("admin.users"))
             conn.execute(
                 text(
-                    "INSERT INTO ai.credit_accounts (user_id, available_amount, reserved_amount, lifetime_granted, lifetime_spent, version, created_at, updated_at) "
+                    f"INSERT INTO {table} (user_id, available_amount, reserved_amount, lifetime_granted, lifetime_spent, version, created_at, updated_at) "
                     "VALUES (:uid, :delta, 0, GREATEST(:delta, 0), 0, 0, now(), now()) "
                     "ON CONFLICT (user_id) DO UPDATE SET "
-                    "available_amount = ai.credit_accounts.available_amount + :delta, "
-                    "lifetime_granted = ai.credit_accounts.lifetime_granted + GREATEST(:delta, 0), "
-                    "version = ai.credit_accounts.version + 1, updated_at = now()"
+                    f"available_amount = {table}.available_amount + :delta, "
+                    f"lifetime_granted = {table}.lifetime_granted + GREATEST(:delta, 0), "
+                    f"version = {table}.version + 1, updated_at = now()"
                 ),
                 {"uid": user.id, "delta": delta},
             )
             conn.execute(
                 text(
-                    "INSERT INTO ai.credit_ledger_entries (user_id, entry_type, delta_available, delta_reserved, available_after, reserved_after, source_type, source_ref, idempotency_key, metadata) "
-                    "VALUES (:uid, 'admin_adjustment', :delta, 0, :after, 0, 'admin', :ref, :idem, jsonb_build_object('operator_user_id', :op))"
+                    "INSERT INTO ai.credit_ledger_entries (user_id, account_type, entry_type, delta_available, delta_reserved, available_after, reserved_after, source_type, source_ref, idempotency_key, metadata) "
+                    "VALUES (:uid, :account_type, 'admin_adjustment', :delta, 0, :after, 0, 'admin', :ref, :idem, jsonb_build_object('operator_user_id', :op))"
                 ),
-                {"uid": user.id, "delta": delta, "after": new_available, "ref": f"user:{user.id}", "idem": idempotency, "op": current_user.id},
+                {"uid": user.id, "account_type": account_type, "delta": delta, "after": new_available, "ref": f"user:{user.id}", "idem": idempotency, "op": current_user.id},
             )
             db.session.rollback()
     except Exception:  # noqa: BLE001
@@ -320,6 +327,66 @@ def set_user_plan(user_id: int):
     db.session.commit()
     flash(f"用户 {user.email} 的会员等级已设为 {plan}。", "success")
     return redirect(url_for("admin.users"))
+
+
+# -----------------------------------------------------------------------------
+# Redemption codes (Phase 3: China-friendly credit top-up)
+# -----------------------------------------------------------------------------
+@admin_bp.route("/redemption")
+@login_required
+@admin_required
+def redemption():
+    codes: list[dict] = []
+    total = 0
+    try:
+        rows = db.session.execute(
+            text("SELECT code, amount, status, created_at, redeemed_at, redeemed_by FROM ai.redemption_codes ORDER BY created_at DESC LIMIT 200")
+        ).all()
+        codes = [
+            {
+                "code": row[0],
+                "amount": float(row[1]),
+                "status": row[2],
+                "created_at": row[3],
+                "redeemed_at": row[4],
+                "redeemed_by": row[5],
+            }
+            for row in rows
+        ]
+        total = db.session.execute(text("SELECT count(*) FROM ai.redemption_codes")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        pass
+    return render_template("admin/redemption.html", codes=codes, total=total, generated=[])
+
+
+@admin_bp.route("/redemption/generate", methods=["POST"])
+@login_required
+@admin_required
+def redemption_generate():
+    try:
+        amount = round(float(request.form.get("amount", "")), 4)
+        count = int(request.form.get("count", ""))
+    except ValueError:
+        flash("金额/数量格式不正确。", "danger")
+        return redirect(url_for("admin.redemption"))
+    if not (0 < amount <= 1000000) or not (1 <= count <= 200):
+        flash("金额需在 0–1000000 之间，数量需在 1–200 之间。", "danger")
+        return redirect(url_for("admin.redemption"))
+    generated: list[str] = []
+    try:
+        with db.engine.begin() as conn:
+            for _ in range(count):
+                code = "MP-" + "-".join(secrets.token_hex(2).upper() for _ in range(3))
+                conn.execute(
+                    text("INSERT INTO ai.redemption_codes (code, amount, created_by) VALUES (:code, :amount, :by)"),
+                    {"code": code, "amount": amount, "by": current_user.id},
+                )
+                generated.append(code)
+    except Exception:  # noqa: BLE001
+        flash("生成失败，请确认 ai.redemption_codes 表已迁移（0010）。", "danger")
+        return redirect(url_for("admin.redemption"))
+    flash(f"已生成 {len(generated)} 个兑换码，每个 {amount:g} 会员积分。", "success")
+    return render_template("admin/redemption.html", codes=[], total=0, generated=generated)
 
 
 @admin_bp.route(

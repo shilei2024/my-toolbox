@@ -48,6 +48,7 @@ export interface CreditLedgerEntry {
 export interface BillingSummary {
   readonly plans: readonly BillingPlan[];
   readonly account?: BillingAccount;
+  readonly memberAccount?: BillingAccount;
   readonly subscription?: BillingSubscription;
   readonly ledger: readonly CreditLedgerEntry[];
 }
