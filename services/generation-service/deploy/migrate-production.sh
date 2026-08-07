@@ -8,6 +8,9 @@ fi
 
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
 
+# Fail fast instead of hanging forever when a stale transaction holds DDL locks.
+export PGOPTIONS="${PGOPTIONS:-} -c lock_timeout=30000"
+
 # psql/libpq rejects Vercel Prisma pooler query parameters (uselibpqcompat /
 # pgbouncer); rebuild the URL without them so separators stay valid.
 DB_BASE="${DATABASE_URL%%\?*}"
