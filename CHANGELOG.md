@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.13 · 修复 /favicon.ico 404 控制台报错 / 2026-08-07
+- **根因**：浏览器每次打开页面都会自动请求 `/favicon.ico`，而站点只提供
+  `/static/img/favicon.svg`，导致每个页面控制台都出现
+  `Failed to load resource: 404`（不影响页面显示）。
+- **修复**：新增 `/favicon.ico` 路由，302 重定向到已有的 SVG 图标。
+- **测试**：新增 `tests/test_favicon_route.py`。
+
 ## 0.5.12 · 修复主站工具死链（doc-viewer 404）/ 2026-08-07
 - **根因**：`tools_config.yaml` 是工具的唯一样式来源，但 `sync_tool_registry`
   只做“新增/更新”，不会禁用数据库中残留的旧工具行；残留的

@@ -173,6 +173,12 @@ def create_app() -> Flask:
     def healthz():
         return jsonify(status="ok", time=utc_today_str())
 
+    @app.get("/favicon.ico")
+    def favicon_ico():
+        # Browsers auto-request /favicon.ico even when pages declare the SVG
+        # icon; without this route every page load logs a 404 in the console.
+        return redirect(url_for("static", filename="img/favicon.svg"))
+
     @app.get("/diag")
     def diag():
         """Deployment diagnostics — reveals why tool pages may not load.
