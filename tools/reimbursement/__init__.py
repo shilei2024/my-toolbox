@@ -730,18 +730,20 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
 
     # Step 1: 获取 token
     try:
-        resp = __import__("requests").get(
+        resp = requests.get(
             "https://aip.baidubce.com/oauth/2.0/token",
             params={"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key},
             timeout=10,
         )
-        token = resp.json().get("access_token")
+        if resp.status_code != 200:
+            raise RuntimeError(f"Baidu token HTTP {resp.status_code}")
+        data = resp.json()
+        token = data.get("access_token")
         if not token:
-            current_app.logger.warning("Baidu token failed")
-            return None
+            raise RuntimeError(f"Baidu token error: {data.get('error') or data.get('error_description') or 'unknown'}")
     except Exception as e:
         current_app.logger.warning("Baidu token: %s", e)
-        return None
+        raise RuntimeError(f"百度: {e}") from e
 
     # Step 2: 增值税发票识别（页×版本穷举）
     for raw in img_list:
