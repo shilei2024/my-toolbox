@@ -462,7 +462,30 @@ def ocr():
 
     ocr_errors: list[str] = []
 
-    # --- 策略 1: 腾讯云 OCR（国内推荐；复用已有腾讯云账号密钥） ---
+    # --- 策略 1: 百度云 OCR（增值税发票识别 + 通用 OCR；首选） ---
+    baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
+    baidu_secret = os.environ.get("BAIDU_OCR_SECRET_KEY", "").strip()
+
+    if baidu_key and baidu_secret:
+        try:
+            result = _baidu_ocr_from_bytes(img_bytes, baidu_key, baidu_secret)
+            if result:
+                has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
+                if has_data:
+                    commit_usage("reimbursement")
+                    return jsonify(success=True, data=result, provider="baidu")
+                current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
+                ocr_errors.append("百度识别无结果")
+            else:
+                ocr_errors.append("百度识别无结果或服务未开通")
+        except Exception as e:
+            current_app.logger.warning("Baidu OCR error: %s", e)
+            ocr_errors.append(f"百度: {e}")
+    else:
+        current_app.logger.info("Baidu OCR keys not configured, skipping...")
+        ocr_errors.append("百度未配置")
+
+    # --- 策略 2: 腾讯云 OCR（备用；复用已有腾讯云账号密钥） ---
     tencent_id = os.environ.get("OCR_SECRET_ID", "").strip() or os.environ.get("COS_SECRET_ID", "").strip()
     tencent_key = os.environ.get("OCR_SECRET_KEY", "").strip() or os.environ.get("COS_SECRET_KEY", "").strip()
     if tencent_id and tencent_key:
@@ -475,34 +498,14 @@ def ocr():
                     return jsonify(success=True, data=result, provider="tencent")
                 current_app.logger.warning("Tencent OCR returned empty fields, trying fallbacks...")
                 ocr_errors.append("腾讯云识别无结果")
+            else:
+                ocr_errors.append("腾讯云识别无结果或服务未开通")
         except Exception as e:
             current_app.logger.warning("Tencent OCR error: %s", e)
             ocr_errors.append(f"腾讯云: {e}")
     else:
         current_app.logger.info("Tencent OCR keys not configured, skipping...")
         ocr_errors.append("腾讯云未配置")
-
-    # --- 策略 2: 百度云 OCR（增值税发票识别 + 通用 OCR） ---
-    baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
-    baidu_secret = os.environ.get("BAIDU_OCR_SECRET_KEY", "").strip()
-
-    if baidu_key and baidu_secret:
-        try:
-            result = _baidu_ocr_from_bytes(img_bytes, baidu_key, baidu_secret)
-            if result:
-                has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
-                if has_data:
-                    commit_usage("reimbursement")
-                    return jsonify(success=True, data=result, provider="baidu")
-                else:
-                    current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
-                    ocr_errors.append("百度识别无结果")
-        except Exception as e:
-            current_app.logger.warning("Baidu OCR error: %s", e)
-            ocr_errors.append(f"百度: {e}")
-    else:
-        current_app.logger.info("Baidu OCR keys not configured, skipping...")
-        ocr_errors.append("百度未配置")
 
     # --- 策略 3: PaddleOCR 本地识别 ---
     try:
