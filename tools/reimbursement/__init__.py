@@ -694,17 +694,20 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
                     page = doc[page_num]
                     mat = fitz.Matrix(300 / 72, 300 / 72)
                     pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                    jpg = pix.tobytes("jpeg")
+                    jpg = pix.tobytes("jpg")
+                    if not jpg.startswith(b"\xff\xd8"):
+                        raise ValueError("PDF page did not render to JPEG")
                     if len(jpg) > 2_500_000:
                         mat2 = fitz.Matrix(200 / 72, 200 / 72)
                         pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
-                        jpg = pix2.tobytes("jpeg")
+                        jpg = pix2.tobytes("jpg")
                     img_list.append(jpg)
             finally:
                 doc.close()
         except Exception as e:
             current_app.logger.warning("PyMuPDF stream: %s", e)
-            img_list = [img_bytes]
+            # Never send raw PDF bytes as an image to the OCR API.
+            return None
     else:
         # 非 PDF：大图片适度压缩，小图片保持原样
         if len(img_bytes) > 4_000_000:
@@ -808,8 +811,9 @@ def _baidu_vat_call(img_bytes: bytes, access_token: str) -> dict | None:
     )
     data = resp.json()
     if data.get("error_code"):
-        current_app.logger.debug("Baidu VAT [%s]: %s", data["error_code"], data.get("error_msg", ""))
-        return None
+        # Surface the real reason (service not opened, quota, format, ...) to
+        # the caller so the user sees it instead of a silent fallback.
+        raise RuntimeError(f"Baidu VAT error {data['error_code']}: {data.get('error_msg', '')}")
     return data.get("words_result")
 
 
@@ -823,7 +827,9 @@ def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
         data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15,
     )
     data = resp.json()
-    return data.get("words_result") if not data.get("error_code") else None
+    if data.get("error_code"):
+        raise RuntimeError(f"Baidu OCR error {data['error_code']}: {data.get('error_msg', '')}")
+    return data.get("words_result")
 
 
 # ---------------------------------------------------------------------------
