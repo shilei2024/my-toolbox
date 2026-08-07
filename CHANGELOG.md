@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 · 报销发票 OCR 修复（腾讯云识别）与 Phase 2/3 方案 / 2026-08-07
+- **修复发票无法识别**：根因是未配置任何 OCR 后端（百度密钥缺失、
+  PaddleOCR 未安装），接口一直走“模拟降级”返回空字段。新增腾讯云
+  增值税发票识别适配器（TC3-HMAC-SHA256 签名，仅用 requests，无新增
+  SDK），识别顺序：腾讯云 → 百度 → PaddleOCR → 模拟降级。
+- **配置**：新增 `OCR_SECRET_ID` / `OCR_SECRET_KEY`（可复用
+  COS_SECRET_ID/KEY，子账号需有 ocr:VatInvoiceOCR 权限）。
+- **测试**：新增 TC3 签名与发票字段映射单测。
+- **方案**：platform-upgrade-plan.md 细化 Phase 2（模型配置中心、按
+  尺寸/张数计分、注册赠送后台可配）与 Phase 3（微信/支付宝支付分档路径、
+  双积分账本、模型分级）设计。
+
 ## 0.6.0 · Phase 1：昵称、统一图标、AI 入口、COS 按用户名归档、后台用户管理 / 2026-08-07
 - **昵称（#5）**：users 新增 nickname（幂等迁移）；`/profile` 页面可设置昵称；
   主站头部、Gallery 头部、画廊作品署名都优先显示昵称，未设置时显示注册邮箱；

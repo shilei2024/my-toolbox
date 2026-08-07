@@ -36,22 +36,46 @@
 
 ## Phase 2：后台配置中心与积分规则（#3 完整）
 
-- Provider / 模型配置中心：新增/编辑 provider、模型、启停、优先级、凭证状态
-  （现有 admin-console 扩展）。
-- 计分规则：模型分级（free/member）、分辨率与张数定价，存入 ai.settings 或
-  专用表；工作流默认价与用户积分余额在创建任务时合并计算。
-- 注册赠送积分：从环境变量改为后台运行设置（BILLING_SIGNUP_GRANT 迁移到
-  ai.runtime_settings），管理员可改。
+- **模型配置中心**：扩展现有 admin-console——
+  - Provider：新增/编辑（代码内已有适配器的才可新增，避免产生死路由）；
+    启停、优先级、凭证状态（可粘贴/更新密钥，只显示“已配置”）。
+  - 模型：`ai.provider_models` 增加 `tier`（free/member）与 `credit_cost`；
+    行内编辑 model_code、默认模型、启停。
+- **计分规则**：`ai.workflow_versions.defaults` 增加 per-size 定价表
+  （如 `{"1024x1024":1, "1920x1920":2, ...}`）+ 张数倍率；创建任务时按
+  尺寸×张数预留，worker 结算时按实际模型 tier 从对应账本扣费。
+- **注册赠送积分后台可配**：主站 `public.settings` 增加
+  `signup_credit_grant`；Generation Service 读取同一数据库的该配置，
+  优先于环境变量 `BILLING_SIGNUP_GRANT`。
+- 管理入口：主站后台 → 设置页新增“积分与模型”分组；Gallery 后台
+  admin-console 增加模型/计分标签页。
 
 ## Phase 3：会员与付费（#8）
 
 - 用户维度：plan 字段扩展为 free / member，会员到期时间；
   免费积分（free_credits）与会员积分（member_credits）双账本。
-- 付费：Stripe Checkout 订阅（已有骨架），Webhook 同步会员状态；
-  会员可无限使用主站普通小工具（现有 usage limit 按 plan 放行）。
+- **国内支付路径（按资质分档）**：
+  1. 有营业执照/个体户：微信支付 Native（PC 扫码）+ 支付宝电脑网站支付；
+     适配层 `billing/payment-provider.ts` 增加 wechat/alipay 实现，
+     回调验签后同步会员与积分。
+  2. 暂无商户资质：先上线“积分兑换码”（管理员在后台生成兑换码/充值码，
+     用户提交后人工/自动核销），微信/支付宝转账后填码即可到账；
+     同时保留 Stripe 国际卡作为海外兜底。
+  3. 后续接入第三方聚合（如虎皮椒）需评估合规与费率，默认不推荐。
+- **会员权益**：会员可无限使用主站普通小工具（现有 usage limit 按 plan
+  放行）；生图仍按积分计费。
+- **双账本**：`ai.credit_accounts` 拆分为两行（account_type=free/member），
+  保留现有 ledger 审计；免费积分只能调用 tier=free 的模型，会员积分可调用
+  tier=member 模型。
 - 生图计费：免费积分只允许低阶模型（mock/free 档），会员积分允许高阶模型；
   不同模型、分辨率、张数按配置计分。
 - 主站 /pricing 与 Gallery /billing 展示套餐与剩余积分。
+
+### 2026-08-07 追加：报销发票 OCR 修复
+- 根因：未配置任何可用 OCR 后端（百度密钥缺失、PaddleOCR 未安装），
+  接口永远返回“模拟降级”空结果。
+- 修复：新增腾讯云增值税发票识别适配器（TC3 签名，复用腾讯云密钥，
+  无新增 SDK），识别顺序改为 腾讯云 → 百度 → PaddleOCR → 模拟降级。
 
 ## 安全与回滚
 

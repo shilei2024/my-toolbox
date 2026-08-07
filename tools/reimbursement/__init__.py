@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
+import requests
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import csrf, db, limiter
@@ -458,7 +460,24 @@ def ocr():
     if not img_bytes:
         return jsonify(error="图片数据为空"), 400
 
-    # --- 策略 1: 百度云 OCR（优先，增值税发票识别 + 通用 OCR） ---
+    # --- 策略 1: 腾讯云 OCR（国内推荐；复用已有腾讯云账号密钥） ---
+    tencent_id = os.environ.get("OCR_SECRET_ID", "").strip() or os.environ.get("COS_SECRET_ID", "").strip()
+    tencent_key = os.environ.get("OCR_SECRET_KEY", "").strip() or os.environ.get("COS_SECRET_KEY", "").strip()
+    if tencent_id and tencent_key:
+        try:
+            result = _tencent_ocr_from_bytes(img_bytes, tencent_id, tencent_key)
+            if result:
+                has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
+                if has_data:
+                    commit_usage("reimbursement")
+                    return jsonify(success=True, data=result, provider="tencent")
+                current_app.logger.warning("Tencent OCR returned empty fields, trying fallbacks...")
+        except Exception as e:
+            current_app.logger.warning("Tencent OCR error: %s", e)
+    else:
+        current_app.logger.info("Tencent OCR keys not configured, skipping...")
+
+    # --- 策略 2: 百度云 OCR（增值税发票识别 + 通用 OCR） ---
     baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
     baidu_secret = os.environ.get("BAIDU_OCR_SECRET_KEY", "").strip()
 
@@ -477,7 +496,7 @@ def ocr():
     else:
         current_app.logger.info("Baidu OCR keys not configured, skipping...")
 
-    # --- 策略 2: PaddleOCR 本地识别 ---
+    # --- 策略 3: PaddleOCR 本地识别 ---
     try:
         # 先保存为临时文件（PaddleOCR 需要文件路径）
         upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
@@ -519,7 +538,7 @@ def ocr():
     except Exception as e:
         current_app.logger.warning("PaddleOCR fallback error: %s", e)
 
-    # --- 策略 3: 模拟降级 ---
+    # --- 策略 4: 模拟降级 ---
     return jsonify(
         success=True,
         data={
@@ -535,6 +554,115 @@ def ocr():
 # ---------------------------------------------------------------------------
 # OCR 核心：从字节到结果（Vercel 兼容，无文件系统依赖）
 # ---------------------------------------------------------------------------
+def _tencent_ocr_from_bytes(img_bytes: bytes, secret_id: str, secret_key: str, region: str = "ap-shanghai") -> dict | None:
+    """Tencent Cloud VAT invoice OCR (TC3-HMAC-SHA256, no extra SDK).
+
+    Uses the existing Tencent Cloud account: set OCR_SECRET_ID / OCR_SECRET_KEY
+    (or reuse COS_SECRET_ID / COS_SECRET_KEY when that sub-account also has the
+    ocr:VatInvoiceOCR / ocr:GeneralBasicOCR permissions).
+    """
+    import base64  # noqa: PLC0415
+
+    payload = json.dumps({"ImageBase64": base64.b64encode(img_bytes).decode("ascii")}, separators=(",", ":"))
+    timestamp = int(time.time())
+    authorization = _tc3_authorization(
+        secret_id=secret_id,
+        secret_key=secret_key,
+        service="ocr",
+        host="ocr.tencentcloudapi.com",
+        action="VatInvoiceOCR",
+        version="2018-11-19",
+        region=region,
+        payload=payload,
+        timestamp=timestamp,
+    )
+    resp = requests.post(
+        "https://ocr.tencentcloudapi.com",
+        data=payload.encode("utf-8"),
+        headers={
+            "Authorization": authorization,
+            "Content-Type": "application/json; charset=utf-8",
+            "Host": "ocr.tencentcloudapi.com",
+            "X-TC-Action": "VatInvoiceOCR",
+            "X-TC-Timestamp": str(timestamp),
+            "X-TC-Version": "2018-11-19",
+            "X-TC-Region": region,
+        },
+        timeout=20,
+    )
+    try:
+        data = resp.json()
+    except ValueError:
+        raise RuntimeError(f"Tencent OCR returned non-JSON ({resp.status_code})") from None
+    response = data.get("Response") or {}
+    error = response.get("Error") or {}
+    if resp.status_code != 200 or error:
+        raise RuntimeError(f"Tencent OCR error: {error.get('Code', resp.status_code)} {error.get('Message', '')}")
+    infos = response.get("VatInvoiceInfos") or []
+
+    def _find(*names: str) -> str:
+        for item in infos:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("Name", "")) in names:
+                return str(item.get("Value", "") or "").strip()
+        return ""
+
+    result = {
+        "invoice_number": _find("发票号码", "InvoiceNum"),
+        "invoice_date": _find("开票日期", "InvoiceDate"),
+        "seller_name": _find("销售方名称", "SellerName"),
+        "amount_excluding_tax": _find("金额", "AmountWithoutTax"),
+        "tax_amount": _find("税额", "TaxAmount"),
+        "total_amount": _find("价税合计(小写)", "价税合计", "AmountWithTax"),
+        "description": _find("货物或应税劳务名称", "项目名称", "Items"),
+    }
+    if result["invoice_number"] or result["total_amount"] or result["seller_name"]:
+        return result
+    return None
+
+
+def _tc3_authorization(
+    secret_id: str,
+    secret_key: str,
+    service: str,
+    host: str,
+    action: str,
+    version: str,
+    region: str,
+    payload: str,
+    timestamp: int,
+) -> str:
+    """Build the Tencent Cloud API v3 (TC3-HMAC-SHA256) Authorization header."""
+    import hashlib  # noqa: PLC0415
+    import hmac  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    date = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+    canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\n"
+    signed_headers = "content-type;host"
+    hashed_payload = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    canonical_request = "\n".join(["POST", "/", "", canonical_headers, signed_headers, hashed_payload])
+    string_to_sign = "\n".join([
+        "TC3-HMAC-SHA256",
+        str(timestamp),
+        f"{date}/{service}/tc3_request",
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+    ])
+
+    def _hmac(key: bytes, msg: str) -> bytes:
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+    secret_date = _hmac(("TC3" + secret_key).encode("utf-8"), date)
+    secret_service = _hmac(secret_date, service)
+    secret_signing = _hmac(secret_service, "tc3_request")
+    signature = hmac.new(secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return (
+        f"TC3-HMAC-SHA256 Credential={secret_id}/{date}/{service}/tc3_request, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+
+
 def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> dict | None:
     """
     完整 OCR 流程（接收字节，无需文件路径）。
