@@ -83,6 +83,7 @@ export async function createGalleryHttpServer(options: {
     app.get("/v1/admin/dashboard", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => options.admin!.dashboard(viewer(request, options.auth)));
     app.patch("/v1/admin/images/:id/moderation", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.moderateImage(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/providers/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProvider(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    app.patch("/v1/admin/provider-models/:id", { config: { rateLimit: { max: 40, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProviderModel(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/workflows/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateWorkflow(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
   }
 

@@ -1,6 +1,7 @@
 """Database-backed settings that take effect without restarting the app."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -15,6 +16,7 @@ RUNTIME_SETTING_KEYS = {
     "site_tagline": "SITE_TAGLINE",
     "daily_free_limit": "DAILY_FREE_LIMIT",
     "anon_free_limit": "ANON_FREE_LIMIT",
+    "signup_credit_grant": "SIGNUP_CREDIT_GRANT",
 }
 CACHE_TS_KEY = "_RUNTIME_SETTINGS_CACHE_TS"
 
@@ -40,11 +42,16 @@ def validate_site_settings(values: dict[str, str]) -> dict[str, Any]:
     if not 0 <= anon_limit <= 100:
         raise ValueError("匿名用户免费次数必须在 0–100 之间。")
 
+    signup_grant = values.get("signup_credit_grant", "10").strip() or "10"
+    if not re.fullmatch(r"(?:0|[1-9]\d{0,8})(?:\.\d{1,4})?", signup_grant):
+        raise ValueError("新用户赠送积分必须是 0–999999999 的小数（最多 4 位小数）。")
+
     return {
         "site_name": site_name,
         "site_tagline": site_tagline,
         "daily_free_limit": daily_limit,
         "anon_free_limit": anon_limit,
+        "signup_credit_grant": signup_grant,
     }
 
 
@@ -86,6 +93,9 @@ def apply_runtime_settings(app: Flask, force: bool = False) -> None:
         ),
         "anon_free_limit": raw.get(
             "anon_free_limit", str(app.config["ANON_FREE_LIMIT"])
+        ),
+        "signup_credit_grant": raw.get(
+            "signup_credit_grant", str(app.config.get("SIGNUP_CREDIT_GRANT", "10"))
         ),
     }
     try:

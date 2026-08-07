@@ -12,7 +12,7 @@ import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerat
 const generation: GenerationView = {
   id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像",
   prompt: "清晨的庭院", negativePrompt: "", width: 1024, height: 1024, count: 1, visibility: "private", promptVisibility: "hidden",
-  creditsReserved: "1.0000", creditsCharged: "0.0000", cancelRequested: false,
+  creditsReserved: "1.0000", creditsCharged: "0.0000", creditTier: "free", cancelRequested: false,
   createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z", images: [],
 };
 

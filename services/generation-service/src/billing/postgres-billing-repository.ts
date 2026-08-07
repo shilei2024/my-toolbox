@@ -52,9 +52,24 @@ export class PostgresBillingRepository implements BillingRepository {
   }
 
   async ensureSignupGrant(userId: number, amount: string): Promise<void> {
-    if (Number(amount) <= 0) return;
+    // The main-site admin can override the signup grant through the shared
+    // `public.settings` table (key: signup_credit_grant); fall back to the
+    // environment default when unset or invalid.
+    let effective = amount;
+    try {
+      const configured = await this.#pool.query<{ value: string | null }>(
+        "SELECT value FROM public.settings WHERE key = 'signup_credit_grant' LIMIT 1",
+      );
+      const raw = configured.rows[0]?.value?.trim();
+      if (raw && /^(?:0|[1-9]\d{0,8})(?:\.\d{1,4})?$/.test(raw)) {
+        effective = Number(raw).toFixed(4);
+      }
+    } catch {
+      // public.settings may not exist yet on fresh databases; use the default.
+    }
+    if (Number(effective) <= 0) return;
     await this.transaction(async (client) => {
-      await grantCredits(client, userId, amount, "signup_grant", "system", "signup", `signup-grant:${userId}`);
+      await grantCredits(client, userId, effective, "signup_grant", "system", "signup", `signup-grant:${userId}`);
     });
   }
 

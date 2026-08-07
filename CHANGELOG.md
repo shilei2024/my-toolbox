@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 · Phase 2：模型配置中心、计分规则、注册赠送可配、模型分级 / 2026-08-07
+- **数据库（0009）**：`ai.provider_models` 新增 `tier`（free/member）与
+  `credit_cost`（单张积分）；`ai.generation_jobs` 新增 `credit_tier`。
+- **模型配置中心**：Gallery 后台新增“模型与计分”面板——每个 Provider 下列出
+  模型，可编辑积分档位（free/member）、单张积分、默认模型、启停；
+  后端新增 `PATCH /v1/admin/provider-models/:id` 与审计日志。
+- **计分规则**：创建任务时优先按工作流 `defaults.pricing` 的
+  `"{宽}x{高}"` 定价 × 张数计算预留积分，未配置则回退原
+  `credit_cost × 张数`。
+- **注册赠送积分后台可配**：主站后台 → 系统设置新增“新用户注册赠送积分”；
+  Generation Service 优先读取同一数据库 `public.settings` 中的
+  `signup_credit_grant`，未配置时回退环境变量。
+- **模型分级 gating**：免费档任务只能选择 `tier=free` 的模型；会员档任务
+  可选全部模型（双账本结算在 Phase 3 实施）。
+- **会员工具无限使用**：主站 users.plan 为 member/pro/vip 时，普通小工具
+  不再受每日免费次数限制；后台用户列表可直接设置会员等级。
+- **测试**：新增选择策略分级过滤测试；Phase 8 管理端模型更新覆盖。
+
 ## 0.6.1 · 报销发票 OCR 修复（腾讯云识别）与 Phase 2/3 方案 / 2026-08-07
 - **修复发票无法识别**：根因是未配置任何 OCR 后端（百度密钥缺失、
   PaddleOCR 未安装），接口一直走“模拟降级”返回空字段。新增腾讯云

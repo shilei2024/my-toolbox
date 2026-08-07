@@ -1,5 +1,6 @@
 export const PROVIDER_AVAILABILITIES = ["active", "degraded", "disabled"] as const;
 export type ProviderAvailability = (typeof PROVIDER_AVAILABILITIES)[number];
+export type CreditTier = "free" | "member";
 
 export const GENERATION_MODES = ["text-to-image", "image-to-image"] as const;
 export type GenerationMode = (typeof GENERATION_MODES)[number];
@@ -50,6 +51,8 @@ export interface GenerationRequest {
   readonly negativePrompt: string;
   /** Sanitized owner name used to organize COS objects (e.g. email local part). */
   readonly ownerKey?: string;
+  /** Credit tier the job was created under; free-tier jobs can only use free models. */
+  readonly creditTier?: CreditTier;
   readonly width: number;
   readonly height: number;
   readonly count: number;
@@ -64,6 +67,7 @@ export interface ProviderBinding {
   readonly workflowVersionId: string;
   readonly providerWorkflowRef?: string;
   readonly providerModel?: string;
+  readonly modelTier?: CreditTier;
   readonly providerConfig: Readonly<JsonObject>;
   readonly priority: number;
   readonly estimatedCost?: number;

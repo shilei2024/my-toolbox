@@ -97,6 +97,14 @@
             </td>
             <td>
               {% if u.id != current_user.id %}
+                <form action="{{ url_for('admin.set_user_plan', user_id=u.id) }}" method="post" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <select name="plan" class="form-select form-select-sm d-inline-block" style="width: auto;" onchange="this.form.submit()">
+                    {% for plan in ['free', 'member', 'pro', 'vip'] %}
+                      <option value="{{ plan }}" {% if u.plan == plan %}selected{% endif %}>{{ plan }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
                 <form action="{{ url_for('admin.toggle_user', user_id=u.id) }}" method="post" class="d-inline">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                   <button class="btn btn-sm btn-outline-{{ 'danger' if u.is_active_user else 'success' }}">

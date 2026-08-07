@@ -1,4 +1,5 @@
 import type { JsonObject } from "../providers/types.ts";
+import type { CreditTier } from "../providers/types.ts";
 
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
@@ -41,6 +42,7 @@ export interface CreateGenerationInput {
   readonly visibility: GenerationVisibility;
   readonly promptVisibility: PromptVisibility;
   readonly parameters: Readonly<JsonObject>;
+  readonly creditTier: CreditTier;
 }
 
 export interface GenerationView {
@@ -57,6 +59,7 @@ export interface GenerationView {
   readonly promptVisibility: PromptVisibility;
   readonly creditsReserved: string;
   readonly creditsCharged: string;
+  readonly creditTier: CreditTier;
   readonly cancelRequested: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;

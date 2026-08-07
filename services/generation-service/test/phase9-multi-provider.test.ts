@@ -136,6 +136,25 @@ test("database routing state overrides static adapter priority and disabled prov
   assert.deepEqual(ranked.map((candidate) => candidate.provider.descriptor.code), ["second"]);
 });
 
+test("free-tier jobs exclude member-tier models while member jobs may use any model", () => {
+  const registry = new ProviderRegistry();
+  registry.register(new MockImageProvider({ code: "first", priority: 1 }));
+  registry.register(new MockImageProvider({ code: "second", priority: 2 }));
+  registry.setRouting("first", { availability: "active", priority: 1 });
+  registry.setRouting("second", { availability: "active", priority: 2 });
+  const policy = new ProviderSelectionPolicy(registry);
+  const bindings = [
+    binding("first", "free-model", {}, { modelTier: "free" }),
+    binding("second", "member-model", {}, { modelTier: "member" }),
+  ];
+  const freeRanked = policy.rank({ ...request, creditTier: "free" }, bindings);
+  assert.deepEqual(freeRanked.map((candidate) => candidate.binding.providerCode), ["first"]);
+  const memberRanked = policy.rank({ ...request, creditTier: "member" }, bindings);
+  assert.deepEqual(memberRanked.map((candidate) => candidate.binding.providerCode), ["first", "second"]);
+  const unsetRanked = policy.rank(request, bindings);
+  assert.deepEqual(unsetRanked.map((candidate) => candidate.binding.providerCode), ["first", "second"]);
+});
+
 test("multi-provider executor retries and falls back only for safe provider failures", async () => {
   const registry = new ProviderRegistry();
   registry.register(new MockImageProvider({ code: "primary", priority: 1, failure: new ProviderError({ providerCode: "primary", category: "unavailable", code: "upstream_503", message: "Unavailable" }) }));

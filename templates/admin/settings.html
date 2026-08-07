@@ -11,6 +11,13 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
           <div class="mb-3">
+            <label class="form-label">新用户注册赠送积分</label>
+            <input type="text" name="signup_credit_grant" class="form-control"
+                   value="{{ stored.signup_credit_grant or config.SIGNUP_CREDIT_GRANT or '10' }}"/>
+            <div class="form-text">新用户首次打开 AI 创作页时赠送的免费积分；0 表示不赠送。</div>
+          </div>
+
+          <div class="mb-3">
             <label class="form-label">网站名称</label>
             <input type="text" name="site_name" class="form-control"
                    value="{{ stored.site_name or config.SITE_NAME }}"/>

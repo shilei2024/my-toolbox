@@ -307,6 +307,21 @@ def delete_user(user_id: int):
     return redirect(url_for("admin.users"))
 
 
+@admin_bp.route("/users/<int:user_id>/plan", methods=["POST"])
+@login_required
+@admin_required
+def set_user_plan(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    plan = request.form.get("plan", "free").strip().lower()
+    if plan not in {"free", "member", "pro", "vip"}:
+        flash("会员等级必须是 free / member / pro / vip。", "danger")
+        return redirect(url_for("admin.users"))
+    user.plan = plan
+    db.session.commit()
+    flash(f"用户 {user.email} 的会员等级已设为 {plan}。", "success")
+    return redirect(url_for("admin.users"))
+
+
 @admin_bp.route(
     "/users/<int:user_id>/tools/<string:tool_id>/toggle-access",
     methods=["POST"],
@@ -435,6 +450,7 @@ def settings():
         "site_tagline",
         "daily_free_limit",
         "anon_free_limit",
+        "signup_credit_grant",
     )
     if request.method == "POST":
         submitted = {

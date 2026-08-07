@@ -9,7 +9,7 @@ interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: s
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
   prompt: string; negative_prompt: string;
-  visibility: GenerationVisibility; prompt_visibility: PromptVisibility; credits_reserved: string; credits_charged: string; cancel_requested_at: Date | null;
+  visibility: GenerationVisibility; prompt_visibility: PromptVisibility; credits_reserved: string; credits_charged: string; cancel_requested_at: Date | null; credit_tier: "free" | "member";
   created_at: Date; updated_at: Date; finished_at: Date | null; error_code: string | null; error_message: string | null; images: unknown;
 }
 
@@ -46,13 +46,13 @@ export class PostgresGenerationRepository implements GenerationRepository {
         || input.count < bounds.count.min || input.count > bounds.count.max) {
         throw new GenerationError("invalid_request", "所选创作方式不支持该画面尺寸或数量，请按选项调整。", 400);
       }
-      const cost = (Number(workflowCreditCost(workflow.defaults, defaultCreditCost)) * input.count).toFixed(4);
+      const cost = (Number(workflowCreditCostFor(workflow.defaults, defaultCreditCost, input.width, input.height)) * input.count).toFixed(4);
       const inserted = await client.query<{ id: string }>(`INSERT INTO ai.generation_jobs (
           user_id, workflow_version_id, idempotency_key, prompt, negative_prompt, input_params,
-          requested_width, requested_height, requested_count, visibility, prompt_visibility, credits_reserved
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, 0)
+          requested_width, requested_height, requested_count, visibility, prompt_visibility, credits_reserved, credit_tier
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, 0, $12)
         ON CONFLICT (user_id, idempotency_key) WHERE user_id IS NOT NULL AND idempotency_key IS NOT NULL DO NOTHING
-        RETURNING id`, [input.userId, workflow.id, input.idempotencyKey, input.prompt, input.negativePrompt, JSON.stringify(input.parameters), input.width, input.height, input.count, input.visibility, input.promptVisibility]);
+        RETURNING id`, [input.userId, workflow.id, input.idempotencyKey, input.prompt, input.negativePrompt, JSON.stringify(input.parameters), input.width, input.height, input.count, input.visibility, input.promptVisibility, input.creditTier]);
       const jobId = inserted.rows[0]?.id;
       if (!jobId) {
         const raced = await this.findByIdempotency(client, input.userId, input.idempotencyKey);
@@ -90,7 +90,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
     }
     const result = await this.#pool.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
         j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count,
-        j.visibility, j.prompt_visibility, j.credits_reserved, j.credits_charged, j.cancel_requested_at,
+        j.visibility, j.prompt_visibility, j.credits_reserved, j.credits_charged, j.credit_tier, j.cancel_requested_at,
         j.created_at, j.updated_at, j.finished_at, j.error_code, j.error_message,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
           FROM ai.images i WHERE i.job_id = j.id AND i.deleted_at IS NULL), '[]'::jsonb) AS images
@@ -168,7 +168,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
   private async findById(client: Pick<Pool, "query"> | PoolClient, id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> {
     const result = await client.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name,
         j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
-        j.credits_reserved, j.credits_charged, j.cancel_requested_at, j.created_at, j.updated_at, j.finished_at,
+        j.credits_reserved, j.credits_charged, j.credit_tier, j.cancel_requested_at, j.created_at, j.updated_at, j.finished_at,
         j.error_code, j.error_message,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id, 'slug', i.slug) ORDER BY i.created_at)
           FROM ai.images i WHERE i.job_id = j.id AND i.deleted_at IS NULL), '[]'::jsonb) AS images
@@ -199,6 +199,16 @@ function workflowCreditCost(defaults: Record<string, unknown>, fallback: string)
   if ((typeof value === "string" || typeof value === "number") && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 1_000_000) return Number(value).toFixed(4);
   return fallback;
 }
+function workflowCreditCostFor(defaults: Record<string, unknown>, fallback: string, width: number, height: number): string {
+  const pricing = defaults.pricing;
+  if (pricing && typeof pricing === "object" && !Array.isArray(pricing)) {
+    const value = (pricing as Record<string, unknown>)[`${width}x${height}`];
+    if ((typeof value === "string" || typeof value === "number") && Number.isFinite(Number(value)) && Number(value) >= 0) {
+      return Number(value).toFixed(4);
+    }
+  }
+  return workflowCreditCost(defaults, fallback);
+}
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number { return Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max ? Number(value) : fallback; }
 function visibility(value: unknown): GenerationVisibility { return value === "public" || value === "private" ? value : "private"; }
 function jobView(row: JobRow): GenerationView {
@@ -209,6 +219,7 @@ function jobView(row: JobRow): GenerationView {
     width: row.requested_width, height: row.requested_height, count: row.requested_count,
     visibility: row.visibility, promptVisibility: row.prompt_visibility,
     creditsReserved: row.credits_reserved, creditsCharged: row.credits_charged,
+    creditTier: row.credit_tier,
     cancelRequested: row.cancel_requested_at !== null, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
     ...(row.finished_at ? { finishedAt: row.finished_at.toISOString() } : {}),
     ...(row.error_code ? { error: { code: row.error_code, message: safeMessage || "生成失败，请稍后重试。" } } : {}),

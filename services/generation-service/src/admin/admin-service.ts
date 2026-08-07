@@ -2,7 +2,7 @@ import type { StructuredLogger } from "../pipeline/structured-logger.ts";
 import { GalleryError } from "../gallery/errors.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { AdminRepository } from "./repository.ts";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
 
 export class AdminService {
   readonly #repository: AdminRepository;
@@ -37,6 +37,14 @@ export class AdminService {
     return result;
   }
 
+  async updateProviderModel(modelId: string, input: unknown, viewer: ViewerContext): Promise<AdminProviderModelItem> {
+    const adminUserId = requireAdmin(viewer);
+    const command = parseProviderModel(input);
+    const result = await this.#repository.updateProviderModel(uuid(modelId), command, adminUserId, viewer.requestId);
+    this.#logger.info("admin.provider_model_updated", { requestId: viewer.requestId, actorUserId: adminUserId, modelId, tier: command.tier, isEnabled: command.isEnabled });
+    return result;
+  }
+
   async updateWorkflow(workflowId: string, input: unknown, viewer: ViewerContext): Promise<AdminWorkflowItem> {
     const adminUserId = requireAdmin(viewer);
     const command = parseWorkflow(input);
@@ -65,6 +73,18 @@ function parseProvider(value: unknown): UpdateProviderCommand {
   const body = object(value, ["status", "priority", "expectedUpdatedAt"]);
   if (body.status !== "active" && body.status !== "disabled") throw invalid("status is invalid");
   return { status: body.status, priority: integer(body.priority, 0, 10_000, "priority"), expectedUpdatedAt: timestamp(body.expectedUpdatedAt) };
+}
+
+function parseProviderModel(value: unknown): UpdateProviderModelCommand {
+  const body = object(value, ["tier", "creditCost", "isDefault", "isEnabled", "expectedUpdatedAt"]);
+  if (body.tier !== "free" && body.tier !== "member") throw invalid("tier is invalid");
+  if (typeof body.isDefault !== "boolean" || typeof body.isEnabled !== "boolean") throw invalid("isDefault/isEnabled is invalid");
+  let creditCost: number | undefined;
+  if (body.creditCost !== undefined && body.creditCost !== null) {
+    if (typeof body.creditCost !== "number" || !Number.isFinite(body.creditCost) || body.creditCost < 0 || body.creditCost > 1_000_000) throw invalid("creditCost is invalid");
+    creditCost = Math.round(body.creditCost * 10_000) / 10_000;
+  }
+  return { tier: body.tier, ...(creditCost === undefined ? {} : { creditCost }), isDefault: body.isDefault, isEnabled: body.isEnabled, expectedUpdatedAt: timestamp(body.expectedUpdatedAt) };
 }
 
 function parseWorkflow(value: unknown): UpdateWorkflowCommand {

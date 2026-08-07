@@ -30,6 +30,19 @@ export interface AdminProviderItem {
   readonly consecutiveFailures: number;
   readonly lastHealthAt?: string;
   readonly updatedAt: string;
+  readonly models: readonly AdminProviderModelItem[];
+}
+
+export interface AdminProviderModelItem {
+  readonly id: string;
+  readonly providerId: string;
+  readonly modelCode: string;
+  readonly displayName: string;
+  readonly tier: "free" | "member";
+  readonly creditCost?: number;
+  readonly isDefault: boolean;
+  readonly isEnabled: boolean;
+  readonly updatedAt: string;
 }
 
 export interface AdminWorkflowItem {

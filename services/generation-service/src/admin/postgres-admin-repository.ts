@@ -2,7 +2,7 @@ import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { GalleryAssetRecord, GalleryAssetUrlResolver } from "../gallery/asset-url.ts";
 import { GalleryError } from "../gallery/errors.ts";
 import type { AdminRepository } from "./repository.ts";
-import type { AdminAuditItem, AdminDashboard, AdminImageItem, AdminJobItem, AdminOverview, AdminProviderItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { AdminAuditItem, AdminDashboard, AdminImageItem, AdminJobItem, AdminOverview, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
 
 interface CountRow extends QueryResultRow {
   pending_moderation: string;
@@ -40,6 +40,18 @@ interface ProviderRow extends QueryResultRow {
   secret_ref: string | null;
   consecutive_failures: number;
   last_health_at: Date | string | null;
+  updated_at: Date | string;
+}
+
+interface ProviderModelRow extends QueryResultRow {
+  id: string;
+  provider_id: string;
+  model_code: string;
+  display_name: string;
+  tier: "free" | "member";
+  credit_cost: string | null;
+  is_default: boolean;
+  is_enabled: boolean;
   updated_at: Date | string;
 }
 
@@ -84,7 +96,7 @@ export class PostgresAdminRepository implements AdminRepository {
   }
 
   async dashboard(): Promise<AdminDashboard> {
-    const [counts, images, providers, workflows, jobs, audit] = await Promise.all([
+    const [counts, images, providers, modelRows, workflows, jobs, audit] = await Promise.all([
       this.#pool.query<CountRow>(`SELECT
         (SELECT count(*) FROM ai.images WHERE moderation_status IN ('pending', 'manual_review') AND deleted_at IS NULL) AS pending_moderation,
         (SELECT count(*) FROM ai.images WHERE visibility = 'public' AND moderation_status = 'approved' AND deleted_at IS NULL) AS public_images,
@@ -94,6 +106,8 @@ export class PostgresAdminRepository implements AdminRepository {
         (SELECT count(*) FROM ai.workflows WHERE is_enabled) AS enabled_workflows`),
       this.#pool.query<ImageRow>(`${imageSelect()} WHERE i.moderation_status IN ('pending', 'manual_review') AND i.deleted_at IS NULL ORDER BY i.created_at ASC, i.id ASC LIMIT 40`),
       this.#pool.query<ProviderRow>(`SELECT id, code, display_name, adapter_type, status, priority, secret_ref, consecutive_failures, last_health_at, updated_at FROM ai.providers ORDER BY priority ASC, code ASC LIMIT 100`),
+      this.#pool.query<ProviderModelRow>(`SELECT id, provider_id, model_code, display_name, tier, credit_cost, is_default, is_enabled, updated_at
+        FROM ai.provider_models ORDER BY provider_id, is_default DESC, model_code ASC LIMIT 500`),
       this.#pool.query<WorkflowRow>(workflowSelect("ORDER BY w.sort_order ASC, w.slug ASC LIMIT 100")),
       this.#pool.query<JobRow>(`SELECT j.id, j.status, w.name AS workflow_name, p.code AS provider_code, j.actual_cost, j.created_at, j.finished_at
         FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id
@@ -101,6 +115,12 @@ export class PostgresAdminRepository implements AdminRepository {
       this.#pool.query<AuditRow>(`SELECT id::text, actor_user_id, action, resource_type, resource_id, created_at FROM ai.audit_logs WHERE actor_type = 'admin' ORDER BY created_at DESC, id DESC LIMIT 30`),
     ]);
     const row = counts.rows[0];
+    const modelsByProvider = new Map<string, AdminProviderModelItem[]>();
+    for (const modelRow of modelRows.rows) {
+      const list = modelsByProvider.get(modelRow.provider_id) ?? [];
+      list.push(model(modelRow));
+      modelsByProvider.set(modelRow.provider_id, list);
+    }
     const overview: AdminOverview = {
       pendingModeration: Number(row?.pending_moderation ?? 0),
       publicImages: Number(row?.public_images ?? 0),
@@ -112,7 +132,7 @@ export class PostgresAdminRepository implements AdminRepository {
     return {
       overview,
       moderationQueue: await Promise.all(images.rows.map((item) => this.image(item))),
-      providers: providers.rows.map(provider),
+      providers: providers.rows.map((item) => provider(item, modelsByProvider.get(item.id) ?? [])),
       workflows: workflows.rows.map(workflow),
       recentJobs: jobs.rows.map(job),
       recentAudit: audit.rows.map(auditItem),
@@ -147,7 +167,32 @@ export class PostgresAdminRepository implements AdminRepository {
       await insertAudit(client, requestId, adminUserId, "admin.provider_updated", "provider", providerId, { from: { status: current.rows[0].status, priority: current.rows[0].priority }, to: { status: command.status, priority: command.priority } });
       return result.rows[0]!;
     });
-    return provider(row);
+    return provider(row, []);
+  }
+
+  async updateProviderModel(modelId: string, command: UpdateProviderModelCommand, adminUserId: number, requestId: string): Promise<AdminProviderModelItem> {
+    const row = await this.transaction(async (client) => {
+      const current = await client.query<ProviderModelRow>(
+        "SELECT id, provider_id, model_code, display_name, tier, credit_cost, is_default, is_enabled, updated_at FROM ai.provider_models WHERE id = $1 FOR UPDATE",
+        [modelId],
+      );
+      if (!current.rows[0]) throw notFound("Provider model was not found");
+      if (iso(current.rows[0].updated_at) !== command.expectedUpdatedAt) throw conflict();
+      if (command.isDefault) {
+        await client.query("UPDATE ai.provider_models SET is_default = false WHERE provider_id = $1 AND id <> $2", [current.rows[0].provider_id, modelId]);
+      }
+      const result = await client.query<ProviderModelRow>(
+        `UPDATE ai.provider_models SET tier = $2, credit_cost = $3, is_default = $4, is_enabled = $5 WHERE id = $1
+         RETURNING id, provider_id, model_code, display_name, tier, credit_cost, is_default, is_enabled, updated_at`,
+        [modelId, command.tier, command.creditCost === undefined ? null : command.creditCost, command.isDefault, command.isEnabled],
+      );
+      await insertAudit(client, requestId, adminUserId, "admin.provider_model_updated", "provider_model", modelId, {
+        from: { tier: current.rows[0].tier, creditCost: current.rows[0].credit_cost, isDefault: current.rows[0].is_default, isEnabled: current.rows[0].is_enabled },
+        to: { tier: command.tier, creditCost: command.creditCost ?? null, isDefault: command.isDefault, isEnabled: command.isEnabled },
+      });
+      return result.rows[0]!;
+    });
+    return model(row);
   }
 
   async updateWorkflow(workflowId: string, command: UpdateWorkflowCommand, adminUserId: number, requestId: string): Promise<AdminWorkflowItem> {
@@ -201,8 +246,22 @@ function workflowSelect(suffix: string): string {
     ${suffix}`;
 }
 
-function provider(row: ProviderRow): AdminProviderItem {
-  return { id: row.id, code: row.code, displayName: row.display_name, adapterType: row.adapter_type, status: row.status, priority: row.priority, secretConfigured: !!row.secret_ref, consecutiveFailures: row.consecutive_failures, ...(row.last_health_at ? { lastHealthAt: iso(row.last_health_at) } : {}), updatedAt: iso(row.updated_at) };
+function provider(row: ProviderRow, models: readonly AdminProviderModelItem[]): AdminProviderItem {
+  return { id: row.id, code: row.code, displayName: row.display_name, adapterType: row.adapter_type, status: row.status, priority: row.priority, secretConfigured: !!row.secret_ref, consecutiveFailures: row.consecutive_failures, ...(row.last_health_at ? { lastHealthAt: iso(row.last_health_at) } : {}), updatedAt: iso(row.updated_at), models };
+}
+
+function model(row: ProviderModelRow): AdminProviderModelItem {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    modelCode: row.model_code,
+    displayName: row.display_name,
+    tier: row.tier,
+    ...(row.credit_cost === null ? {} : { creditCost: Number(row.credit_cost) }),
+    isDefault: row.is_default,
+    isEnabled: row.is_enabled,
+    updatedAt: iso(row.updated_at),
+  };
 }
 
 function workflow(row: WorkflowRow): AdminWorkflowItem {

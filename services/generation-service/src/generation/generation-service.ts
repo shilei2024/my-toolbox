@@ -41,8 +41,9 @@ export class GenerationService {
     const visibility = enumValue(input.visibility, "visibility", ["public", "private"] as const);
     const promptVisibility = enumValue(input.promptVisibility, "promptVisibility", ["public", "hidden"] as const);
     const parameters = jsonObject(input.parameters ?? {}, "parameters");
+    const creditTier = input.creditTier === undefined ? "free" : enumValue(input.creditTier, "creditTier", ["free", "member"] as const);
     const key = token(idempotencyKey, "Idempotency-Key", 128);
-    return this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters }, this.#defaultCreditCost);
+    return this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters, creditTier }, this.#defaultCreditCost);
   }
 
   async get(id: string, viewer: ViewerContext): Promise<GenerationView> {
@@ -88,7 +89,7 @@ function requireUser(viewer: ViewerContext): number {
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GenerationError("invalid_request", "请求内容格式不正确。", 400);
   const result = value as Record<string, unknown>;
-  const allowed = new Set(["workflowSlug", "prompt", "negativePrompt", "width", "height", "count", "visibility", "promptVisibility", "parameters"]);
+  const allowed = new Set(["workflowSlug", "prompt", "negativePrompt", "width", "height", "count", "visibility", "promptVisibility", "parameters", "creditTier"]);
   if (Object.keys(result).some((key) => !allowed.has(key))) throw new GenerationError("invalid_request", "请求包含不支持的字段。", 400);
   return result;
 }

@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, type FormEvent } from "react";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminWorkflowItem } from "@/lib/admin-types";
+import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem } from "@/lib/admin-types";
 
 type AdminTab = "moderation" | "providers" | "workflows" | "jobs" | "audit";
 
@@ -53,6 +53,26 @@ export function AdminConsole({ initialDashboard }: { readonly initialDashboard: 
     }, `${workflow.name} 已更新。`);
   }
 
+  async function updateProviderModel(model: AdminProviderModelItem, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const creditRaw = String(data.get("creditCost") ?? "").trim();
+    const creditCost = creditRaw === "" ? undefined : Number(creditRaw);
+    if (creditCost !== undefined && (!Number.isFinite(creditCost) || creditCost < 0)) {
+      setMessage("单张积分必须是大于等于 0 的数字，或留空。");
+      return;
+    }
+    await run(`model:${model.id}`, async () => {
+      await mutate(`/api/admin/provider-models/${encodeURIComponent(model.id)}`, "PATCH", {
+        tier: data.get("tier"),
+        ...(creditCost === undefined ? {} : { creditCost }),
+        isDefault: data.get("isDefault") === "on",
+        isEnabled: data.get("isEnabled") === "on",
+        expectedUpdatedAt: model.updatedAt,
+      });
+    }, `${model.displayName} 已更新。`);
+  }
+
   const stats = [
     ["待审核", dashboard.overview.pendingModeration, "需要人工决定"],
     ["公开作品", dashboard.overview.publicImages, "当前可被发现"],
@@ -70,7 +90,7 @@ export function AdminConsole({ initialDashboard }: { readonly initialDashboard: 
       {message && <p className="admin-message" role="status">{message}</p>}
       <div className="admin-section">
         {tab === "moderation" && <ModerationPanel items={dashboard.moderationQueue} busy={busy} onModerate={moderate} onDelete={remove} />}
-        {tab === "providers" && <ProviderPanel items={dashboard.providers} busy={busy} onSubmit={updateProvider} />}
+        {tab === "providers" && <><ProviderPanel items={dashboard.providers} busy={busy} onSubmit={updateProvider} /><ProviderModelsPanel items={dashboard.providers} busy={busy} onSubmit={updateProviderModel} /></>}
         {tab === "workflows" && <WorkflowPanel items={dashboard.workflows} busy={busy} onSubmit={updateWorkflow} />}
         {tab === "jobs" && <JobsPanel dashboard={dashboard} />}
         {tab === "audit" && <AuditPanel dashboard={dashboard} />}
@@ -87,6 +107,28 @@ function ModerationPanel({ items, busy, onModerate, onDelete }: { readonly items
 function ProviderPanel({ items, busy, onSubmit }: { readonly items: readonly AdminProviderItem[]; readonly busy?: string; readonly onSubmit: (item: AdminProviderItem, event: FormEvent<HTMLFormElement>) => void }) {
   if (!items.length) return <AdminEmpty title="还没有 Provider" copy="Provider 注册属于服务端部署流程，后台只管理已注册实例。" />;
   return <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Provider</th><th>状态</th><th>优先级</th><th>凭证</th><th>健康</th><th>操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.displayName}</strong><small>{item.code} / {item.adapterType}</small></td><td><Status value={item.status} /></td><td colSpan={4}><form className="admin-inline-form" onSubmit={(event) => onSubmit(item, event)}><select name="status" defaultValue={item.status === "active" ? "active" : "disabled"} aria-label={`${item.displayName} 状态`}><option value="active">active</option><option value="disabled">disabled</option></select><input name="priority" type="number" min="0" max="10000" defaultValue={item.priority} aria-label={`${item.displayName} 优先级`} /><span className="credential-mark">{item.secretConfigured ? "已配置" : "未配置"}</span><span className="health-copy">失败 {item.consecutiveFailures} 次<br />{item.lastHealthAt ? formatDate(item.lastHealthAt) : "尚未检查"}</span><button className="button" type="submit" disabled={busy === `provider:${item.id}`}>保存</button></form></td></tr>)}</tbody></table></div>;
+}
+
+function ProviderModelsPanel({ items, busy, onSubmit }: { readonly items: readonly AdminProviderItem[]; readonly busy?: string; readonly onSubmit: (model: AdminProviderModelItem, event: FormEvent<HTMLFormElement>) => void }) {
+  if (!items.some((item) => item.models.length)) return null;
+  return <div className="admin-models">
+    <div className="admin-models-title">模型与计分（tier=free 免费积分可用；tier=member 需会员积分）</div>
+    {items.map((item) => item.models.map((model) => (
+      <form key={model.id} className="admin-model-row" onSubmit={(event) => onSubmit(model, event)}>
+        <span className="admin-model-provider">{item.displayName}</span>
+        <code>{model.modelCode}</code>
+        <span className="admin-model-name">{model.displayName}</span>
+        <select name="tier" defaultValue={model.tier} aria-label="积分档位">
+          <option value="free">free</option>
+          <option value="member">member</option>
+        </select>
+        <input name="creditCost" type="number" min="0" step="0.0001" defaultValue={model.creditCost ?? ""} placeholder="单张积分" aria-label="单张积分" />
+        <label><input name="isDefault" type="checkbox" defaultChecked={model.isDefault} />默认</label>
+        <label><input name="isEnabled" type="checkbox" defaultChecked={model.isEnabled} />启用</label>
+        <button className="button" type="submit" disabled={busy === `model:${model.id}`}>保存</button>
+      </form>
+    )))}
+  </div>;
 }
 
 function WorkflowPanel({ items, busy, onSubmit }: { readonly items: readonly AdminWorkflowItem[]; readonly busy?: string; readonly onSubmit: (item: AdminWorkflowItem, event: FormEvent<HTMLFormElement>) => void }) {

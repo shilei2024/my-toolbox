@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { AdminService } from "../src/admin/admin-service.ts";
 import type { AdminRepository } from "../src/admin/repository.ts";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminWorkflowItem } from "../src/admin/types.ts";
+import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem } from "../src/admin/types.ts";
 import { NoopGalleryCache } from "../src/gallery/cache.ts";
 import { GalleryCursorCodec } from "../src/gallery/cursor.ts";
 import { GalleryError } from "../src/gallery/errors.ts";
@@ -60,6 +60,7 @@ class FakeAdminRepository implements AdminRepository {
   async dashboard(): Promise<AdminDashboard> { return dashboard(); }
   async moderateImage(_id: string, command: { decision: "approved" | "rejected" }): Promise<AdminImageItem> { return { ...dashboard().moderationQueue[0]!, moderationStatus: command.decision }; }
   async updateProvider(_id: string, command: { status: "active" | "disabled"; priority: number }): Promise<AdminProviderItem> { return { ...dashboard().providers[0]!, status: command.status, priority: command.priority }; }
+  async updateProviderModel(_id: string, command: { tier: "free" | "member" }): Promise<AdminProviderModelItem> { return { ...dashboard().providers[0]!.models[0]!, tier: command.tier }; }
   async updateWorkflow(_id: string, command: { isEnabled: boolean; sortOrder: number }): Promise<AdminWorkflowItem> { return { ...dashboard().workflows[0]!, isEnabled: command.isEnabled, sortOrder: command.sortOrder }; }
 }
 
@@ -67,7 +68,7 @@ function dashboard(): AdminDashboard {
   return {
     overview: { pendingModeration: 1, publicImages: 4, jobsLast24Hours: 3, failedJobsLast24Hours: 0, activeProviders: 1, enabledWorkflows: 1 },
     moderationQueue: [{ id: IMAGE_ID, slug: "review-me", title: "Review me", workflowName: "Portrait", moderationStatus: "manual_review", visibility: "public", promptVisibility: "hidden", thumbnailUrl: "https://assets.example.test/review.webp", createdAt: UPDATED_AT, updatedAt: UPDATED_AT }],
-    providers: [{ id: PROVIDER_ID, code: "comfyui", displayName: "ComfyUI", adapterType: "comfyui", status: "active", priority: 10, secretConfigured: true, consecutiveFailures: 0, updatedAt: UPDATED_AT }],
+    providers: [{ id: PROVIDER_ID, code: "comfyui", displayName: "ComfyUI", adapterType: "comfyui", status: "active", priority: 10, secretConfigured: true, consecutiveFailures: 0, updatedAt: UPDATED_AT, models: [{ id: "model-1", providerId: PROVIDER_ID, modelCode: "comfyui-v1", displayName: "ComfyUI v1", tier: "free", isDefault: true, isEnabled: true, updatedAt: UPDATED_AT }] }],
     workflows: [{ id: WORKFLOW_ID, slug: "portrait", name: "Portrait", category: "people", isEnabled: true, sortOrder: 10, activeVersion: 1, bindingCount: 1, updatedAt: UPDATED_AT }],
     recentJobs: [],
     recentAudit: [],
