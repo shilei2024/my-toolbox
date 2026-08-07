@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 · 修复 Gallery Vercel 构建失败（favicon.ico 格式） / 2026-08-08
+- **根因**：Phase 1 手写的 favicon.ico（纯标准库生成）不符合 ICO 规范，
+  Next.js/sharp 无法解码，导致 `next build` 失败、Vercel 停留在旧部署
+  （新接口如 /api/billing/redeem 一直 404）。
+- **修复**：改用 Pillow 生成标准多尺寸 ICO（16/32/48/256），与
+  icon.svg / 主站 favicon.svg 同设计；本地 `next build` 已验证全量通过。
+- 生成脚本改为 `scripts/dev/generate-favicon.py`（需 Pillow）。
+
 ## 0.7.1 · Phase 3 基础：双积分账本 + 积分兑换码 + 创作页积分档位 / 2026-08-07
 - **数据库（0010/0011）**：新增 `ai.member_credit_accounts` 会员积分账本；
   流水表增加 `account_type`（free/member）；新增兑换码表
