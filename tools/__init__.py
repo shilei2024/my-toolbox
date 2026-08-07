@@ -72,6 +72,18 @@ def sync_tool_registry(app: Flask) -> None:
             tool.required_plan = entry.get("required_plan", "free") or "free"
             if "enabled" in entry:
                 tool.enabled = bool(entry["enabled"])
+        if entries:
+            # The YAML registry is the single source of truth: disable rows
+            # that were removed from it (or never implemented) so the homepage
+            # never renders a dead link to a route that does not exist.
+            configured_ids = {entry["id"] for entry in entries}
+            stale = (
+                db.session.query(Tool)
+                .filter(Tool.enabled.is_(True), Tool.id.notin_(configured_ids))
+                .all()
+            )
+            for tool in stale:
+                tool.enabled = False
         db.session.commit()
 
 
