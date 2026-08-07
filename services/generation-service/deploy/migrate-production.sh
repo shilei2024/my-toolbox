@@ -9,8 +9,22 @@ fi
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
 
 # psql/libpq rejects Vercel Prisma pooler query parameters (uselibpqcompat /
-# pgbouncer); strip them before any connection attempt.
-DB_URL="$(printf '%s' "$DATABASE_URL" | sed -E 's/[?&]uselibpqcompat=[^&]*//g; s/[?&]pgbouncer=[^&]*//g; s/[?&]+$//')"
+# pgbouncer); rebuild the URL without them so separators stay valid.
+DB_BASE="${DATABASE_URL%%\?*}"
+DB_QUERY="${DATABASE_URL#*\?}"
+if [ "$DB_QUERY" = "$DATABASE_URL" ]; then DB_QUERY=""; fi
+KEPT=""
+if [ -n "$DB_QUERY" ]; then
+  IFS='&'
+  for part in $DB_QUERY; do
+    case "$part" in
+      uselibpqcompat=*|pgbouncer=*) ;;
+      *) KEPT="${KEPT}${KEPT:+&}${part}" ;;
+    esac
+  done
+  unset IFS
+fi
+if [ -n "$KEPT" ]; then DB_URL="${DB_BASE}?${KEPT}"; else DB_URL="$DB_BASE"; fi
 
 psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE IF NOT EXISTS public.schema_migrations (
