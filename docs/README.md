@@ -19,6 +19,16 @@
 | [troubleshooting](troubleshooting/README.md) | 常见故障的定位、恢复和升级路径 | 开发、运维、客服 |
 | [changelog](changelog/README.md) | Phase 1–10 与后续里程碑的交付和验证记录 | 全体成员 |
 
+## 文档去重说明（2026-08-08 整理）
+
+- **新手部署**：唯一入口是 [deploy/DEPLOY_GUIDE.md](../deploy/DEPLOY_GUIDE.md)；
+  规范部署索引见 [deployment/README.md](deployment/README.md)，两者互为补充而非重复。
+- **本地开发**：见 [local-development-bridge.md](deployment/local-development-bridge.md)。
+- **变更记录**：根目录 [CHANGELOG.md](../CHANGELOG.md) 为最新权威变更日志；
+  [changelog/](changelog/README.md) 保留历史阶段档案，不再追加新条目。
+- **平台升级方案**：8 项需求与 Phase 1–3 进度见
+  [platform-upgrade-plan.md](development/platform-upgrade-plan.md)。
+
 ## 文档治理规则
 
 1. 架构事实写入 `architecture/`，重要取舍同时新增 ADR。

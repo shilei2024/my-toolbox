@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.3 · 项目整理与文档同步 / 2026-08-08
+- 清理本地临时产物（`quick-lru.tgz`、`.tmp` 预览图、`.gallery-next-cache`、
+  `__pycache__`），`.gitignore` 补充 `.gallery-next-cache/`。
+- 文档去重：`docs/README.md` 新增“文档去重说明”，明确新手部署、本地开发、
+  变更记录、平台升级方案的权威入口；`docs/changelog/README.md` 标注为历史
+  档案，最新变更以根 `CHANGELOG.md` 为准。
+- 根 `README.md` 补充项目结构与最新能力说明。
+- 无业务逻辑改动。
+
 ## 0.7.2 · 修复 Gallery Vercel 构建失败（favicon.ico 格式） / 2026-08-08
 - **根因**：Phase 1 手写的 favicon.ico（纯标准库生成）不符合 ICO 规范，
   Next.js/sharp 无法解码，导致 `next build` 失败、Vercel 停留在旧部署

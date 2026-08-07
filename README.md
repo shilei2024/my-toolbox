@@ -25,6 +25,19 @@ My Toolbox 是一个基于 Flask 的轻量级在线工具箱，集成 PDF、图�
 
 ## 快速开始
 
+### 项目结构
+
+```text
+apps/gallery-web             # AI 画廊前端（Next.js BFF + Gallery + 管理控制台）
+services/generation-service  # 生成服务（Provider 路由、队列、计分、COS 持久化）
+app.py / templates/ / static # 主站（Flask 工具箱 + 统一后台）
+docs/                        # 文档中心（docs/README.md 为唯一入口）
+deploy/                      # 生产部署（compose、Caddy、迁移脚本）
+```
+
+最新能力：AI 生图/画廊、昵称、双积分账本、积分兑换码、模型配置中心等，见
+[CHANGELOG.md](CHANGELOG.md) 与 [平台升级方案](docs/development/platform-upgrade-plan.md)。
+
 ### 1. 获取代码
 
 ```bash
