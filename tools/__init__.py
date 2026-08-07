@@ -47,7 +47,8 @@ def _import_module(module_path: str) -> Any | None:
 def sync_tool_registry(app: Flask) -> None:
     """Sync the YAML registry into the DB so the admin UI sees them."""
     with app.app_context():
-        for entry in _load_yaml_config(app):
+        entries = _load_yaml_config(app)
+        for entry in entries:
             tool = db.session.get(Tool, entry["id"])
             if tool is None:
                 tool = Tool(id=entry["id"])
@@ -77,9 +78,13 @@ def sync_tool_registry(app: Flask) -> None:
             # that were removed from it (or never implemented) so the homepage
             # never renders a dead link to a route that does not exist.
             configured_ids = {entry["id"] for entry in entries}
+            configured_routes = {entry.get("route", f"/tools/{entry['id']}") for entry in entries}
             stale = (
                 db.session.query(Tool)
-                .filter(Tool.enabled.is_(True), Tool.id.notin_(configured_ids))
+                .filter(
+                    Tool.enabled.is_(True),
+                    (Tool.id.notin_(configured_ids)) | (Tool.route.notin_(configured_routes)),
+                )
                 .all()
             )
             for tool in stale:

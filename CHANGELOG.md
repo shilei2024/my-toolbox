@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.14 · 热修：工具注册启动失败（NameError）导致全站工具 404 / 2026-08-07
+- **根因**：0.5.12 引入的“残留工具自动禁用”逻辑引用了未定义的
+  `entries` 变量（`NameError`），`sync_tool_registry` 在启动时抛异常，
+  `register_tools` 被跳过，重启后所有 `/tools/*` 页面都返回 404。
+- **修复**：把 `_load_yaml_config(app)` 结果赋给 `entries` 后再循环；
+  同时残留工具判定同时按工具 id 与路由双重兜底，避免 id 与路由不一致的
+  残留行（如 doc-viewer）漏网。
+- **回归测试**：`tests/test_tool_registry_sync.py` 会直接触发该路径，
+  防止再次出现启动期工具加载失败。
+
 ## 0.5.13 · 修复 /favicon.ico 404 控制台报错 / 2026-08-07
 - **根因**：浏览器每次打开页面都会自动请求 `/favicon.ico`，而站点只提供
   `/static/img/favicon.svg`，导致每个页面控制台都出现
