@@ -407,9 +407,15 @@ def _init_extensions(app: Flask) -> None:
                     db.session.execute(text("SELECT 1 FROM users LIMIT 1")).scalar()
                 except Exception:  # noqa: BLE001
                     db.create_all()
+                # The probe leaves the session transaction open, which holds an
+                # ACCESS SHARE lock on `users` and can deadlock the very next
+                # DDL (e.g. the nickname migration) across gunicorn workers.
+                db.session.rollback()
             _ensure_tool_external_url_column(app)
             _ensure_user_nickname_column(app)
+            db.session.rollback()
             apply_runtime_settings(app, force=True)
+            db.session.rollback()
     except Exception:
         app.logger.warning(
             "Database unavailable at boot; continuing without schema/runtime settings",
