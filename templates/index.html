@@ -21,7 +21,32 @@
   {% endif %}
 </section>
 
-{# 实时汇率 — 双向切换 #}
+{% set ai_tool = tools | selectattr("id", "equalto", "ai_image") | first %}
+{% if ai_tool and ai_tool.external_url %}
+<section class="ai-hero-card mb-5">
+  <div class="ai-hero-grid" aria-hidden="true"></div>
+  <div class="ai-hero-body">
+    <span class="ai-hero-badge"><i class="bi bi-stars"></i> AI IMAGE STUDIO</span>
+    <h2>AI 生图 · 画廊展示</h2>
+    <p>输入一句话，生成高质量 AI 图片；作品自动进入画廊，支持多种模型、画幅与积分计价。</p>
+    <div class="ai-hero-actions">
+      <a class="btn btn-light" href="{{ ai_tool.external_url }}" target="_blank" rel="noopener">
+        <i class="bi bi-magic"></i> 开始创作
+      </a>
+      <a class="btn btn-outline-light" href="{{ ai_tool.external_url.replace('/create', '/gallery') }}" target="_blank" rel="noopener">
+        <i class="bi bi-images"></i> 浏览画廊
+      </a>
+    </div>
+    <ul class="ai-hero-meta">
+      <li><i class="bi bi-grid-3x3-gap"></i> 多画幅</li>
+      <li><i class="bi bi-credit-card"></i> 积分计价</li>
+      <li><i class="bi bi-shield-check"></i> 内容审核</li>
+    </ul>
+  </div>
+</section>
+{% endif %}
+
+{# 实时汇率 - 双向切换 #}
 <div id="exchangeRate" class="text-center mb-3">
   <div class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill border bg-white shadow-sm" style="min-width:fit-content;">
     <span id="fxFromBadge" class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded-pill small fw-semibold"

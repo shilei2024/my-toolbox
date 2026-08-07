@@ -358,6 +358,25 @@ def _ensure_tool_external_url_column(app: Flask) -> None:
         app.logger.warning("tools.external_url migration skipped: %s", exc)
 
 
+def _ensure_user_nickname_column(app: Flask) -> None:
+    """Lightweight migration: add `users.nickname` on databases created before
+    the nickname feature (SQLite/PostgreSQL; idempotent)."""
+    from sqlalchemy import inspect as sa_inspect, text  # noqa: PLC0415
+
+    try:
+        insp = sa_inspect(db.engine)
+        if "users" not in insp.get_table_names():
+            return
+        columns = {col["name"] for col in insp.get_columns("users")}
+        if "nickname" in columns:
+            return
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(80)"))
+        app.logger.info("Migrated users table: added nickname column")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("users.nickname migration skipped: %s", exc)
+
+
 def _init_extensions(app: Flask) -> None:
     # Resolve SQLite path to the app's instance_path if user didn't override.
     # Skip for in-memory DB (used on Vercel / read-only FS), absolute paths,
@@ -389,6 +408,7 @@ def _init_extensions(app: Flask) -> None:
                 except Exception:  # noqa: BLE001
                     db.create_all()
             _ensure_tool_external_url_column(app)
+            _ensure_user_nickname_column(app)
             apply_runtime_settings(app, force=True)
     except Exception:
         app.logger.warning(

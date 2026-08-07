@@ -9,7 +9,7 @@ import type { GenerationJobClaim, GenerationJobRepository, QueueAttemptDescripto
 
 interface ClaimRow extends QueryResultRow {
   id: string; status: "pending" | "running" | "completed" | "failed" | "cancelled"; cancel_requested_at: Date | null; credits_reserved: string;
-  workflow_version_id: string; workflow_id: string; workflow_version: number; workflow_kind: string;
+  workflow_version_id: string; workflow_id: string; workflow_version: number; workflow_kind: string; user_id: number | null; owner_email: string | null;
   prompt: string; negative_prompt: string; input_params: JsonObject; requested_width: number; requested_height: number; requested_count: number;
   request_id: string | null;
 }
@@ -31,9 +31,13 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
       await client.query("BEGIN");
       const result = await client.query<ClaimRow>(`SELECT j.id, j.status, j.cancel_requested_at, j.credits_reserved, j.workflow_version_id,
           w.id AS workflow_id, v.version AS workflow_version, w.category AS workflow_kind,
+          j.user_id, u.email AS owner_email,
           j.prompt, j.negative_prompt, j.input_params, j.requested_width, j.requested_height, j.requested_count,
           (SELECT payload->>'requestId' FROM ai.outbox_events WHERE aggregate_id = j.id AND event_type = 'generation.requested' ORDER BY created_at LIMIT 1) AS request_id
-        FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id
+        FROM ai.generation_jobs j
+        JOIN ai.workflow_versions v ON v.id = j.workflow_version_id
+        JOIN ai.workflows w ON w.id = v.workflow_id
+        LEFT JOIN public.users u ON u.id = j.user_id
         WHERE j.id = $1 FOR UPDATE OF j`, [jobId]);
       row = result.rows[0];
       if (!row) throw new Error("generation_job_not_found");
@@ -62,11 +66,13 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     } finally { client.release(); }
 
     const bindings = await this.#catalog.bindingsFor(row.workflow_version_id);
+    const owner = ownerKey(row.owner_email, row.user_id);
     const request: GenerationRequest = {
       jobId: row.id,
       workflow: { workflowId: row.workflow_id, workflowVersionId: row.workflow_version_id, version: row.workflow_version, kind: row.workflow_kind },
       mode: "text-to-image", prompt: row.prompt, negativePrompt: row.negative_prompt,
       width: row.requested_width, height: row.requested_height, count: row.requested_count,
+      ...(owner === undefined ? {} : { ownerKey: owner }),
       ...(typeof row.input_params.seed === "number" ? { seed: row.input_params.seed } : {}),
       parameters: row.input_params,
     };
@@ -177,3 +183,8 @@ function safeProviderMetadata(value: Readonly<Record<string, unknown>>): Record<
   return Object.fromEntries(Object.entries(value).filter(([key, item]) => allowed.has(key) && (typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null)));
 }
 function modelFrom(value: Readonly<Record<string, unknown>>): string | null { return typeof value.model === "string" ? value.model.slice(0, 128) : null; }
+function ownerKey(email: string | null, userId: number | null): string | undefined {
+  if (userId === null) return undefined;
+  const local = (email ?? "").split("@")[0]?.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return `${local || "user"}-${userId}`.slice(0, 80);
+}

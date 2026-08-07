@@ -149,7 +149,49 @@ def gallery_session():
         email = str(getattr(current_user, "email", "") or "")
         if email:
             payload["email"] = email
+        nickname = str(getattr(current_user, "nickname", "") or "").strip()
+        if nickname:
+            payload["nickname"] = nickname
         response = jsonify(payload)
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "Cookie"
     return response
+
+
+@auth_bp.get("/profile")
+@login_required
+def profile():
+    return render_template("profile.html", user=current_user)
+
+
+@auth_bp.post("/profile")
+@login_required
+def profile_update():
+    nickname = request.form.get("nickname", "").strip()
+    if len(nickname) > 80:
+        flash("昵称最多 80 个字符。", "danger")
+        return redirect(url_for("auth.profile"))
+    current_user.nickname = nickname or None
+    db.session.commit()
+    _sync_gallery_display_name(current_user.id, current_user.display_name)
+    flash("昵称已更新。", "success")
+    return redirect(url_for("auth.profile"))
+
+
+def _sync_gallery_display_name(user_id: int, display_name: str) -> None:
+    """Mirror the nickname into ai.user_profiles for artwork attribution."""
+    from sqlalchemy import text  # noqa: PLC0415
+
+    try:
+        db.session.execute(
+            text(
+                "INSERT INTO ai.user_profiles (user_id, display_name, created_at, updated_at) "
+                "VALUES (:user_id, :display_name, now(), now()) "
+                "ON CONFLICT (user_id) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = now()"
+            ),
+            {"user_id": user_id, "display_name": display_name},
+        )
+        db.session.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.warning("ai.user_profiles sync skipped: %s", exc)

@@ -334,7 +334,7 @@ curl https://api-ai.mindfulpenpal.com/health
       "Action": ["cos:GetObject"],
       "Effect": "Allow",
       "Principal": { "qcs": ["*"] },
-      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/jobs/*"]
+      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/*"]
     }
   ],
   "Version": "2.0"
@@ -348,7 +348,7 @@ curl https://api-ai.mindfulpenpal.com/health
 > - `<地域>` = 桶所在地域代码，如 `ap-shanghai`；
 > - `<账号ID>` = **APPID（12 位数字）**，不是登录账号也不是昵称；
 > - `<桶名>` = **带 APPID 后缀的完整桶名**，例如桶显示为 `mavis-gallery-1393621694` 时，
->   Resource 应写成 `qcs::cos:ap-shanghai:uid/1393621694:mavis-gallery-1393621694/images/jobs/*`。
+>   Resource 应写成 `qcs::cos:ap-shanghai:uid/1393621694:mavis-gallery-1393621694/images/*`。
 > 若控制台粘贴 JSON 报错，优先检查这三个值是否还留着 `<>` 尖括号占位符。
 
 确认环境文件里已填：

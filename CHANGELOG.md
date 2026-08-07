@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0 · Phase 1：昵称、统一图标、AI 入口、COS 按用户名归档、后台用户管理 / 2026-08-07
+- **昵称（#5）**：users 新增 nickname（幂等迁移）；`/profile` 页面可设置昵称；
+  主站头部、Gallery 头部、画廊作品署名都优先显示昵称，未设置时显示注册邮箱；
+  设置昵称自动同步 ai.user_profiles。
+- **统一小图标（#7）**：设计同一科技风图标（紫→青渐变 M + 星芒），主站
+  `static/img/favicon.svg` 与 Gallery `app/icon.svg` / `app/favicon.ico` 一致；
+  新增纯标准库生成脚本 `scripts/dev/generate-favicon.py`。
+- **生图预览居中（#6）**：Gallery 预览区按实际画幅居中显示、完整展示不裁剪，
+  并保持所选宽高比。
+- **AI 入口卡片（#1）**：主站首页新增“AI 生图 · 画廊展示”Hero 卡片，
+  含开始创作 / 浏览画廊入口；两站同步紫青渐变科技风设计令牌（#2 基础）。
+- **COS 按用户名归档（#4）**：新上传对象键改为
+  `images/{用户名}/{jobId}/{序号}.ext`（用户名取邮箱本地部分 + 用户 ID），
+  存量对象不变；桶策略文档同步为 `images/*`。
+- **后台用户管理（#3 部分）**：用户列表新增昵称设置、AI 积分查看与调整
+  （写 ai.credit_ledger_entries 审计）、删除用户（停用 + 匿名化，保留历史）。
+- 方案文档：`docs/development/platform-upgrade-plan.md`（8 项需求与 Phase 2/3 规划）。
+
 ## 0.5.14 · 热修：工具注册启动失败（NameError）导致全站工具 404 / 2026-08-07
 - **根因**：0.5.12 引入的“残留工具自动禁用”逻辑引用了未定义的
   `entries` 变量（`NameError`），`sync_tool_registry` 在启动时抛异常，

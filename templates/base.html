@@ -43,10 +43,11 @@
           {% endif %}
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
-              <i class="bi bi-person-circle"></i> {{ current_user.email }}
+              <i class="bi bi-person-circle"></i> {{ current_user.display_name }}
             </a>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><span class="dropdown-item-text text-muted small">已登录</span></li>
+              <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}"><i class="bi bi-person-gear"></i> 个人资料 / 昵称</a></li>
+              <li><span class="dropdown-item-text text-muted small">{{ current_user.email }}</span></li>
               <li><hr class="dropdown-divider"></li>
               <li>
                 <form action="{{ url_for('auth.logout') }}" method="post" class="px-3">

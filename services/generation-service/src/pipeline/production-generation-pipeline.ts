@@ -33,7 +33,7 @@ export class ProductionGenerationPipeline {
       const status = await this.#polling.wait(provider, submission, context);
       if (status.state !== "succeeded") throw new ProviderError({ providerCode: provider.descriptor.code, category: status.state === "cancelled" ? "cancelled" : "upstream", code: status.error?.code ?? `provider_${status.state}`, message: status.error?.message ?? "Provider generation failed", retryable: status.error?.retryable ?? false, externalRequestId: status.externalRequestId });
       const generatedAt = Date.now();
-      const assets = await this.#persistence.persist(request.jobId, status.outputs);
+      const assets = await this.#persistence.persist(request.jobId, status.outputs, request.ownerKey);
       const finished = Date.now();
       this.#logger.info("generation.completed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: finished - started, uploadDurationMs: finished - generatedAt, outputCount: assets.length });
       return { externalRequestId: status.externalRequestId, assets, providerCode: provider.descriptor.code, providerMetadata: status.providerMetadata, ...(status.actualCost === undefined ? {} : { actualCost: status.actualCost }), generationDurationMs: generatedAt - started, storageDurationMs: finished - generatedAt };

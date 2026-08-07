@@ -48,6 +48,8 @@ export interface GenerationRequest {
   readonly mode: GenerationMode;
   readonly prompt: string;
   readonly negativePrompt: string;
+  /** Sanitized owner name used to organize COS objects (e.g. email local part). */
+  readonly ownerKey?: string;
   readonly width: number;
   readonly height: number;
   readonly count: number;

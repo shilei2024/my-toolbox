@@ -152,6 +152,28 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
   }
 });
 
+test("COS persistence organizes objects under the owner key when present", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phase4-owner-"));
+  const uploads: string[] = [];
+  const storage = {
+    code: "test",
+    async upload(input: { objectKey: string }) {
+      uploads.push(input.objectKey);
+      return { storageProvider: "test", bucket: "b", region: "r", objectKey: input.objectKey, url: `https://example.test/${input.objectKey}` };
+    },
+    async delete() { return undefined; },
+  };
+  const persistence = new ImagePersistenceService(storage as never, root, 1000);
+  const output = { kind: "base64" as const, data: PNG_1X1.toString("base64"), mimeType: "image/png" as const, width: 1, height: 1 };
+  try {
+    await persistence.persist("job-owner", [output], "alice-1");
+    await persistence.persist("job-legacy", [output]);
+    assert.deepEqual(uploads, ["images/alice-1/job-owner/0.png", "images/jobs/job-legacy/0.png"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("COS metadata header names are normalized to hyphenated lowercase keys", () => {
   assert.equal(sanitizeMetadataKey("job_id"), "job-id");
   assert.equal(sanitizeMetadataKey("output_index"), "output-index");

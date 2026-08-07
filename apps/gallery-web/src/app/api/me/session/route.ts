@@ -9,6 +9,7 @@ export async function GET() {
     bridge: viewer.bridge ?? "unconfigured",
     ...(viewer.userId ? { userId: viewer.userId } : {}),
     ...(viewer.email ? { email: viewer.email } : {}),
+    ...(viewer.nickname ? { nickname: viewer.nickname } : {}),
   }, {
     headers: { "Cache-Control": "no-store" },
   });

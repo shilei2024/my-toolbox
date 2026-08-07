@@ -14,6 +14,7 @@ export type ViewerBridge = "ok" | "guest" | "unconfigured" | "error";
 export interface ViewerContext {
   readonly userId?: number;
   readonly email?: string;
+  readonly nickname?: string;
   readonly role: ViewerRole;
   readonly requestId: string;
   readonly bridge?: ViewerBridge;

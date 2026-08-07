@@ -19,7 +19,7 @@ export class ImagePersistenceService {
   readonly #fetcher: typeof fetch;
   readonly #remoteDownloadTimeoutMs: number;
   constructor(storage: StorageProvider, temporaryRoot: string, remoteDownloadTimeoutMs: number, fetcher: typeof fetch = fetch) { this.#storage = storage; this.#root = path.resolve(temporaryRoot); this.#remoteDownloadTimeoutMs = remoteDownloadTimeoutMs; this.#fetcher = fetcher; }
-  async persist(jobId: string, outputs: readonly ProviderImageOutput[]): Promise<readonly PersistedImageAsset[]> {
+  async persist(jobId: string, outputs: readonly ProviderImageOutput[], ownerKey?: string): Promise<readonly PersistedImageAsset[]> {
     const assets: PersistedImageAsset[] = [];
     try {
       const safeJobId = objectKeySegment(jobId);
@@ -28,7 +28,9 @@ export class ImagePersistenceService {
         try {
           const info = await stat(local);
           const extension = extensionFor(output.mimeType);
-          const key = `images/jobs/${safeJobId}/${index}${extension}`;
+          // Organize objects by owner (username) so bucket browsing is easier:
+          // images/{ownerKey}/{jobId}/{index}.ext; legacy jobs stay under jobs/.
+          const key = `images/${ownerKey ?? "jobs"}/${safeJobId}/${index}${extension}`;
           const sha256 = await digestFile(local);
           // Do not send x-cos-meta-* headers: the object key already embeds
           // the job id and output index, and signing custom metadata headers

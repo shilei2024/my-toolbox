@@ -1,5 +1,8 @@
 :root {
   --brand-color: #0d6efd;
+  --brand-violet: #6d5cff;
+  --brand-cyan: #22d3ee;
+  --brand-gradient: linear-gradient(135deg, #6d5cff 0%, #22d3ee 100%);
   --surface: #ffffff;
   --bg: #f6f9fc;
 }
@@ -32,6 +35,80 @@ main {
 }
 .tool-card-link { color: inherit; }
 .tool-card-link:hover { color: inherit; }
+
+/* Tech-style AI entry card (homepage) */
+.ai-hero-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  color: #fff;
+  background:
+    radial-gradient(120% 160% at 12% 0%, rgb(109 92 255 / 55%), transparent 46%),
+    radial-gradient(120% 160% at 88% 100%, rgb(34 211 238 / 45%), transparent 46%),
+    linear-gradient(135deg, #1c2340 0%, #101a33 100%);
+  box-shadow: 0 1.25rem 3rem rgb(13 20 40 / 22%);
+}
+.ai-hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 5%) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(90% 90% at 50% 30%, #000 30%, transparent 78%);
+}
+.ai-hero-body {
+  position: relative;
+  z-index: 1;
+  padding: 2rem 2.2rem;
+  max-width: 720px;
+}
+.ai-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  background: rgb(255 255 255 / 10%);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.ai-hero-body h2 {
+  margin: 0.85rem 0 0.4rem;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  font-weight: 800;
+  background: linear-gradient(90deg, #fff 20%, #a5f3fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ai-hero-body p { margin: 0; color: rgb(234 242 255 / 82%); max-width: 560px; line-height: 1.7; }
+.ai-hero-actions { margin-top: 1.15rem; display: flex; gap: 0.7rem; flex-wrap: wrap; }
+.ai-hero-actions .btn-light { border: none; color: #1c2340; font-weight: 700; }
+.ai-hero-actions .btn-outline-light { border-color: rgb(255 255 255 / 45%); }
+.ai-hero-meta {
+  margin: 1.2rem 0 0;
+  padding: 0;
+  display: flex;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+  list-style: none;
+  color: rgb(234 242 255 / 70%);
+  font-size: 0.82rem;
+}
+.ai-hero-meta i { color: #7dd3fc; }
+
+/* Shared tech accent on regular tool cards */
+.tool-card {
+  border-top: 2px solid transparent !important;
+}
+.tool-card:hover {
+  border-top-color: var(--brand-violet) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f7ff 100%) !important;
+  box-shadow: 0 0.75rem 1.75rem rgb(109 92 255 / 16%) !important;
+}
 
 .tool-icon {
   display: inline-flex;

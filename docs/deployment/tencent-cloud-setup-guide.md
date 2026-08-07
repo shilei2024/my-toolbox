@@ -174,7 +174,7 @@ ssh -i C:\Users\你的用户名\Downloads\mykey.pem root@<服务器公网IP>
       "Action": ["cos:GetObject"],
       "Effect": "Allow",
       "Principal": { "qcs": ["*"] },
-      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/jobs/*"]
+      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/*"]
     }
   ],
   "Version": "2.0"

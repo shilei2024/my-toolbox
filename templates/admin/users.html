@@ -9,12 +9,14 @@
         <tr>
           <th>ID</th>
           <th>邮箱</th>
+          <th>昵称</th>
           <th>角色</th>
           <th>状态</th>
           <th>注册时间（中国）</th>
           <th>最后登录（中国）</th>
           <th style="min-width: 210px;">专有工具权限</th>
           <th>自定义上限</th>
+          <th>AI 积分</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -23,6 +25,14 @@
           <tr>
             <td>{{ u.id }}</td>
             <td>{{ u.email }}</td>
+            <td>
+              <form action="{{ url_for('admin.set_user_nickname', user_id=u.id) }}" method="post" class="d-flex gap-1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="text" name="nickname" class="form-control form-control-sm" maxlength="80"
+                       value="{{ u.nickname or '' }}" placeholder="未设置" style="max-width: 130px;"/>
+                <button class="btn btn-sm btn-outline-primary">保存</button>
+              </form>
+            </td>
             <td>
               {% if u.is_admin %}<span class="badge bg-primary">管理员</span>{% else %}<span class="badge bg-secondary">用户</span>{% endif %}
               {% if u.plan != 'free' %}<span class="badge bg-info">{{ u.plan }}</span>{% endif %}
@@ -75,12 +85,28 @@
               </details>
             </td>
             <td>
+              <span class="fw-semibold">{{ credits.get(u.id, 0) | round(4) }}</span>
+              <details class="mt-1">
+                <summary class="small text-primary" style="cursor: pointer;">调整</summary>
+                <form action="{{ url_for('admin.set_user_credits', user_id=u.id) }}" method="post" class="d-flex gap-1 mt-1">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <input type="text" name="delta" class="form-control form-control-sm" placeholder="如 +10 或 -5" required style="max-width: 110px;"/>
+                  <button class="btn btn-sm btn-outline-primary">保存</button>
+                </form>
+              </details>
+            </td>
+            <td>
               {% if u.id != current_user.id %}
                 <form action="{{ url_for('admin.toggle_user', user_id=u.id) }}" method="post" class="d-inline">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                   <button class="btn btn-sm btn-outline-{{ 'danger' if u.is_active_user else 'success' }}">
                     {{ '禁用' if u.is_active_user else '启用' }}
                   </button>
+                </form>
+                <form action="{{ url_for('admin.delete_user', user_id=u.id) }}" method="post" class="d-inline"
+                      onsubmit="return confirm('确定删除该用户？将停用账号并匿名化邮箱，历史记录保留。');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
                 </form>
               {% else %}
                 <span class="text-muted small">—</span>

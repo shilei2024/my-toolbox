@@ -46,6 +46,7 @@ class User(UserMixin, db.Model):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active_user: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    nickname: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     plan: Mapped[str] = mapped_column(String(32), default="free", nullable=False)
     # custom_limits: {tool_id: int_limit, ...}; null means use global default
     custom_limits: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -63,6 +64,12 @@ class User(UserMixin, db.Model):
     def custom_limit_map(self) -> dict[str, int]:
         if not self.custom_limits:
             return {}
+
+    @property
+    def display_name(self) -> str:
+        """Nickname when set, otherwise the registered account (email)."""
+        name = (self.nickname or "").strip()
+        return name if name else (self.email or "未设置")
         try:
             return {str(k): int(v) for k, v in json.loads(self.custom_limits).items()}
         except (ValueError, TypeError):

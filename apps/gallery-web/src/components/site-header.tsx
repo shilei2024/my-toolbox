@@ -9,6 +9,7 @@ interface SessionView {
   readonly role: "guest" | "user" | "admin";
   readonly userId?: number;
   readonly email?: string;
+  readonly nickname?: string;
 }
 
 export function SiteHeader() {
@@ -33,7 +34,7 @@ export function SiteHeader() {
     <nav className="nav-links" aria-label="主导航"><Link className="nav-link" href="/gallery">发现</Link><Link className="nav-link" href="/my-images">我的图片</Link><Link className="nav-link" href="/favorites">收藏</Link><Link className="nav-link" href="/pricing">会员</Link></nav>
     <div className="header-actions">
       {session === undefined ? null : authenticated
-        ? <Link className="nav-link auth-link" href="/billing">{session.email || "我的账号"}</Link>
+        ? <Link className="nav-link auth-link" href="/billing">{session.nickname || session.email || "我的账号"}</Link>
         : <Link className="button" href={`/login?next=${encodeURIComponent(returnTo)}`}>登录</Link>}
       {session?.role === "admin" && publicAdminConsoleUrl() !== undefined
         ? <Link className="nav-link auth-link" href={publicAdminConsoleUrl()!}>后台</Link>

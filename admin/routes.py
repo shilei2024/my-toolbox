@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from auth.decorators import admin_required
 from extensions import db
@@ -129,6 +129,16 @@ def users():
         .all()
     )
     user_ids = [user.id for user in items]
+    credits: dict[int, float] = {}
+    if user_ids:
+        try:
+            rows = db.session.execute(
+                text("SELECT user_id, available_amount FROM ai.credit_accounts WHERE user_id IN :ids"),
+                {"ids": tuple(user_ids)},
+            ).all()
+            credits = {int(row[0]): float(row[1]) for row in rows}
+        except Exception:  # noqa: BLE001
+            credits = {}
     private_tool_ids = [tool.id for tool in private_tools]
     grants = set()
     if user_ids and private_tool_ids:
@@ -146,6 +156,7 @@ def users():
         users=items,
         private_tools=private_tools,
         tool_grants=grants,
+        credits=credits,
         page=page,
         per_page=per_page,
         total=total,
@@ -195,6 +206,104 @@ def set_user_limit(user_id: int):
                 return redirect(url_for("admin.users"))
     user.custom_limits = json.dumps(new_map) if new_map else None
     db.session.commit()
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/nickname", methods=["POST"])
+@login_required
+@admin_required
+def set_user_nickname(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    nickname = request.form.get("nickname", "").strip()
+    if len(nickname) > 80:
+        flash("昵称最多 80 个字符。", "danger")
+        return redirect(url_for("admin.users"))
+    user.nickname = nickname or None
+    db.session.commit()
+    from auth.routes import _sync_gallery_display_name  # noqa: PLC0415
+
+    _sync_gallery_display_name(user.id, user.display_name)
+    flash(f"用户 {user.email} 的昵称已更新。", "success")
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/credits", methods=["POST"])
+@login_required
+@admin_required
+def set_user_credits(user_id: int):
+    from datetime import datetime, timezone  # noqa: PLC0415
+    from sqlalchemy import text  # noqa: PLC0415
+
+    user = db.session.get(User, user_id) or abort(404)
+    raw = request.form.get("delta", "").strip()
+    try:
+        delta = round(float(raw), 4)
+        if not (-1000000000 <= delta <= 1000000000):
+            raise ValueError
+    except ValueError:
+        flash("积分调整必须是 -1000000000 ~ 1000000000 的数字。", "danger")
+        return redirect(url_for("admin.users"))
+    if delta == 0:
+        flash("调整值为 0，未做任何修改。", "warning")
+        return redirect(url_for("admin.users"))
+
+    idempotency = f"admin-credit:{user.id}:{datetime.now(timezone.utc).isoformat()}"
+    try:
+        with db.engine.begin() as conn:
+            current = conn.execute(
+                text("SELECT available_amount FROM ai.credit_accounts WHERE user_id = :uid FOR UPDATE"),
+                {"uid": user.id},
+            ).scalar() or 0
+            new_available = round(float(current) + delta, 4)
+            if new_available < 0:
+                flash("调整后积分不能为负数（当前可用积分不足）。", "danger")
+                return redirect(url_for("admin.users"))
+            conn.execute(
+                text(
+                    "INSERT INTO ai.credit_accounts (user_id, available_amount, reserved_amount, lifetime_granted, lifetime_spent, version, created_at, updated_at) "
+                    "VALUES (:uid, :delta, 0, GREATEST(:delta, 0), 0, 0, now(), now()) "
+                    "ON CONFLICT (user_id) DO UPDATE SET "
+                    "available_amount = ai.credit_accounts.available_amount + :delta, "
+                    "lifetime_granted = ai.credit_accounts.lifetime_granted + GREATEST(:delta, 0), "
+                    "version = ai.credit_accounts.version + 1, updated_at = now()"
+                ),
+                {"uid": user.id, "delta": delta},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO ai.credit_ledger_entries (user_id, entry_type, delta_available, delta_reserved, available_after, reserved_after, source_type, source_ref, idempotency_key, metadata) "
+                    "VALUES (:uid, 'admin_adjustment', :delta, 0, :after, 0, 'admin', :ref, :idem, jsonb_build_object('operator_user_id', :op))"
+                ),
+                {"uid": user.id, "delta": delta, "after": new_available, "ref": f"user:{user.id}", "idem": idempotency, "op": current_user.id},
+            )
+            db.session.rollback()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        flash("积分调整失败，请确认 ai 数据库表已迁移（0005）。", "danger")
+        return redirect(url_for("admin.users"))
+    flash(f"用户 {user.email} 积分调整 {delta:+,}，当前可用 {new_available:,.4f}。", "success")
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_user(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    if user.id == current_user.id:
+        flash("不能删除自己的账号。", "warning")
+        return redirect(url_for("admin.users"))
+    if user.is_admin:
+        flash("不能删除管理员账号。", "warning")
+        return redirect(url_for("admin.users"))
+    # Soft delete: disable login and anonymize the account while preserving
+    # audit history, usage logs and generated artwork attribution.
+    user.is_active_user = False
+    user.email = f"deleted-{user.id}@invalid.local"
+    user.nickname = None
+    user.password_hash = "!"
+    db.session.commit()
+    flash(f"用户 #{user.id} 已删除（停用并匿名化，历史记录保留）。", "success")
     return redirect(url_for("admin.users"))
 
 
