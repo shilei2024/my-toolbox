@@ -27,3 +27,8 @@ mindfulpenpal.com {
 
   reverse_proxy host.docker.internal:8000
 }
+
+# Canonicalize www to the apex domain so www.mindfulpenpal.com works too.
+www.mindfulpenpal.com {
+  redir https://mindfulpenpal.com{uri} permanent
+}
