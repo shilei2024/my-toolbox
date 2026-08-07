@@ -460,6 +460,8 @@ def ocr():
     if not img_bytes:
         return jsonify(error="图片数据为空"), 400
 
+    ocr_errors: list[str] = []
+
     # --- 策略 1: 腾讯云 OCR（国内推荐；复用已有腾讯云账号密钥） ---
     tencent_id = os.environ.get("OCR_SECRET_ID", "").strip() or os.environ.get("COS_SECRET_ID", "").strip()
     tencent_key = os.environ.get("OCR_SECRET_KEY", "").strip() or os.environ.get("COS_SECRET_KEY", "").strip()
@@ -472,10 +474,13 @@ def ocr():
                     commit_usage("reimbursement")
                     return jsonify(success=True, data=result, provider="tencent")
                 current_app.logger.warning("Tencent OCR returned empty fields, trying fallbacks...")
+                ocr_errors.append("腾讯云识别无结果")
         except Exception as e:
             current_app.logger.warning("Tencent OCR error: %s", e)
+            ocr_errors.append(f"腾讯云: {e}")
     else:
         current_app.logger.info("Tencent OCR keys not configured, skipping...")
+        ocr_errors.append("腾讯云未配置")
 
     # --- 策略 2: 百度云 OCR（增值税发票识别 + 通用 OCR） ---
     baidu_key = os.environ.get("BAIDU_OCR_API_KEY", "").strip()
@@ -491,10 +496,13 @@ def ocr():
                     return jsonify(success=True, data=result, provider="baidu")
                 else:
                     current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
+                    ocr_errors.append("百度识别无结果")
         except Exception as e:
             current_app.logger.warning("Baidu OCR error: %s", e)
+            ocr_errors.append(f"百度: {e}")
     else:
         current_app.logger.info("Baidu OCR keys not configured, skipping...")
+        ocr_errors.append("百度未配置")
 
     # --- 策略 3: PaddleOCR 本地识别 ---
     try:
@@ -537,8 +545,10 @@ def ocr():
                     pass
     except Exception as e:
         current_app.logger.warning("PaddleOCR fallback error: %s", e)
+        ocr_errors.append(f"PaddleOCR: {e}")
 
     # --- 策略 4: 模拟降级（success=false，前端据此提示手动填写） ---
+    note = "、".join(ocr_errors)[:400] or "未配置 OCR 服务或识别失败"
     return jsonify(
         success=False,
         data={
@@ -547,7 +557,7 @@ def ocr():
             "tax_amount": "", "total_amount": "", "description": "",
         },
         provider="mock",
-        note="未配置 OCR 服务或识别失败，请手动填写。",
+        note=f"{note}。请手动填写。",
     )
 
 
