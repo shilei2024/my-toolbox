@@ -23,6 +23,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import (
     Flask,
@@ -63,6 +64,19 @@ def _has_external_database() -> bool:
     an unparseable DSN.
     """
     return _auto_db_url().startswith(("postgres://", "postgresql://"))
+
+
+def _redact_db_uri(uri: str) -> str:
+    """Return a database URI with the password removed for public diagnostics."""
+    parts = urlsplit(uri)
+    if parts.password:
+        netloc = parts.hostname or ""
+        if parts.port:
+            netloc += f":{parts.port}"
+        if parts.username:
+            netloc = f"{parts.username}:****@{netloc}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return uri[:60]
 
 
 def create_app() -> Flask:
@@ -197,7 +211,7 @@ def create_app() -> Flask:
             sys_version=sys.version.split()[0],
             on_vercel=_ON_VERCEL,
             readonly_fs=_is_readonly_fs,
-            db_uri_head=str(app.config["SQLALCHEMY_DATABASE_URI"])[:60],
+            db_uri_head=_redact_db_uri(str(app.config["SQLALCHEMY_DATABASE_URI"])),
             yaml_tool_count=diag.get("yaml_count"),
             registered_count=len(diag.get("registered", [])),
             failed_count=len(diag.get("failed", {})),
