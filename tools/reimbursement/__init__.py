@@ -538,9 +538,9 @@ def ocr():
     except Exception as e:
         current_app.logger.warning("PaddleOCR fallback error: %s", e)
 
-    # --- 策略 4: 模拟降级 ---
+    # --- 策略 4: 模拟降级（success=false，前端据此提示手动填写） ---
     return jsonify(
-        success=True,
+        success=False,
         data={
             "invoice_number": "", "invoice_date": "",
             "seller_name": "", "amount_excluding_tax": "",
