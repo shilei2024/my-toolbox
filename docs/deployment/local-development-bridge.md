@@ -1,5 +1,22 @@
 # 本地开发：主站 → Mavis Gallery 登录桥与完整服务链
 
+## 本机前置条件（缺一不可，否则 dev-up 会直接报错）
+
+- **Node.js 22 LTS 或更新**（`node --version` 能输出版本号；仓库脚本使用
+  `--env-file-if-exists`，旧版 Node 会报 `bad option`）
+- **Python 3.11+**，且已创建虚拟环境并安装依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+```
+
+- **Redis**：`dev-up.ps1` 会自动用 Docker 启动（无 Docker 时需自行准备，
+  并在 `services/generation-service/.env` 配置 `REDIS_URL`）
+- **本地 PostgreSQL**（推荐 18，端口 5433，库 `mavis_dev`，用户
+  `mavis`/`mavis-dev-local`）；初始化命令见下方“首次初始化本地数据库”。
+  不想手动建库时，也可以自行用 Docker 映射一个 5433 端口的 postgres 容器。
+
 ## 目标
 
 本机跑通完整链路：
@@ -21,6 +38,9 @@
 ```powershell
 # 1. 补齐缺失的环境变量（幂等，只打印变量名，不打印值）
 .\scripts\dev\setup-local-env.ps1
+
+# 1b.（首次开发）把 DATABASE_URL 指向本地库；会覆盖现有值，只用于本地
+.\scripts\dev\setup-local-env.ps1 -SetLocalDbUrl
 
 # 2. 启动整套服务（自动检测 Redis；需要 Docker 或本机已有 Redis）
 .\scripts\dev\dev-up.ps1
@@ -95,3 +115,6 @@ psql "postgresql://mavis:mavis-dev-local@127.0.0.1:5433/mavis_dev" -c "UPDATE ai
 | 工作流列表 503 | Generation API 未启动，或 `DATABASE_URL` 不可达 |
 | 任务一直 pending | Dispatcher 未启动、Redis 不可达，或 outbox 未发布 |
 | 任务 failed `internal_error` | 查看 `.tmp/dev-worker.err.log`；COS 上传失败通常是密钥无效，或元数据头含下划线（已修复为 `job-id` 形式） |
+| 启动时报 `.venv\Scripts\python.exe` 不存在 | 还没建 Python 虚拟环境，按“本机前置条件”执行 `python -m venv .venv` 并安装依赖 |
+| 启动时报 npm 不在 PATH | 未安装 Node.js 22+，或安装后没重开终端 |
+| 启动时警告 DATABASE_URL 指向外部主机 | 本地开发连了生产库，先执行 `setup-local-env.ps1 -SetLocalDbUrl` 切到本地库 |

@@ -25,7 +25,18 @@ if (Test-Path $pidFile) {
     exit 1
 }
 
-& (Join-Path $PSScriptRoot "setup-local-env.ps1")
+& (Join-Path $PSScriptRoot "setup-local-env.ps1") -RefreshUrls
+
+# Clear prerequisites instead of silently starting processes that die at once.
+$venvPython = Join-Path $root ".venv\Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    Write-Error "Python virtual environment is missing at $venvPython. Create it first:`n  python -m venv .venv`n  .\.venv\Scripts\pip install -r requirements.txt"
+    exit 1
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    Write-Error "npm was not found on PATH. Install Node.js 22 LTS or newer, reopen the terminal, then retry."
+    exit 1
+}
 
 function Get-EnvValue {
     param([string]$Path, [string]$Key)
@@ -43,6 +54,15 @@ if (-not $apiPort) { $apiPort = "3101" }
 $redisPort = "6380"
 $redisUrl = Get-EnvValue -Path (Join-Path $root "services\generation-service\.env") -Key "REDIS_URL"
 if ($redisUrl -match ':(\d+)/') { $redisPort = $matches[1] }
+
+if (-not $redisUrl) {
+    Write-Error "REDIS_URL is missing in services/generation-service/.env. Run .\scripts\dev\setup-local-env.ps1 first."
+    exit 1
+}
+$generationDatabaseUrl = Get-EnvValue -Path (Join-Path $root "services\generation-service\.env") -Key "DATABASE_URL"
+if ($generationDatabaseUrl -and $generationDatabaseUrl -notmatch "127\.0\.0\.1|localhost|host\.docker\.internal") {
+    Write-Warning "services/generation-service/.env DATABASE_URL points to an EXTERNAL host. Local development should use a local database: run .\scripts\dev\setup-local-env.ps1 -SetLocalDbUrl first."
+}
 
 if (-not $SkipRedis) {
     $redisAlreadyUp = $false

@@ -15,7 +15,8 @@ param(
     [int]$ApiPort = 3101,
     [int]$RedisPort = 6380,
     [switch]$ForceSecrets,
-    [switch]$RefreshUrls
+    [switch]$RefreshUrls,
+    [switch]$SetLocalDbUrl
 )
 $ErrorActionPreference = "Stop"
 
@@ -133,6 +134,14 @@ $runtimeDefaults = [ordered]@{
 }
 foreach ($entry in $runtimeDefaults.GetEnumerator()) {
     Ensure-EnvValue -Path $generationEnv -Key $entry.Key -Value $entry.Value -Force $RefreshUrls
+}
+
+if ($SetLocalDbUrl) {
+    Write-Host "== Local database URLs =="
+    $localDb = "postgresql://mavis:mavis-dev-local@127.0.0.1:5433/mavis_dev"
+    Ensure-EnvValue -Path $flaskEnv -Key "DATABASE_URL" -Value $localDb -Force $true
+    Ensure-EnvValue -Path $generationEnv -Key "DATABASE_URL" -Value $localDb -Force $true
+    Write-Warning "DATABASE_URL now points to the LOCAL database (127.0.0.1:5433/mavis_dev). Never run this against production data."
 }
 
 Write-Host ""

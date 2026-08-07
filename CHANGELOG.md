@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.11 · 本地开发启动诊断与安全加固 / 2026-08-07
+- **dev-up 前置检查**：启动前明确检查 Python 虚拟环境（`.venv`）与 npm 是否
+  存在，缺失时直接给出修复命令，不再静默拉起一个立刻死掉的服务，避免
+  “网站起不来”且无任何提示。
+- **端口与 URL 一致性**：`dev-up.ps1` 现在以 `-RefreshUrls` 调用
+  `setup-local-env.ps1`，HOST/PORT/APP_BASE_URL 与各服务 URL 始终对齐，
+  不会被残留的旧 `.env`（例如 `PORT=8000` + `APP_BASE_URL=example.com`）
+  带偏。
+- **本地库安全开关**：新增 `setup-local-env.ps1 -SetLocalDbUrl`，一键把
+  Flask 与 Generation Service 的 `DATABASE_URL` 指向本地库
+  （127.0.0.1:5433/mavis_dev）；dev-up 检测到外部数据库地址时给出强警告，
+  防止本地开发误操作生产数据。
+- **文档**：`local-development-bridge.md` 增加本机前置条件（Node 22+、
+  Python venv、Redis、本地 PostgreSQL）与对应故障排查项。
+
 ## 0.5.10 · 数据库操作量优化（避免打满托管库免费额度）/ 2026-08-06
 - **Dispatcher 出站队列空闲退避**：连续空转时轮询间隔从 1 秒指数退避到
   `GENERATION_OUTBOX_IDLE_MAX_MS`（默认 30 秒），队列出现消息时立即恢复；
