@@ -64,16 +64,16 @@ class User(UserMixin, db.Model):
     def custom_limit_map(self) -> dict[str, int]:
         if not self.custom_limits:
             return {}
+        try:
+            return {str(k): int(v) for k, v in json.loads(self.custom_limits).items()}
+        except (ValueError, TypeError):
+            return {}
 
     @property
     def display_name(self) -> str:
         """Nickname when set, otherwise the registered account (email)."""
         name = (self.nickname or "").strip()
         return name if name else (self.email or "未设置")
-        try:
-            return {str(k): int(v) for k, v in json.loads(self.custom_limits).items()}
-        except (ValueError, TypeError):
-            return {}
 
     def limit_for(self, tool_id: str, default: int) -> int:
         return self.custom_limit_map.get(tool_id, default)

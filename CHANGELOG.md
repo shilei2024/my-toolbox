@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.9 · 修复自定义配额用户登录后首页崩溃 / 2026-08-08
+- **根因**：`User.custom_limit_map` 在 `custom_limits` 非空时误返回 `None`
+  （JSON 解析代码被并入 `display_name`），登录后首页渲染 `remaining_for()`
+  抛 `AttributeError`，表现为非管理员账号登录后无法进入网站。
+- **修复**：将解析逻辑移回 `custom_limit_map`，`display_name` 只保留昵称逻辑；
+  新增回归测试覆盖“带自定义配额的用户可正常登录并渲染首页”。
+- **测试加固**：`tests/run_tests.py` 强制使用内存数据库，避免环境变量
+  导致测试误写本地 `instance/app.db`。
+
 ## 0.7.8 · 报销 OCR 闭环与项目收尾整理 / 2026-08-08
 - **OCR 问题闭环**：百度密钥填错已修正，发票上传 → OCR → 回填链路验证通过；
   识别顺序为 百度 → 腾讯云 → 手动填写，失败原因直接显示在页面。
