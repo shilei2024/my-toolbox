@@ -113,8 +113,10 @@ def _write_reports():
     print("=" * 72)
     return out_json, out_html
 
-# 使用内存数据库，避免污染本地 app.db
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+# 使用内存数据库，避免污染本地 app.db。
+# 这里必须强制赋值（而不是 setdefault）：如果宿主机环境或 .env 已注入
+# DATABASE_URL，setdefault 不会覆盖它，测试就会悄悄落到真实数据库上。
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 # 开发模式：关闭 secure cookie，便于测试客户端携带 session
 os.environ["FLASK_ENV"] = "development"
 # 关闭后台调度（避免测试进程挂起 / 拉起线程）
