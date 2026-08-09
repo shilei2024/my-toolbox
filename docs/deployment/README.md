@@ -28,6 +28,7 @@
 | 10 | [支付、积分、会员配置与部署](phase-10-configuration-and-deployment.md) | 同左 |
 | M4 | [Gallery 图片/视频生成部署](m4-media-generation.md) | 同左 |
 | M4 本地 | [Gallery 调用本机 ComfyUI 生图/生视频](gallery-local-comfyui.md) | 同左 |
+| M4 Staging | [生图/生视频 Staging 验收手册（逐步执行版）](m4-staging-runbook.md) | 同左 |
 
 ## 部署前必须准备
 

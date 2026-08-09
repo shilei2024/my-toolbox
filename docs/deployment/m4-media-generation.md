@@ -2,6 +2,8 @@
 
 本功能会影响在线创作 API 和 Worker，但迁移后的火山方舟 Provider 默认禁用。必须先在 Staging 验收，生产启用需要单独审批。
 
+> 需要一步步照着做的操作者，请直接使用 [M4 Staging 验收手册（逐步执行版）](m4-staging-runbook.md)。
+
 若目标是让 Gallery 调用开发电脑上的 ComfyUI，请先按[本机 ComfyUI 生图/生视频联调指南](gallery-local-comfyui.md)执行；本页其余内容仍是 Staging/生产发布门禁。
 
 ## 1. 为什么要先准备这些资源
