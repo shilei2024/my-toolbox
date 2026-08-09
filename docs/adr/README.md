@@ -29,3 +29,4 @@
 | [0019](0019-phase-d-code-quality-and-governance.md) | Phase D Code Quality and Governance Cleanup |
 | [0020](0020-m3-task-center-adapter-contract.md) | M3 Task Center Adapter Contract |
 | [0021](0021-m5-unified-queue-observability.md) | M5 Unified Queue Observability |
+| [0022](0022-gallery-mainland-access-via-tencent-self-hosting.md) | Gallery mainland access via Tencent self-hosting |

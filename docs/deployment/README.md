@@ -5,6 +5,7 @@
 ## 平台部署标准
 
 - [Vercel 前端部署](vercel-deployment.md)
+- [Gallery 国内访问修复：腾讯云自托管](gallery-tencent-self-hosting.md)
 - [腾讯云 CVM 后端部署](tencent-backend-deployment.md)
 - [腾讯云资源准备指南（小白版）](tencent-cloud-setup-guide.md)
 - [环境变量与密钥管理](environment-variables.md)

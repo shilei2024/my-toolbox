@@ -1,5 +1,10 @@
 # 打通 Gallery 创作闭环：Cloudflare 隧道完整手册（2026-08-06 最新）
 
+> **范围更新（ADR 0022）**：生产 Gallery 已改为腾讯云自托管，`gallery` 子域名应使用
+> 指向 CVM 的 A 记录。本文只适用于 Vercel 到 `api-ai` 的跨境 API 连通性问题；其中涉及
+> `gallery → cname.vercel-dns.com` 的旧步骤不再用于生产。Gallery 的上线和回滚请改按
+> [Gallery 国内访问修复：腾讯云自托管](gallery-tencent-self-hosting.md)。
+
 > 适用场景：Vercel 的 Gallery 调用 `api-ai.mindfulpenpal.com` 持续 503
 > （`fetch failed` / 超时），而海外节点、服务器本机都能访问；Cloudflare 直连时出现
 > **Error 525（TLS 握手失败）**。说明海外大型云网络直连上海服务器不稳定，需要用
