@@ -34,11 +34,12 @@ jobs:
           python -m pip check
       - name: Run Python test suite
         env:
+          DATABASE_URL: sqlite:///:memory:
           VERCEL: "1"
           SECRET_KEY: ci-only-secret-not-for-production
           ADMIN_EMAIL: ci-admin@example.test
           ADMIN_PASSWORD: ci-only-password
-        run: python -m unittest discover --start-directory tests --pattern "test_*.py"
+        run: python -m unittest discover --start-directory tests --top-level-directory . --pattern "test_*.py"
 
   generation-service:
     name: Generation Service

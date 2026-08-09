@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.17 · 修复 CI 三个任务失败 / 2026-08-09
+- **Gallery Web / Generation Service 依赖审计失败**：
+  - Gallery：postcss 间接依赖的 `nanoid@3.3.16` 命中高危
+    GHSA-2v37-7h3g-55p8，通过 overrides 固定为 `3.3.17`。
+  - Generation：`image-size` 无修复版本（ICNS / JXL / HEIF 解析器存在死循环
+    DoS），改用 `sharp` 读取图片尺寸，覆盖 Base64 输出与 ComfyUI 本地文件两条
+    路径；三个同步 Provider 调用点改为 `await`。
+- **Python 测试套件失败**：
+  - `config.py` 此前只接受 Postgres 形式的 `DATABASE_URL`，导致
+    `sqlite:///:memory:` 被忽略、unittest 进程共享 `instance/app.db`，admin id
+    断言变得依赖执行顺序；现在 `sqlite://` 也作为合法覆盖值。
+  - 新增 `tests/__init__.py` 并让 CI 使用 `--top-level-directory .`，配合
+    `DATABASE_URL=sqlite:///:memory:` 保证测试隔离。
+  - 腾讯云 OCR 错误不再把上游 `Message` 拼进异常，避免泄漏响应内容。
+- **验证**：Python 112 项测试全部通过；Generation Service typecheck + 87 项
+  测试通过；Gallery lint / 生产构建通过；两个项目 `npm install` 审计均为
+  0 漏洞。
+
 ## 0.7.16 · 修复 Gallery 页面显示不完整（CSP 拦截流式渲染）/ 2026-08-09
 - **根因**：`next.config.ts` 静态设置的 CSP `default-src 'self'` 会拦截 Next.js
   App Router 流式渲染用来揭示正文的内联脚本（`$RS` 等），页面打开后停留在头部 +
