@@ -111,6 +111,13 @@ UPDATE ai.workflows SET is_enabled = true WHERE slug = 'api-ark-video-doubao-see
 “生视频 / API 模型”Tab。内部 `/v1/generation/workflows` 需要 BFF 签名的 Viewer
 Context，不要用浏览器或 curl 直接访问。
 
+也可以用冒烟脚本直接提交（要求 `SMOKE_USER_ID` 对应账号有足够积分）：
+
+```sh
+cd services/generation-service
+SMOKE_USER_ID=<测试用户id> SMOKE_API_BASE_URL=https://api-ai-staging.example.com npm run smoke:comfyui
+```
+
 ## 4. 端到端验收（测试账号）
 
 ### 4.1 提交任务
