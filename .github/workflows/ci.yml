@@ -34,7 +34,7 @@ jobs:
           python -m pip check
       - name: Run Python test suite
         env:
-          DATABASE_URL: sqlite:///:memory:
+          DATABASE_URL: "sqlite:///:memory:"
           VERCEL: "1"
           SECRET_KEY: ci-only-secret-not-for-production
           ADMIN_EMAIL: ci-admin@example.test
