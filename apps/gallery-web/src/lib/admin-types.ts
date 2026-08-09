@@ -50,6 +50,7 @@ export interface AdminWorkflowItem {
   readonly name: string;
   readonly slug: string;
   readonly category: string;
+  readonly mode: "workflow" | "api";
   readonly isEnabled: boolean;
   readonly activeVersion?: number;
   readonly bindingCount: number;

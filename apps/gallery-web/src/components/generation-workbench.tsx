@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BillingSummary } from "@/lib/billing-types";
-import type { GenerationPage, GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
+import type { GenerationMode, GenerationPage, GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
 
 type LoadState = "loading" | "ready" | "error";
 const terminal = new Set(["completed", "failed", "cancelled"]);
@@ -17,12 +17,13 @@ export function GenerationWorkbench() {
   const [recentState, setRecentState] = useState<LoadState>("loading");
   const [previewUrls, setPreviewUrls] = useState<Readonly<Record<string, string>>>({});
   const [selected, setSelected] = useState("");
+  const [mode, setMode] = useState<GenerationMode>("workflow");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
   const [count, setCount] = useState(1);
-  const [visibility, setVisibility] = useState<GenerationVisibility>("private");
-  const [promptVisibility, setPromptVisibility] = useState<"public" | "hidden">("hidden");
+  const [visibility, setVisibility] = useState<GenerationVisibility>("public");
+  const [promptVisibility, setPromptVisibility] = useState<"public" | "hidden">("public");
   const [creditTier, setCreditTier] = useState<"free" | "member">("free");
   const [generation, setGeneration] = useState<GenerationView>();
   const [billing, setBilling] = useState<BillingSummary>();
@@ -75,15 +76,27 @@ export function GenerationWorkbench() {
     return { workflows, session: parseSession(sessionBody), billing: billingBody };
   }, []);
 
+  const selectWorkflow = useCallback((item: GenerationWorkflow) => {
+    setSelected(item.slug);
+    setSize(initialSize(item));
+    setCount(initialCount(item));
+    setVisibility(item.defaults.visibility ?? "public");
+    setPromptVisibility(item.defaults.promptVisibility ?? "public");
+  }, []);
+
   const applyComposerData = useCallback((data: Awaited<ReturnType<typeof fetchComposerData>>) => {
     setWorkflows(data.workflows);
-    setSelected(data.workflows[0]!.slug);
-    setSize(initialSize(data.workflows[0]!));
-    setCount(initialCount(data.workflows[0]!));
-    setVisibility(data.workflows[0]!.defaults.visibility);
+    setMode(data.workflows[0]!.mode ?? "workflow");
+    selectWorkflow(data.workflows[0]!);
     setSession(data.session);
     setBilling(data.billing);
-  }, []);
+  }, [selectWorkflow]);
+
+  const switchMode = useCallback((next: GenerationMode) => {
+    setMode(next);
+    const first = workflows.find((item) => (item.mode ?? "workflow") === next);
+    if (first) selectWorkflow(first);
+  }, [selectWorkflow, workflows]);
 
   useEffect(() => {
     let active = true;
@@ -116,6 +129,7 @@ export function GenerationWorkbench() {
   }
 
   const workflow = useMemo(() => workflows.find((item) => item.slug === selected), [workflows, selected]);
+  const visibleWorkflows = useMemo(() => workflows.filter((item) => (item.mode ?? "workflow") === mode), [mode, workflows]);
   const estimate = workflow ? (Number(workflow.creditCost) * count).toFixed(4).replace(/\.0+$/, "") : "—";
   const loggedIn = (session !== undefined && session.role !== "guest") || billing?.account !== undefined;
 
@@ -195,11 +209,13 @@ export function GenerationWorkbench() {
   }
 
   function retryTask(item: GenerationView) {
-    if (!workflows.some((entry) => entry.slug === item.workflowSlug)) {
+    const target = workflows.find((entry) => entry.slug === item.workflowSlug);
+    if (!target) {
       setMessage("该创作方式当前不可用，无法回填重试。");
       return;
     }
-    setSelected(item.workflowSlug);
+    setMode(target.mode ?? "workflow");
+    setSelected(target.slug);
     setSize(`${item.width}x${item.height}`);
     setCount(item.count);
     setVisibility(item.visibility);
@@ -217,10 +233,17 @@ export function GenerationWorkbench() {
 
     <div className="workbench-grid">
       <form className="composer-panel" aria-label="AI 生图创作参数" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        <div className="panel-heading"><div><span className="step-index">01</span><h2>选择创作方式</h2></div><span className="panel-hint">工作流决定画面的基础能力</span></div>
-        {loadState === "loading" ? <div className="workflow-loading">正在读取平台工作流…</div> : loadState === "error" ? <div className="inline-error-row"><div className="inline-error">{message}</div><button className="button" type="button" onClick={retryLoad}>重试</button></div> : <div className="workflow-grid" role="radiogroup" aria-label="创作方式">
-          {workflows.map((item) => <label className="workflow-option" key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => { setSelected(item.slug); setSize(initialSize(item)); setCount(initialCount(item)); }} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small></label>)}
-        </div>}
+        <div className="panel-heading"><div><span className="step-index">01</span><h2>选择创作方式</h2></div><span className="panel-hint">工作流与 API 模型分开选择</span></div>
+        {loadState === "loading" ? <div className="workflow-loading">正在读取平台工作流…</div> : loadState === "error" ? <div className="inline-error-row"><div className="inline-error">{message}</div><button className="button" type="button" onClick={retryLoad}>重试</button></div> : <>
+          <div className="creation-mode-tabs" role="tablist" aria-label="创作方式分类">
+            {(["workflow", "api"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`mode-tab${mode === value ? " active" : ""}`} onClick={() => switchMode(value)}>{value === "workflow" ? "工作流" : "API 模型"}<span className="mode-count">{workflows.filter((item) => item.mode === value).length}</span></button>)}
+          </div>
+          {visibleWorkflows.length === 0
+            ? <div className="workflow-loading">该分类暂无可用方式，请切换分类或稍后再试。</div>
+            : <div className="workflow-grid" role="radiogroup" aria-label={mode === "workflow" ? "工作流创作方式" : "API 模型创作方式"}>
+              {visibleWorkflows.map((item) => <label className="workflow-option" key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small></label>)}
+            </div>}
+        </>}
 
         <div className="composer-section"><div className="panel-heading compact"><div><span className="step-index">02</span><h2>描述你的画面</h2></div><span className="panel-hint">建议写清主体、环境、光线和质感</span></div>
           <label className="prompt-field"><span className="sr-only">画面描述</span><textarea required maxLength={2000} rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="例如：夏日清晨的江南庭院，白墙黛瓦，薄雾穿过竹林，柔和自然光，安静而克制的电影质感……" /><small>{prompt.length} / 2000</small></label>

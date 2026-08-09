@@ -69,3 +69,16 @@ sequenceDiagram
 - 工作台登录态以 `/api/me/session` 为准，计费摘要只做余额展示；服务不可用时错误文案统一本地化，游客与登录态有明确区分，首页仅保留"创作 + 预览"核心内容。
 
 回滚：本变更不涉及数据库迁移与任务/积分数据；回滚服务端 `create` 校验与 Workflow 字段、前端工作台即可，无数据风险。
+
+## M1.5 工作流 / API 分开与公开默认值
+
+创作目录通过 `ai.workflows.mode` 分成「工作流」与「API 模型」两类：既有风格工作流
+保持 `workflow`；每个启用 Provider 模型自动生成 `api` 模式工作流（唯一 binding）。
+`GET /v1/generation/workflows` 支持 `?mode=` 过滤，前端 Tab 分开选择，统一后台显示
+模式。API 模式仍然复用 workflow version + binding + 队列/Worker，不引入第二套任务
+语义；浏览器仍只提交 `workflowSlug`，Provider/model 在服务端 binding 解析，密钥不
+进前端。新任务默认 `visibility=public`、`prompt_visibility=public`，历史作品不回填。
+
+回滚：先回滚 Next.js Tab 与默认值；Generation Service 可回滚 mode 字段/过滤；迁移
+0012 只新增列与目录数据，撤销时禁用 API 工作流或按引用清理，不影响既有任务。
+详见 ADR-0024。
