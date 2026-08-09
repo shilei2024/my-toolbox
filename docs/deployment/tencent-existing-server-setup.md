@@ -10,11 +10,11 @@
 用户浏览器
   ├─ mindfulpenpal.com        → Vercel 上的原网站（Flask：登录/注册/工具）
   │     └─ 首页“AI 作图”卡片 → 跳到 gallery.mindfulpenpal.com/create
-  └─ gallery.mindfulpenpal.com → 腾讯云 Caddy → Gallery Web（Next.js BFF）
-                                                     │
-                                                     │ 内部调用（HMAC 签名）
-                                                     ▼
-                                            腾讯云服务器（Docker）
+  └─ gallery.mindfulpenpal.com → Vercel 上的 Gallery Web（Next.js BFF）
+                                   │
+                                   │ 内部调用（HMAC 签名）
+                                   ▼
+                          腾讯云服务器（Docker）
                             ├─ api（Generation API，3101）
                             ├─ dispatcher（数据库任务 → 队列）
                             ├─ worker（调用 AI Provider、上传 COS）
@@ -33,7 +33,7 @@
 | 服务器系统 | Ubuntu 22.04/24.04 | 已装 Docker/Compose/PostgreSQL |
 | 域名 DNS 托管 | Namecheap（registrar-servers.com） | 子域名解析在 Namecheap 控制台加 |
 | 后端域名 | `api-ai.mindfulpenpal.com` | A 记录 → 服务器 IP |
-| 前端域名 | `gallery.mindfulpenpal.com` | A 记录 → 服务器 IP（Gallery 自托管） |
+| 前端域名 | `gallery.mindfulpenpal.com` | CNAME → Vercel（`cname.vercel-dns.com`） |
 | COS 桶名 / 地域 | 例如 `mindfulpenpal-images` / `ap-shanghai` | 已创建 |
 | COS 密钥 | CAM 子账号 SecretId/SecretKey | 不要用主账号密钥 |
 | 原站数据库 | Vercel Postgres / Neon / 腾讯云 PG | 必须是 PostgreSQL |
@@ -212,19 +212,14 @@ sudo nano /etc/mindfulpenpal.production.env
 | `APP_ENV` | `production` |
 | `PRODUCTION_RELEASE_APPROVED` | 先 `false`，预检前改 `true`（见第 7 步） |
 | `GENERATION_IMAGE` | `mindfulpenpal/generation-service:0.4.0`（本机构建） |
-| `GALLERY_WEB_IMAGE` | `mindfulpenpal/gallery-web:0.4.0`（本机构建） |
 | `POSTGRES_MIGRATION_IMAGE` | `postgres:16-alpine` |
 | `CADDY_IMAGE` | `caddy:2.10-alpine` |
 | `ALLOW_LOCAL_IMAGE_TAGS` | `true`（本机构建镜像时使用；有镜像仓库建议用 digest 并保持 `false`） |
 | `GENERATION_API_DOMAIN` | `api-ai.mindfulpenpal.com` |
-| `GALLERY_WEB_DOMAIN` | `gallery.mindfulpenpal.com` |
 | `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?uselibpqcompat=true&sslmode=require` |
 | `REDIS_URL` | `redis://redis:6379`（compose 内网 Redis） |
 | `ALLOW_PLAINTEXT_REDIS` | `true`（Redis 只在 Docker 内网，不发布公网端口） |
 | `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
-| `GALLERY_SERVICE_BASE_URL` | `https://api-ai.mindfulpenpal.com` |
-| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/internal/gallery/session` |
-| `GALLERY_PUBLIC_ORIGIN` | `https://gallery.mindfulpenpal.com` |
 | `GALLERY_ASSET_HOSTS` | `<桶名>.cos.<地域>.myqcloud.com`（方案 B，见第 8 步） |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` | CAM 子账号密钥 |
 | `COS_BUCKET` / `COS_REGION` | 桶名 / 地域代码（如 `ap-shanghai`） |
@@ -233,9 +228,9 @@ sudo nano /etc/mindfulpenpal.production.env
 | `BILLING_SIGNUP_GRANT` | `10`（新用户送积分） |
 | `OPENAI_API_KEY` / `GEMINI_API_KEY` / `JIMENG_API_KEY` | 至少填一个真实密钥，对应 `*_BASE_URL` 保持默认 |
 
-> 注意：`GALLERY_INTROSPECTION_SECRET` 是 Vercel 主站（Flask）与自托管 Gallery Web
-> 之间共享的独立密钥（至少 32 字节）。Generation Service 不使用它，但服务器上的
-> Gallery 容器需要该值；它必须与 Vercel 主站完全一致。
+> 注意：`GALLERY_INTROSPECTION_SECRET` 不属于服务器环境文件，它是 Vercel 主站（Flask）与
+> Gallery Web 两个项目之间共享的独立密钥（至少 32 字节）。Generation Service 不使用它，
+> 服务器上这一项留空不会影响任何功能；必须配置在 Vercel 的两个项目里且两边完全一致。
 
 > 注意：本地 PostgreSQL 使用自签名证书，Generation Service 的 Node `pg` 驱动默认把
 > `sslmode=require` 当作 `verify-full`，会导致 worker 启动时报 `self-signed certificate`
@@ -254,9 +249,6 @@ openssl rand -hex 32
 cd /opt/mindfulpenpal
 docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
   -t mindfulpenpal/generation-service:0.4.0 services/generation-service
-
-docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
-  -t mindfulpenpal/gallery-web:0.4.0 apps/gallery-web
 ```
 
 拉取另外两个镜像：
@@ -386,12 +378,14 @@ docker compose --env-file /etc/mindfulpenpal.production.env \
 你的域名 NS 是 `registrar-servers.com`（Namecheap 免费 DNS），所以在 Namecheap 控制台加记录：
 
 1. 登录 Namecheap → Domain List → 找到 mindfulpenpal.com → Manage → Advanced DNS。
-2. 回到 Namecheap 添加两条记录：
+2. 先到 Vercel 的 Gallery Web 项目（Settings → Domains）添加
+   `gallery.mindfulpenpal.com`，记下 Vercel 给的 CNAME 目标（通常是 `cname.vercel-dns.com`）。
+3. 回到 Namecheap 添加两条记录：
 
 | Type | Host | Value |
 | --- | --- | --- |
 | A Record | `api-ai` | `<服务器公网IP>` |
-| A Record | `gallery` | `<服务器公网IP>` |
+| CNAME Record | `gallery` | `cname.vercel-dns.com` |
 
 验证（在本地 PowerShell）：
 
@@ -400,8 +394,7 @@ Resolve-DnsName api-ai.mindfulpenpal.com
 Resolve-DnsName gallery.mindfulpenpal.com
 ```
 
-`api-ai` 与 `gallery` 均应返回服务器 IP。DNS 生效一般几分钟到 1 小时。有关低停机切换、验收与
-回滚，按 [Gallery 国内访问修复：腾讯云自托管](gallery-tencent-self-hosting.md) 执行。
+`api-ai` 应返回服务器 IP；`gallery` 应返回 Vercel 地址。DNS 生效一般几分钟到 1 小时。
 
 ## 10. 第 9 步：切换 Vercel 到新数据库并配置 Gallery
 
@@ -424,9 +417,9 @@ Vercel 项目 Settings → Environment Variables → Production：
 
 > 风险提示：`SESSION_COOKIE_DOMAIN` 配错会让整站登录失效。确认登录正常再继续。
 
-### 10.2 Gallery Web（腾讯云 Docker）
+### 10.2 Gallery Web 项目（apps/gallery-web）
 
-在服务器 `/etc/mindfulpenpal.production.env` 配置以下变量：
+Vercel 项目 Settings → Environment Variables → Production 新增：
 
 | 变量 | 值 |
 | --- | --- |
@@ -440,8 +433,13 @@ Vercel 项目 Settings → Environment Variables → Production：
 
 确认该项目 Root Directory 为 `apps/gallery-web`，Production Branch 为 `main`。
 
-然后按 [Gallery 国内访问修复：腾讯云自托管](gallery-tencent-self-hosting.md) 构建镜像、启动容器并
-切换 DNS。Vercel 的 Gallery 项目可保留为回滚备用，但不再承接 `gallery.mindfulpenpal.com` 的生产流量。
+> Vercel 新版界面入口：Project → Settings → Environments → 找到 **Production** 区块 →
+> 在 “Git Branch” 选择 `main` 并保存（旧版在 Settings → Git 的 “Production Branch” 输入框，
+> 新版已迁移到 Environments）。若界面没有下拉框，说明该区域已改用部署管理：
+> 到 Deployments 页找到来自 `main` 的最新部署，点 “Promote to Production” 同样可让生产跟随 main。
+
+Gallery Web 始终部署在 Vercel，不在本服务器运行；`gallery.mindfulpenpal.com` 的 DNS
+保持 CNAME → `cname.vercel-dns.com`。
 
 ## 11. 第 10 步：启用 AI Provider 与验收
 

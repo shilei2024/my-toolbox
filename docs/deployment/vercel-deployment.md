@@ -1,5 +1,12 @@
 # Vercel 前端部署指南
 
+## 部署边界（2026-08-09 起）
+
+Gallery Web（`apps/gallery-web`）**只部署在 Vercel**，不部署到腾讯云服务器（见
+ADR-0023）。`gallery.mindfulpenpal.com` 的 DNS 保持 CNAME → `cname.vercel-dns.com`；
+腾讯云服务器只运行 Generation Service 与 `api-ai` 入口。服务器清理步骤见
+[Gallery 部署：仅 Vercel](gallery-tencent-self-hosting.md)。
+
 ## 安全目标
 
 `mindfulpenpal.com` 只由 `main` 触发 Production Deployment。所有其他分支生成 Preview，不改变生产域名。Vercel 官方将 Local、Preview、Production 分开，非 Production Branch 的 push/PR 默认生成 Preview；Production Branch 的 push/merge 才更新生产域名。[Vercel Environments](https://vercel.com/docs/deployments/environments)
