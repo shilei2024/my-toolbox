@@ -99,6 +99,8 @@ export class ComfyUIProvider implements GenerationProvider {
       seed: request.seed ?? configured("seed") ?? randomInt(0, 2_147_483_647),
       steps: configured("steps"),
       cfg: configured("cfg"),
+      mu: configured("mu"),
+      std: configured("std"),
       sampler: configured("sampler"),
       scheduler: configured("scheduler"),
       model: binding.providerModel ?? configured("model"),
