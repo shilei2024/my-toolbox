@@ -240,15 +240,14 @@ rediss://:密码@Redis内网或公网地址:端口
 | --- | --- | --- |
 | `api-ai` | A | CVM 公网 IP |
 | `img`（方案 A 才需要） | CNAME | CDN 分配的 CNAME 地址 |
-| `<gallery子域名>` | A | CVM 公网 IP（Gallery 腾讯云自托管） |
+| `<gallery子域名>` | CNAME | `cname.vercel-dns.com`（Vercel 分配的地址） |
 
 预期：`nslookup api-ai.<你的域名>` 返回 CVM IP；`https://api-ai.<你的域名>` 能打开 Caddy 页面/`/health`。
 
 > TLS 证书不用手动申请：Caddy 会自动签发。前提是 DNS 已生效、80/443 安全组放行。
 
-Gallery 的构建、低停机 DNS 切换、验收和回滚以
-[Gallery 国内访问修复：腾讯云自托管](gallery-tencent-self-hosting.md) 为准。Vercel 的
-`cname.vercel-dns.com` 仅保留为回滚目标，不应与 Gallery 的 A 记录同时存在。
+Gallery Web 始终部署在 Vercel（Root Directory 为 `apps/gallery-web`），服务器不运行
+Gallery 容器；`<gallery子域名>` 必须保持 CNAME → `cname.vercel-dns.com`，不要改成 A 记录。
 
 ## 10. 把值填回环境文件
 

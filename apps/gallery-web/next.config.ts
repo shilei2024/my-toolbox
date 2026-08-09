@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Keep the Vercel deployment compatible while also emitting the minimal
-  // Node runtime used by the Tencent Cloud production container.
-  output: "standalone",
   async headers() {
     return [
       {

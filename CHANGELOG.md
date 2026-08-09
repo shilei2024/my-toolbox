@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.18 · Gallery 仅部署 Vercel，撤销腾讯云自托管 / 2026-08-09
+- **决策**：`gallery.mindfulpenpal.com` 保持 CNAME → Vercel；腾讯云服务器不再运行
+  Gallery 容器（ADR-0023 覆盖 ADR-0022）。
+- **代码**：删除 `apps/gallery-web/Dockerfile` 与 `.dockerignore`，移除
+  `next.config.ts` 的 `output: "standalone"`；`deploy/docker-compose.production.yml`
+  移除 gallery 服务与 Caddy 依赖；`Caddyfile.production` 移除 Gallery 站点；
+  `deploy/.env.production.example` 移除 `GALLERY_WEB_*` 等服务器端变量。
+- **文档**：新增 ADR-0023；`gallery-tencent-self-hosting.md` 改为“已撤销 + 服务器
+  清理指南”；腾讯云两篇部署指南、Cloudflare 隧道文档、Vercel 部署指南与 ADR 索引
+  同步更新。
+
 ## 0.7.17 · 修复 CI 三个任务失败 / 2026-08-09
 - **Gallery Web / Generation Service 依赖审计失败**：
   - Gallery：postcss 间接依赖的 `nanoid@3.3.16` 命中高危
