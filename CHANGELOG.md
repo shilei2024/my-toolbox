@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.20 · 修复 /create 整页打开时被 CSP 拦截 / 2026-08-09
+- **根因**：`/create` 被静态预渲染，而 CSP 中间件只在动态渲染时把 nonce 注入
+  页面脚本；静态 HTML 的脚本没有 nonce，配合 `strict-dynamic` CSP 后所有脚本
+  被浏览器拦截，页面停留在静态骨架。从画廊页内部点击“开始创作”是客户端导航，
+  脚本已加载所以正常——这解释了“主站卡片进不去、画廊页点创作正常”。
+- **修复**：`/create` 改为 `force-dynamic` 动态渲染，nonce 正常注入；生产构建
+  路由清单中 `/create` 由 Static 变为 Dynamic。
+
 ## 0.7.19 · 生图「工作流 / API」分开 + 默认公开到画廊 / 2026-08-09
 - **创作目录分离**：`ai.workflows` 新增 `mode`（workflow/api）；每个已启用的
   Provider 模型自动生成一个 API 模式工作流（绑定唯一模型），`/create` 以
