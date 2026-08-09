@@ -1,0 +1,17 @@
+{
+  "1": { "class_type": "UNETLoader", "inputs": { "unet_name": "{{model}}", "weight_dtype": "default" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "Qwen\\qwen3vl_8b_fp8_scaled.safetensors", "type": "ideogram4", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "flux2-vae.safetensors" } },
+  "4": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{prompt}}", "clip": ["2", 0] } },
+  "5": { "class_type": "ConditioningZeroOut", "inputs": { "conditioning": ["4", 0] } },
+  "6": { "class_type": "UNETLoader", "inputs": { "unet_name": "ideogram4_unconditional_fp8_scaled.safetensors", "weight_dtype": "default" } },
+  "7": { "class_type": "CFGOverride", "inputs": { "model": ["1", 0], "cfg": "{{cfg}}", "start_percent": 0.7, "end_percent": 1.0 } },
+  "8": { "class_type": "DualModelGuider", "inputs": { "model": ["7", 0], "positive": ["4", 0], "cfg": 7.0, "model_negative": ["6", 0], "negative": ["5", 0] } },
+  "9": { "class_type": "RandomNoise", "inputs": { "noise_seed": "{{seed}}" } },
+  "10": { "class_type": "KSamplerSelect", "inputs": { "sampler_name": "{{sampler}}" } },
+  "11": { "class_type": "Ideogram4Scheduler", "inputs": { "steps": "{{steps}}", "width": "{{width}}", "height": "{{height}}", "mu": 0.0, "std": 1.75 } },
+  "12": { "class_type": "EmptyFlux2LatentImage", "inputs": { "width": "{{width}}", "height": "{{height}}", "batch_size": 1 } },
+  "13": { "class_type": "SamplerCustomAdvanced", "inputs": { "noise": ["9", 0], "guider": ["8", 0], "sampler": ["10", 0], "sigmas": ["11", 0], "latent_image": ["12", 0] } },
+  "14": { "class_type": "VAEDecode", "inputs": { "samples": ["13", 0], "vae": ["3", 0] } },
+  "15": { "class_type": "SaveImage", "inputs": { "images": ["14", 0], "filename_prefix": "generation/ideogram4" } }
+}
