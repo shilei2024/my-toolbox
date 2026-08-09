@@ -1,7 +1,8 @@
 # Gallery 图片/视频创作工作流实施计划
 
-状态：实现与本地验证完成，PR #28 待评审（`codex/gallery-generation-workflows`）；
-CI 绿并合入 main 后，进入 Staging 真凭据/成本/内容安全验收。
+状态：实现与本地验证完成，PR #28 已开（`codex/gallery-generation-workflows`），
+CI 全绿（Gallery/Generation/Python/PostgreSQL 集成含 phase13 + Vercel Preview）；
+待 Reviewer 合入 main 后，进入 Staging 真凭据/成本/内容安全验收。
 
 ## 目标与验收标准
 
