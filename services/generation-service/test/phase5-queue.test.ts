@@ -8,6 +8,7 @@ import { GenerationQueueProcessor, QueueExecutionError } from "../src/queue/gene
 import { GenerationQueueService, parseCancellationCommand } from "../src/queue/generation-queue-service.ts";
 import { GenerationOutboxDispatcher, type GenerationOutboxEvent } from "../src/queue/outbox-dispatcher.ts";
 import { GenerationQueueObservability } from "../src/queue/queue-observability.ts";
+import { GenerationReconciler } from "../src/queue/generation-reconciler.ts";
 import { GENERATION_QUEUE_JOB_NAME, parseGenerationQueueJobData, QueuePayloadError, type GenerationJobClaim, type GenerationJobRepository, type GenerationQueueJobData, type GenerationQueueResult, type SafeQueueFailure } from "../src/queue/types.ts";
 import { ProductionGenerationPipeline } from "../src/pipeline/production-generation-pipeline.ts";
 import { PollingService } from "../src/pipeline/polling-service.ts";
@@ -39,6 +40,28 @@ test("queue configuration is environment-only and validates Redis and worker lim
   assert.equal(config.queueName, "image-generation");
   assert.equal(config.attempts, 3);
   assert.equal(config.concurrency, 2);
+  assert.equal(config.providerHealthFailureThreshold, 3);
+  assert.equal(config.runningJobTimeoutMs, 900000);
+});
+
+test("stale running-job reconciliation uses locked batches and idempotent ledger release", async () => {
+  const queries: string[] = [];
+  const client = {
+    async query(sql: string) {
+      queries.push(sql);
+      if (sql.includes("FROM ai.generation_jobs") && sql.includes("FOR UPDATE SKIP LOCKED")) {
+        return { rows: [{ id: "job-stale", credits_reserved: "2.0000", credit_tier: "free", cancel_requested_at: null }], rowCount: 1 };
+      }
+      if (sql.includes("FROM ai.credit_reservations")) return { rows: [{}], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    },
+    release() {},
+  };
+  const reconciler = new GenerationReconciler({ connect: async () => client } as never, { info() {}, error() {} }, { runningTimeoutMs: 900_000, batchSize: 50 });
+  assert.equal(await reconciler.runOnce(), 1);
+  assert.equal(queries.some((sql) => sql.includes("FOR UPDATE SKIP LOCKED")), true);
+  assert.equal(queries.some((sql) => sql.includes("ai.release_generation_credits")), true);
+  assert.equal(queries.some((sql) => sql.includes("generation.reconciled")), true);
 });
 
 test("Redis payload contains identifiers only and rejects prompt or provider fields", () => {
@@ -190,7 +213,7 @@ function fakeJob(state: string) {
 }
 
 function queueConfig(): GenerationQueueConfig {
-  return { redisUrl: "redis://localhost:6379/0", prefix: "ai-image", queueName: "image-generation", cancellationChannel: "generation-cancel", concurrency: 2, attempts: 3, backoffMs: 1000, completedRetentionCount: 1000, failedRetentionCount: 5000, retentionAgeSeconds: 604800, maxStalledCount: 1, lockDurationMs: 30000, gracefulShutdownMs: 30000, outboxBatchSize: 100, outboxRetryBaseMs: 1000, outboxRetryMaxMs: 60000 };
+  return { redisUrl: "redis://localhost:6379/0", prefix: "ai-image", queueName: "image-generation", cancellationChannel: "generation-cancel", concurrency: 2, attempts: 3, backoffMs: 1000, completedRetentionCount: 1000, failedRetentionCount: 5000, retentionAgeSeconds: 604800, maxStalledCount: 1, lockDurationMs: 30000, gracefulShutdownMs: 30000, outboxBatchSize: 100, outboxRetryBaseMs: 1000, outboxRetryMaxMs: 60000, providerHealthCheckMs: 60000, providerHealthFailureThreshold: 3, reconciliationIntervalMs: 60000, runningJobTimeoutMs: 900000, reconciliationBatchSize: 50 };
 }
 
 function queueEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {

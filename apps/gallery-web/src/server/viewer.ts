@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import type { ViewerBridge, ViewerContext, ViewerRole } from "@/lib/gallery-types";
+import { hasNamedCookie } from "./cookie-utils";
 
 export const resolveViewerFromRequest = cache(async (): Promise<ViewerContext> => {
   return resolveViewerFromCookieHeader((await cookies()).toString());
@@ -26,6 +27,11 @@ export async function resolveViewerFromCookieHeader(cookieHeader: string): Promi
   if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && isLoopback(endpoint.hostname))) {
     return fallback("unconfigured");
   }
+  const sessionCookieName = process.env.MAVIS_AUTH_SESSION_COOKIE_NAME?.trim() || "mytoolbox_session";
+  // Most anonymous requests have no Flask session at all. Avoid a cross-service
+  // round trip (and its 10-second timeout budget) when the browser cannot
+  // possibly authenticate, while retaining full introspection for any session.
+  if (!hasNamedCookie(cookieHeader, sessionCookieName)) return fallback("guest");
 
   try {
     const response = await fetch(endpoint, {

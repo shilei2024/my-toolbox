@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
+from utils.helpers import bind_download_to_session
 
 tool_bp = Blueprint("word_to_pdf", __name__)
 
@@ -84,7 +85,8 @@ def process():
         pdf.build(story)
         buf.seek(0)
 
-        filename = f"converted_{uuid.uuid4().hex[:8]}.pdf"
+        filename = f"converted_{uuid.uuid4().hex}.pdf"
+        bind_download_to_session(filename)
         upload_dir: Path = current_app.config["UPLOAD_DIR"]
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / filename

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.15 — M5 unified queue observability / 2026-08-09
+- Connected the existing bounded BullMQ/Redis queue snapshot to the unified admin control plane at `GET /v1/admin/queue` and the BFF at `GET /api/admin/queue`.
+- Added an on-demand Queue Monitoring tab showing Redis latency, workers, backlog, active/delayed jobs, and retained terminal counts; it is read-only and admin-only.
+- Added safe `admin.queue_attention` logging for an unavailable queue or queued work without workers, while returning 503 when monitoring is unconfigured. See ADR-0021.
+
+## 0.7.14 — M3 task-center foundation / 2026-08-09
+- Added an additive, source-adapter task summary contract over the existing PostgreSQL-backed Generation Service task record; no dual-write table or queue state was introduced.
+- Added signed, authenticated `GET /v1/tasks` and Gallery BFF `GET /api/tasks`, plus the user-facing Gallery `/tasks` center with task state, credit settlement, errors, and result links.
+- Documented the one-source cursor boundary and the future multi-source adapter path in ADR-0020.
+
+## 0.7.13 — Phase D code quality and governance / 2026-08-09
+- Centralized session-authorized staged-download writes for seven file tools, with path-component rejection and upload-root containment regression coverage.
+- Declared the owner-scoped persisted reimbursement export API as the maintained web contract; retained the incompatible legacy POST export payload only as a temporary compatibility boundary.
+- Removed obsolete Flask AI-provider variables from the root example and README; image-generation configuration remains in the Generation Service example.
+- Retained the tested queue observability primitive for M5 instead of deleting a reusable operational contract. See ADR-0019.
+
+## 0.7.12 — Phase C performance and resource bounds / 2026-08-09
+- Scoped Gallery interaction invalidation to the affected artwork detail, removed unnecessary image row locks for interactions/download grants, and retained full public-feed invalidation for deletion or moderation.
+- Prevented Generation Workbench polling after unmount and Gallery Explorer stale-response races; anonymous BFF requests now skip session introspection when the Flask session cookie is absent.
+- Increased safe sitemap keyset batches from 1,000 to 5,000 entries, reducing cross-service calls without incorrect cursor parallelism.
+- Added configurable PDF file-count and page-count resource limits across PDF processing tools. See ADR-0018.
+
+## 0.7.11 — Phase B generation reliability / 2026-08-09
+- Made queue cancellation terminal-state safe: pending jobs are removed/signalled before final settlement, and removed or missing queue jobs release credits through the existing idempotent ledger path.
+- Added bounded stale-running-job reconciliation, provider health checks with PostgreSQL-backed degraded routing, and worker environment controls for both loops.
+- Added delayed Stripe Checkout and owned PaymentIntent success normalization so asynchronous payments reach the existing idempotent credit workflow.
+- Moved ComfyUI model and sampling controls fully to server-side catalog bindings, and made remote timeout/network failures retryable for provider failover. See ADR-0017.
+
+## 0.7.10 — Phase A Web / BFF security hardening / 2026-08-09
+- Restored CSRF protection for reimbursement and ZIP write routes; anonymous reimbursement ownership now comes only from the signed Flask session.
+- Scoped invoice preview and OCR to the attachment owner, validated file IDs before lookup, and added pre-decompression ZIP bomb limits.
+- Bound staged tool downloads to the issuing browser session with short-lived authorization and upgraded published result names to 128-bit randomness; replaced `mktemp`.
+- Restricted `/diag` to DEBUG/admin, added Gallery anti-framing and transport/content-type headers, made BFF writes fail closed without `Origin`, and added BFF role guards, rate limiting, and error-code allowlisting.
+- Added regression coverage for CSRF, owner isolation, OCR path traversal, and ZIP compression bombs. See ADR-0016.
+
 ## 0.7.9 · 修复自定义配额用户登录后首页崩溃 / 2026-08-08
 - **根因**：`User.custom_limit_map` 在 `custom_limits` 非空时误返回 `None`
   （JSON 解析代码被并入 `display_name`），登录后首页渲染 `remaining_for()`

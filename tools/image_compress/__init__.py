@@ -22,14 +22,13 @@ from flask import (
     render_template,
     request,
     send_file,
-    send_from_directory,
     url_for,
 )
 from PIL import Image
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
-from utils.helpers import is_allowed_ext, safe_filename
+from utils.helpers import is_allowed_ext, safe_download_path, safe_filename, stage_download
 
 logger = logging.getLogger(__name__)
 tool_bp = Blueprint("image_compress", __name__)
@@ -155,14 +154,10 @@ def process():
 def download(filename: str):
     from flask import abort
 
-    if not is_allowed_ext(filename, current_app.config["ALLOWED_IMAGE_EXT"]):
+    target = safe_download_path(current_app.config["UPLOAD_DIR"], filename)
+    if not is_allowed_ext(filename, current_app.config["ALLOWED_IMAGE_EXT"]) or target is None or not target.exists():
         abort(404)
-    return send_from_directory(
-        current_app.config["UPLOAD_DIR"],
-        filename,
-        as_attachment=True,
-        download_name=filename,
-    )
+    return send_file(target, as_attachment=True, download_name=filename)
 
 
 def _fail(message: str, is_ajax: bool = False):
@@ -174,9 +169,4 @@ def _fail(message: str, is_ajax: bool = False):
 
 
 def _stage_to_uploads(suggested_name: str, data: bytes) -> str:
-    """Save bytes into UPLOAD_DIR under a uuid-prefixed name."""
-    upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / suggested_name
-    target.write_bytes(data)
-    return suggested_name
+    return stage_download(suggested_name, data)

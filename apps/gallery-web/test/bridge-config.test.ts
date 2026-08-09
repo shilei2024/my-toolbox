@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { bridgeConfigChecks } from "../scripts/check-bridge-config.ts";
+import { hasNamedCookie } from "../src/server/cookie-utils.ts";
 
 function productionEnv(): NodeJS.ProcessEnv {
   return {
@@ -14,6 +15,10 @@ function productionEnv(): NodeJS.ProcessEnv {
 }
 
 describe("Gallery bridge configuration checks", () => {
+  it("detects only the configured Flask session cookie", () => {
+    assert.equal(hasNamedCookie("theme=dark; mytoolbox_session=signed-value", "mytoolbox_session"), true);
+    assert.equal(hasNamedCookie("not_mytoolbox_session=value", "mytoolbox_session"), false);
+  });
   it("passes with a complete production configuration", () => {
     const results = bridgeConfigChecks(productionEnv());
     assert.equal(results.every((result) => result.ok), true);

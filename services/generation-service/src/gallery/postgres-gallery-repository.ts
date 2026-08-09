@@ -213,7 +213,7 @@ export class PostgresGalleryRepository implements GalleryRepository {
       const result = await client.query<GalleryRow>(`${baseSelect("download")}
         WHERE i.id = $2 AND i.deleted_at IS NULL
           AND ((i.visibility = 'public' AND i.moderation_status = 'approved') OR ($1::integer IS NOT NULL AND i.creator_user_id = $1) OR $3::boolean)
-        LIMIT 1 FOR UPDATE OF i`, [viewer.userId ?? null, imageId, viewer.role === "admin"]);
+        LIMIT 1`, [viewer.userId ?? null, imageId, viewer.role === "admin"]);
       const row = result.rows[0];
       if (!row) throw new GalleryError("image_not_found", "Image was not found", 404);
       await client.query("INSERT INTO ai.download_logs (image_id, user_id, ip_hash, user_agent_hash) VALUES ($1, $2, $3, $4)", [imageId, viewer.userId ?? null, ipHash ?? null, userAgentHash ?? null]);
@@ -260,7 +260,7 @@ export class PostgresGalleryRepository implements GalleryRepository {
 
   private async setInteraction(table: "favorites" | "likes", countColumn: "favorite_count" | "like_count", action: string, imageId: string, userId: number, active: boolean, requestId: string): Promise<InteractionResult> {
     return this.transaction(async (client) => {
-      const visible = await client.query("SELECT 1 FROM ai.images WHERE id = $1 AND visibility = 'public' AND moderation_status = 'approved' AND deleted_at IS NULL FOR UPDATE", [imageId]);
+      const visible = await client.query("SELECT 1 FROM ai.images WHERE id = $1 AND visibility = 'public' AND moderation_status = 'approved' AND deleted_at IS NULL", [imageId]);
       if (visible.rowCount !== 1) throw new GalleryError("image_not_found", "Image was not found", 404);
       if (active) await client.query(`INSERT INTO ai.${table} (image_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [imageId, userId]);
       else await client.query(`DELETE FROM ai.${table} WHERE image_id = $1 AND user_id = $2`, [imageId, userId]);

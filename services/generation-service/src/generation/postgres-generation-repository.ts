@@ -120,13 +120,12 @@ export class PostgresGenerationRepository implements GenerationRepository {
       let signalWorker = false;
       if (!terminal.has(job.status)) {
         accepted = true;
-        signalWorker = job.status === "running";
-        if (job.status === "pending") {
-          await client.query("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = now(), finished_at = now() WHERE id = $1", [id]);
-          if (Number(job.credits_reserved) > 0) await releaseCreditsById(client, id, job.credit_tier, `generation-release:${id}`);
-        } else {
-          await client.query("UPDATE ai.generation_jobs SET cancel_requested_at = COALESCE(cancel_requested_at, now()) WHERE id = $1", [id]);
-        }
+        // Pending jobs still have a BullMQ entry. Let the queue adapter remove
+        // it first, then settle this row through finalizeCancellation; marking
+        // it terminal before removal leaves an orphaned queue job and makes a
+        // removed cancellation unable to release the reservation reliably.
+        signalWorker = true;
+        await client.query("UPDATE ai.generation_jobs SET cancel_requested_at = COALESCE(cancel_requested_at, now()) WHERE id = $1", [id]);
         await client.query(`INSERT INTO ai.audit_logs (actor_user_id, actor_type, action, resource_type, resource_id)
           VALUES ($1, $2, 'generation.cancel_requested', 'generation_job', $3)`, [userId, isAdmin ? "admin" : "user", id]);
       }

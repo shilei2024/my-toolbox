@@ -35,7 +35,7 @@ describe("Phase 7 SEO feed", () => {
     const ok = await app.inject({ method: "GET", url: "/v1/seo/images?limit=500", headers });
     assert.equal(ok.statusCode, 200);
     assert.equal(ok.json().items[0].slug, "public-artwork");
-    const oversized = await app.inject({ method: "GET", url: "/v1/seo/images?limit=1001", headers });
+    const oversized = await app.inject({ method: "GET", url: "/v1/seo/images?limit=5001", headers });
     assert.equal(oversized.statusCode, 400);
     await app.close();
   });

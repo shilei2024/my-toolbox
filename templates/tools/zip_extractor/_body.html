@@ -293,7 +293,8 @@ async function startExtract(btn) {
     batch.forEach(q => fd.append('files', q.file, q.name));
 
     try {
-      const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd });
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+      const resp = await fetch('/tools/zip-extractor/analyze', { method: 'POST', body: fd, headers: { 'X-CSRFToken': csrfToken } });
       const text = await resp.text();
       let data;
       try {

@@ -27,6 +27,19 @@ export class PostgresProviderCatalog {
     for (const row of result.rows) if (registry.has(row.code)) registry.setRouting(row.code, { availability: row.status, priority: row.priority });
   }
 
+  async recordHealth(providerCode: string, healthy: boolean, failureThreshold: number): Promise<void> {
+    if (!Number.isSafeInteger(failureThreshold) || failureThreshold < 1) throw new TypeError("failureThreshold must be a positive integer");
+    await this.#pool.query(`UPDATE ai.providers
+      SET consecutive_failures = CASE WHEN $2 THEN 0 ELSE consecutive_failures + 1 END,
+          last_health_at = now(),
+          status = CASE
+            WHEN $2 AND status = 'degraded' THEN 'active'
+            WHEN NOT $2 AND status = 'active' AND consecutive_failures + 1 >= $3 THEN 'degraded'
+            ELSE status
+          END
+      WHERE code = $1`, [providerCode, healthy, failureThreshold]);
+  }
+
   async bindingsFor(workflowVersionId: string): Promise<readonly ProviderBinding[]> {
     const result = await this.#pool.query<BindingRow>(`SELECT b.id, p.code AS provider_code, b.workflow_version_id,
         b.provider_workflow_ref, COALESCE(m.model_code, b.provider_model) AS provider_model,

@@ -3,21 +3,36 @@ import { GalleryError } from "../gallery/errors.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { AdminRepository } from "./repository.ts";
 import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { GenerationQueueSnapshot } from "../queue/queue-observability.ts";
+
+export interface QueueObservabilityPort { snapshot(): Promise<GenerationQueueSnapshot>; }
 
 export class AdminService {
   readonly #repository: AdminRepository;
   readonly #logger: StructuredLogger;
   readonly #onContentChanged: () => Promise<void>;
+  readonly #queueObservability: QueueObservabilityPort | undefined;
 
-  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void> }) {
+  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void>; queueObservability?: QueueObservabilityPort }) {
     this.#repository = options.repository;
     this.#logger = options.logger;
     this.#onContentChanged = options.onContentChanged;
+    this.#queueObservability = options.queueObservability;
   }
 
   async dashboard(viewer: ViewerContext): Promise<AdminDashboard> {
     requireAdmin(viewer);
     return this.#repository.dashboard();
+  }
+
+  async queueSnapshot(viewer: ViewerContext): Promise<GenerationQueueSnapshot> {
+    requireAdmin(viewer);
+    if (!this.#queueObservability) throw new GalleryError("service_unavailable", "Queue monitoring is not configured", 503);
+    const snapshot = await this.#queueObservability.snapshot();
+    if (!snapshot.healthy || (snapshot.waiting > 0 && snapshot.workers === 0)) {
+      this.#logger.error("admin.queue_attention", { requestId: viewer.requestId, healthy: snapshot.healthy, workers: snapshot.workers, waiting: snapshot.waiting, active: snapshot.active });
+    }
+    return snapshot;
   }
 
   async moderateImage(imageId: string, input: unknown, viewer: ViewerContext): Promise<AdminImageItem> {

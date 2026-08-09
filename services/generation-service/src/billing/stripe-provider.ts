@@ -28,6 +28,7 @@ export class StripePaymentProvider implements PaymentProvider {
       allow_promotion_codes: true,
       ...(input.externalCustomerId ? { customer: input.externalCustomerId } : {}),
       ...(mode === "subscription" ? { subscription_data: { metadata: { order_id: input.order.id, plan_slug: input.order.plan.slug } } } : {}),
+      ...(mode === "payment" ? { payment_intent_data: { metadata: { order_id: input.order.id, plan_slug: input.order.plan.slug } } } : {}),
     }, { idempotencyKey: input.order.id });
     if (!session.url) throw new Error("stripe_checkout_url_missing");
     return { externalSessionId: session.id, url: session.url, ...(session.expires_at ? { expiresAt: fromUnix(session.expires_at) } : {}) };
@@ -46,7 +47,7 @@ export class StripePaymentProvider implements PaymentProvider {
 export function normalizeStripeEvent(event: Stripe.Event): NormalizedPaymentEvent {
   const base = { provider: "stripe" as const, externalEventId: event.id, eventCreatedAt: fromUnix(event.created) };
   const object = record(event.data.object);
-  if (event.type === "checkout.session.completed") {
+  if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const mode = scalar(object.mode);
     const customerId = id(object.customer);
     const subscriptionId = id(object.subscription);
@@ -58,6 +59,19 @@ export function normalizeStripeEvent(event: Stripe.Event): NormalizedPaymentEven
       ...(paymentId ? { paymentId } : {}),
       paymentStatus: scalar(object.payment_status) ?? "unpaid",
       mode: mode === "subscription" || mode === "setup" ? mode : "payment",
+    } };
+  }
+  if (event.type === "payment_intent.succeeded") {
+    const orderId = scalar(record(object.metadata).order_id);
+    // Existing Checkout sessions may finish asynchronously after the browser
+    // returns. Only normalize payment intents that carry our server-created
+    // order reference; unrelated Stripe events remain safely ignored.
+    if (!orderId) return { ...base, eventType: "ignored", data: { originalType: event.type } };
+    return { ...base, eventType: "checkout.completed", data: {
+      orderId,
+      paymentId: scalar(object.id) ?? event.id,
+      paymentStatus: "paid",
+      mode: "payment",
     } };
   }
   if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {

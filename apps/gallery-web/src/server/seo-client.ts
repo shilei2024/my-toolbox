@@ -10,6 +10,8 @@ interface SeoImagePage {
   readonly nextCursor?: string;
 }
 
+const SITEMAP_PAGE_SIZE = 5_000;
+
 export const getPublicSeoDetail = cache(async (slug: string): Promise<GalleryImageDetail> => {
   return getGalleryDetail(slug, seoViewer());
 });
@@ -19,7 +21,11 @@ export async function getSitemapImages(maxEntries = 50_000): Promise<readonly Se
   let cursor: string | undefined;
   const seen = new Set<string>();
   while (items.length < maxEntries) {
-    const params = new URLSearchParams({ limit: String(Math.min(1_000, maxEntries - items.length)) });
+    // Cursor pagination is deliberately keyset-based, so later cursors cannot
+    // be known before the preceding page returns. Larger bounded pages remove
+    // 80% of inter-service round trips without trading correctness for unsafe
+    // offset pagination.
+    const params = new URLSearchParams({ limit: String(Math.min(SITEMAP_PAGE_SIZE, maxEntries - items.length)) });
     if (cursor) params.set("cursor", cursor);
     const page = await serviceRequest<SeoImagePage>(`/v1/seo/images?${params}`, seoViewer());
     items.push(...page.items);

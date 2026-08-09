@@ -12,6 +12,8 @@ import { GalleryError, normalizeGalleryError } from "./errors.ts";
 import type { GalleryService } from "./gallery-service.ts";
 import type { InternalViewerContextCodec } from "./internal-auth.ts";
 import type { GalleryPageRequest, ViewerContext } from "./types.ts";
+import type { TaskCenterService } from "../tasks/task-center-service.ts";
+import type { TaskListRequest, TaskModule } from "../tasks/types.ts";
 
 export async function createGalleryHttpServer(options: {
   readonly service: GalleryService;
@@ -22,6 +24,7 @@ export async function createGalleryHttpServer(options: {
   readonly admin?: AdminService;
   readonly billing?: BillingService;
   readonly generation?: GenerationService;
+  readonly tasks?: TaskCenterService;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: options.trustProxy ?? false, bodyLimit: 16 * 1024 });
   await app.register(rateLimit, {
@@ -64,6 +67,12 @@ export async function createGalleryHttpServer(options: {
     });
   }
 
+  if (options.tasks) {
+    app.get("/v1/tasks", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+      return options.tasks!.list(parseTaskListRequest(request.query), viewer(request, options.auth));
+    });
+  }
+
   if (options.billing) {
     app.get("/v1/billing/summary", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       const context = viewer(request, options.auth);
@@ -85,6 +94,7 @@ export async function createGalleryHttpServer(options: {
 
   if (options.admin) {
     app.get("/v1/admin/dashboard", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => options.admin!.dashboard(viewer(request, options.auth)));
+    app.get("/v1/admin/queue", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.admin!.queueSnapshot(viewer(request, options.auth)));
     app.patch("/v1/admin/images/:id/moderation", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.moderateImage(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/providers/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProvider(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/provider-models/:id", { config: { rateLimit: { max: 40, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProviderModel(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
@@ -149,6 +159,20 @@ function parseGenerationListRequest(value: unknown): GenerationListRequest {
   const limit = scalar(query.limit);
   const status = scalar(query.status);
   return {
+    ...(cursor ? { cursor } : {}),
+    ...(limit ? { limit: Number(limit) } : {}),
+    ...(status ? { status: status as GenerationStatus } : {}),
+  };
+}
+
+function parseTaskListRequest(value: unknown): TaskListRequest {
+  const query = record(value);
+  const module = scalar(query.module);
+  const cursor = scalar(query.cursor);
+  const limit = scalar(query.limit);
+  const status = scalar(query.status);
+  return {
+    ...(module ? { module: module as TaskModule } : {}),
     ...(cursor ? { cursor } : {}),
     ...(limit ? { limit: Number(limit) } : {}),
     ...(status ? { status: status as GenerationStatus } : {}),

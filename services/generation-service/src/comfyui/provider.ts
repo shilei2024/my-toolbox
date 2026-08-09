@@ -65,15 +65,19 @@ export class ComfyUIProvider implements ImageProvider {
   async estimateCost(_request: GenerationRequest, binding: ProviderBinding): Promise<CostEstimate> { return { amount: binding.estimatedCost ?? 0, currency: "USD", estimated: true }; }
 
   private values(request: GenerationRequest, binding: ProviderBinding): PlaceholderValues {
-    const parameter = (key: string, fallback?: JsonValue): JsonValue | undefined => request.parameters[key] ?? binding.providerConfig[key] ?? this.#defaults[key] ?? fallback;
+    // Routing and execution controls are server-owned. In particular, never
+    // allow a browser request to replace a catalog-selected model or LoRA.
+    // The request seed remains user-selectable because it is a deliberate,
+    // bounded generation input rather than a provider-routing control.
+    const configured = (key: string, fallback?: JsonValue): JsonValue | undefined => binding.providerConfig[key] ?? this.#defaults[key] ?? fallback;
     const optionalValues = {
       seed: request.seed,
-      steps: parameter("steps"),
-      cfg: parameter("cfg"),
-      sampler: parameter("sampler"),
-      scheduler: parameter("scheduler"),
-      model: binding.providerModel ?? parameter("model"),
-      lora: parameter("lora"),
+      steps: configured("steps"),
+      cfg: configured("cfg"),
+      sampler: configured("sampler"),
+      scheduler: configured("scheduler"),
+      model: binding.providerModel,
+      lora: configured("lora"),
     };
     return {
       prompt: request.prompt,

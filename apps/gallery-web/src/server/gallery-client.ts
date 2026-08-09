@@ -2,12 +2,25 @@ import "server-only";
 
 import { createHmac } from "node:crypto";
 import type { GalleryImageDetail, GalleryPageData, GalleryQuery, ViewerContext } from "@/lib/gallery-types";
+import type { TaskPage } from "@/lib/task-types";
 
 export class GalleryClientError extends Error {
   readonly code: string;
   readonly status: number;
   constructor(code: string, message: string, status: number) { super(message); this.name = "GalleryClientError"; this.code = code; this.status = status; }
 }
+
+const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
+  unauthorized: "请先登录后再继续。",
+  forbidden: "你没有执行此操作的权限。",
+  not_found: "请求的资源不存在。",
+  invalid_request: "请求参数无效，请检查后重试。",
+  validation_failed: "提交的信息未通过校验。",
+  conflict: "资源状态已变化，请刷新后重试。",
+  insufficient_credits: "积分不足，请充值后重试。",
+  rate_limited: "操作过于频繁，请稍后重试。",
+  service_unavailable: "创作服务暂时不可用，请稍后重试。",
+};
 
 export async function getPublicGallery(query: GalleryQuery, viewer: ViewerContext): Promise<GalleryPageData> {
   return serviceRequest<GalleryPageData>(`/v1/gallery${queryString(query)}`, viewer);
@@ -23,6 +36,10 @@ export async function getMyImages(query: GalleryQuery, viewer: ViewerContext): P
 
 export async function getFavorites(query: GalleryQuery, viewer: ViewerContext): Promise<GalleryPageData> {
   return serviceRequest<GalleryPageData>(`/v1/me/favorites${queryString(query)}`, viewer);
+}
+
+export async function getTasks(viewer: ViewerContext, limit = 48): Promise<TaskPage> {
+  return serviceRequest<TaskPage>(`/v1/tasks?limit=${limit}`, viewer);
 }
 
 export async function serviceRequest<T>(path: string, viewer: ViewerContext, init: RequestInit = {}): Promise<T> {
@@ -108,8 +125,9 @@ function safeError(value: unknown): { code: string; message: string } {
     const error = (value as { error?: unknown }).error;
     if (error && typeof error === "object" && !Array.isArray(error)) {
       const code = (error as { code?: unknown }).code;
-      const message = (error as { message?: unknown }).message;
-      if (typeof code === "string" && typeof message === "string") return { code, message };
+      if (typeof code === "string" && code in PUBLIC_ERROR_MESSAGES) {
+        return { code, message: PUBLIC_ERROR_MESSAGES[code] };
+      }
     }
   }
   return { code: "service_unavailable", message: "创作服务暂时不可用，请稍后重试。" };

@@ -7,7 +7,6 @@ import type { GalleryRepository } from "./repository.ts";
 import type { DownloadGrant, GalleryFilters, GalleryImageDetail, GalleryImageSummary, GalleryPage, GalleryPageRequest, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
 
 const PUBLIC_FEED_NAMESPACE = "gallery:public-feed";
-const DETAIL_NAMESPACE = "gallery:detail";
 
 export class GalleryService {
   readonly #repository: GalleryRepository;
@@ -67,15 +66,19 @@ export class GalleryService {
 
   async getBySlug(slug: string, viewer: ViewerContext): Promise<GalleryImageDetail> {
     const normalizedSlug = normalizeSlug(slug);
-    const detailVersion = viewer.role === "guest" ? await this.#cache.version(DETAIL_NAMESPACE) : "private";
-    const cacheKey = `gallery:detail:${detailVersion}:${normalizedSlug}`;
+    const cacheKey = detailCacheKey(normalizedSlug);
     if (viewer.role === "guest") {
       const cached = await this.#cache.get<GalleryImageDetail>(cacheKey);
       if (cached) return cached;
     }
     const image = await this.#repository.findBySlug(normalizedSlug, viewer);
     if (!image) throw new GalleryError("image_not_found", "Image was not found", 404);
-    if (viewer.role === "guest") await this.#cache.set(cacheKey, image, this.#cacheTtlSeconds);
+    if (viewer.role === "guest") {
+      await Promise.all([
+        this.#cache.set(cacheKey, image, this.#cacheTtlSeconds),
+        this.#cache.set(detailIdCacheKey(image.id), normalizedSlug, this.#cacheTtlSeconds),
+      ]);
+    }
     return image;
   }
 
@@ -89,7 +92,7 @@ export class GalleryService {
   async setFavorite(imageId: string, active: boolean, viewer: ViewerContext): Promise<InteractionResult> {
     const userId = requireUser(viewer);
     const result = await this.#repository.setFavorite(normalizeImageId(imageId), userId, active, viewer.requestId);
-    await this.invalidateMutatedImage(imageId);
+    await this.invalidateMutatedImage(normalizeImageId(imageId));
     this.#logger.info("gallery.favorite_changed", { requestId: viewer.requestId, imageId, actorUserId: userId, active: result.active });
     return result;
   }
@@ -97,7 +100,7 @@ export class GalleryService {
   async setLike(imageId: string, active: boolean, viewer: ViewerContext): Promise<InteractionResult> {
     const userId = requireUser(viewer);
     const result = await this.#repository.setLike(normalizeImageId(imageId), userId, active, viewer.requestId);
-    await this.invalidateMutatedImage(imageId);
+    await this.invalidateMutatedImage(normalizeImageId(imageId));
     this.#logger.info("gallery.like_changed", { requestId: viewer.requestId, imageId, actorUserId: userId, active: result.active });
     return result;
   }
@@ -106,7 +109,7 @@ export class GalleryService {
     requireUser(viewer);
     const normalizedId = normalizeImageId(imageId);
     const result = await this.#repository.softDelete(normalizedId, viewer, this.#deletionRetentionSeconds);
-    await Promise.all([this.#cache.bump(DETAIL_NAMESPACE), this.#cache.bump(PUBLIC_FEED_NAMESPACE)]);
+    await Promise.all([this.#cache.delete(detailCacheKey(result.slug)), this.#cache.bump(PUBLIC_FEED_NAMESPACE)]);
     this.#logger.info("gallery.image_soft_deleted", { requestId: viewer.requestId, imageId: normalizedId, actorUserId: viewer.userId ?? 0, actorRole: viewer.role });
   }
 
@@ -118,11 +121,13 @@ export class GalleryService {
   }
 
   async invalidatePublicData(): Promise<void> {
-    await Promise.all([this.#cache.bump(PUBLIC_FEED_NAMESPACE), this.#cache.bump(DETAIL_NAMESPACE)]);
+    await this.#cache.bump(PUBLIC_FEED_NAMESPACE);
   }
 
-  private async invalidateMutatedImage(_imageId: string): Promise<void> {
-    await this.invalidatePublicData();
+  private async invalidateMutatedImage(imageId: string): Promise<void> {
+    const idKey = detailIdCacheKey(imageId);
+    const slug = await this.#cache.get<string>(idKey);
+    await Promise.all([this.#cache.delete(idKey), ...(slug ? [this.#cache.delete(detailCacheKey(slug))] : [])]);
   }
 }
 
@@ -134,7 +139,7 @@ function normalizedLimit(limit?: number): number {
 
 function normalizedSeoLimit(limit?: number): number {
   if (limit === undefined) return 500;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new GalleryError("invalid_request", "limit must be an integer between 1 and 1000", 400);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new GalleryError("invalid_request", "limit must be an integer between 1 and 5000", 400);
   return limit;
 }
 
@@ -187,6 +192,9 @@ function hashKey(value: unknown): string {
 function sha256(value?: string): string | undefined {
   return value ? createHash("sha256").update(value).digest("hex") : undefined;
 }
+
+function detailCacheKey(slug: string): string { return `gallery:detail:${slug}`; }
+function detailIdCacheKey(imageId: string): string { return `gallery:detail-id:${imageId}`; }
 
 function toPage<T>(items: readonly T[], nextCursor?: string): GalleryPage<T> {
   return { items, ...(nextCursor ? { nextCursor } : {}) };

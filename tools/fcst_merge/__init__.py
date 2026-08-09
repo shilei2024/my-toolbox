@@ -33,7 +33,6 @@ from flask import (
     render_template,
     request,
     send_file,
-    send_from_directory,
     url_for,
 )
 from werkzeug.datastructures import FileStorage
@@ -41,7 +40,7 @@ from werkzeug.datastructures import FileStorage
 from auth.decorators import commit_usage, ensure_anon_id, remaining_for, require_usage
 from extensions import db, limiter
 from models import PnMapping
-from utils.helpers import is_allowed_ext, safe_filename
+from utils.helpers import is_allowed_ext, safe_download_path, safe_filename, stage_download
 
 logger = logging.getLogger(__name__)
 tool_bp = Blueprint("fcst_merge", __name__)
@@ -417,14 +416,10 @@ def process():
 
 @tool_bp.get("/download/<path:filename>")
 def download(filename: str):
-    if not is_allowed_ext(filename, {"xlsx"}):
+    target = safe_download_path(current_app.config["UPLOAD_DIR"], filename)
+    if not is_allowed_ext(filename, {"xlsx"}) or target is None or not target.exists():
         abort(404)
-    return send_from_directory(
-        current_app.config["UPLOAD_DIR"],
-        filename,
-        as_attachment=True,
-        download_name=filename,
-    )
+    return send_file(target, as_attachment=True, download_name=filename)
 
 
 # ===========================================================================
@@ -558,8 +553,4 @@ def _fail(message: str, is_ajax: bool = False):
 
 
 def _stage_to_uploads(suggested_name: str, data: bytes) -> str:
-    upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / suggested_name
-    target.write_bytes(data)
-    return suggested_name
+    return stage_download(suggested_name, data)

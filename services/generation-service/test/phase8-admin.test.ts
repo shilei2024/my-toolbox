@@ -49,9 +49,26 @@ describe("Phase 8 Admin service", () => {
     const ok = await app.inject({ method: "GET", url: "/v1/admin/dashboard", headers: authHeaders(admin) });
     assert.equal(ok.statusCode, 200);
     assert.equal(ok.json().overview.pendingModeration, 1);
+    const queue = await app.inject({ method: "GET", url: "/v1/admin/queue", headers: authHeaders(admin) });
+    assert.equal(queue.statusCode, 503);
     const patch = await app.inject({ method: "PATCH", url: `/v1/admin/providers/${PROVIDER_ID}`, headers: authHeaders(admin), payload: { status: "disabled", priority: 10, expectedUpdatedAt: UPDATED_AT } });
     assert.equal(patch.statusCode, 200);
     assert.equal(patch.json().status, "disabled");
+    await app.close();
+  });
+
+  it("returns queue operations metrics only to administrators", async () => {
+    const auth = new InternalViewerContextCodec(SECRET);
+    const monitoring = { snapshot: async () => ({ healthy: true, redisLatencyMs: 2, workers: 1, waiting: 3, active: 2, delayed: 0, failed: 0, completed: 10, checkedAt: UPDATED_AT }) };
+    const admin = new AdminService({ repository: new FakeAdminRepository(), logger: silentLogger, onContentChanged: async () => {}, queueObservability: monitoring });
+    const app = await createGalleryHttpServer({ service: galleryService(), admin, auth, logger: silentLogger });
+    const user = auth.issue(viewer("user", 8));
+    const forbidden = await app.inject({ method: "GET", url: "/v1/admin/queue", headers: authHeaders(user) });
+    assert.equal(forbidden.statusCode, 403);
+    const signedAdmin = auth.issue(viewer("admin", 1));
+    const ok = await app.inject({ method: "GET", url: "/v1/admin/queue", headers: authHeaders(signedAdmin) });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(ok.json().waiting, 3);
     await app.close();
   });
 });

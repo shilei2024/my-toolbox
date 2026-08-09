@@ -3,9 +3,11 @@ import test from "node:test";
 
 import { ConfigurationError } from "../src/config.ts";
 import { ProviderError } from "../src/providers/errors.ts";
+import { requestRemoteJson } from "../src/remote-providers/http.ts";
 import { MockImageProvider } from "../src/providers/mock.provider.ts";
 import { MultiProviderExecutor } from "../src/providers/multi-provider-executor.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
+import { ProviderHealthMonitor } from "../src/providers/provider-health-monitor.ts";
 import { ProviderSelectionPolicy } from "../src/providers/selection-policy.ts";
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../src/providers/types.ts";
 import { loadPhase9RemoteProviderConfig } from "../src/remote-providers/config.ts";
@@ -30,6 +32,28 @@ test("Phase 9 configuration enables only credentialed providers and requires exp
     REMOTE_PROVIDER_REQUEST_TIMEOUT_MS: "30000", REMOTE_PROVIDER_MAX_RESPONSE_BYTES: "1048576",
   });
   assert.deepEqual(Object.keys(config).sort(), ["gemini", "jimeng", "openai"]);
+});
+
+test("remote network failures are retryable so the executor can fail over", async () => {
+  await assert.rejects(
+    requestRemoteJson({ providerCode: "primary", baseUrl: "https://provider.test", apiKey: "secret", requestTimeoutMs: 1_000, maxResponseBytes: 1_024 }, "/generate", { method: "POST" }, (async () => { throw new TypeError("network unavailable"); }) as typeof fetch),
+    (error: unknown) => error instanceof ProviderError && error.category === "unavailable" && error.retryable,
+  );
+});
+
+test("provider health monitoring persists failures and refreshes shared routing", async () => {
+  const registry = new ProviderRegistry();
+  registry.register(new MockImageProvider({ code: "health-primary", availability: "disabled" }));
+  const checks: Array<{ code: string; healthy: boolean; threshold: number }> = [];
+  let refreshed = false;
+  const catalog = {
+    async recordHealth(code: string, healthy: boolean, threshold: number) { checks.push({ code, healthy, threshold }); },
+    async refreshRegistry() { refreshed = true; },
+  };
+  const monitor = new ProviderHealthMonitor(catalog as never, registry, silentLogger(), { failureThreshold: 3 });
+  await monitor.runOnce();
+  assert.deepEqual(checks, [{ code: "health-primary", healthy: false, threshold: 3 }]);
+  assert.equal(refreshed, true);
 });
 
 test("OpenAI adapter sends a provider-local request and returns validated Base64 output", async () => {

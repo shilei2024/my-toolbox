@@ -291,9 +291,9 @@
 const RB = {
   state:{periods:[],categories:[],product_lines:[],offices:[],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
   modal(name){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(name)); },
-  anonId(){ let id=localStorage.getItem('rb_anon_id'); if(!id){id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);localStorage.setItem('rb_anon_id',id)} return id; },
-  async api(url,options={}){ options.headers={...options.headers,'X-RB-Anon-Id':this.anonId()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
-  async apiRaw(url,options={}){ options.headers={...options.headers,'X-RB-Anon-Id':this.anonId()}; const r=await fetch(url,options); if(!r.ok){let msg=`请求失败 (${r.status})`; try{const j=await r.clone().json();msg=j.error||msg}catch(_){} throw new Error(msg)} return r; },
+  csrfToken(){return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')||''},
+  async api(url,options={}){ options.headers={...options.headers,'X-CSRFToken':this.csrfToken()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
+  async apiRaw(url,options={}){ options.headers={...options.headers,'X-CSRFToken':this.csrfToken()}; const r=await fetch(url,options); if(!r.ok){let msg=`请求失败 (${r.status})`; try{const j=await r.clone().json();msg=j.error||msg}catch(_){} throw new Error(msg)} return r; },
   toast(message,error=false){ const el=document.getElementById('rbToast'); el.textContent=message; el.className='rb-toast show'+(error?' error':''); clearTimeout(this.toastTimer); this.toastTimer=setTimeout(()=>el.className='rb-toast',2800); },
   money(v){return '¥'+Number(v||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})},
   esc(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML},

@@ -23,3 +23,9 @@
 | [0013](0013-gitflow-preview-and-immutable-release-promotion.md) | GitFlow、Preview 与不可变发布晋级 |
 | [0014](0014-generation-api-and-vercel-creation-workbench.md) | Generation API、异步生产闭环与 Vercel 创作工作台 |
 | [0015](0015-m1-first-run-credits-and-operational-bindings.md) | M1 首次积分、远端 Provider 绑定与发布策略 |
+| [0016](0016-phase-a-web-and-bff-security-boundaries.md) | Phase A Web 与 BFF 安全边界 |
+| [0017](0017-phase-b-generation-reliability.md) | Phase B Generation Reliability and Provider Control Plane |
+| [0018](0018-phase-c-performance-and-resource-bounds.md) | Phase C Performance and Resource Bounds |
+| [0019](0019-phase-d-code-quality-and-governance.md) | Phase D Code Quality and Governance Cleanup |
+| [0020](0020-m3-task-center-adapter-contract.md) | M3 Task Center Adapter Contract |
+| [0021](0021-m5-unified-queue-observability.md) | M5 Unified Queue Observability |

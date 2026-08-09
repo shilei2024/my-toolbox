@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { GalleryImageSummary, GalleryPageData } from "@/lib/gallery-types";
 
 type ViewMode = "masonry" | "grid" | "compact";
@@ -18,8 +18,17 @@ export function GalleryExplorer({ initialPage, initialError, authenticated }: { 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const requestSequenceRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => requestControllerRef.current?.abort(), []);
 
   async function loadPage(options: { replace: boolean; cursor?: string } = { replace: true }) {
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     setError(undefined);
     const params = new URLSearchParams({ limit: "24" });
@@ -27,15 +36,17 @@ export function GalleryExplorer({ initialPage, initialError, authenticated }: { 
     if (orientation) params.set("orientation", orientation);
     if (options.cursor) params.set("cursor", options.cursor);
     try {
-      const response = await fetch(`/api/gallery?${params}`, { headers: { Accept: "application/json" } });
+      const response = await fetch(`/api/gallery?${params}`, { headers: { Accept: "application/json" }, signal: controller.signal });
       const body = await response.json() as GalleryPageData & { error?: { message?: string } };
       if (!response.ok) throw new Error(body.error?.message || "暂时无法读取作品");
+      if (requestSequence !== requestSequenceRef.current) return;
       setItems((current) => options.replace ? body.items : [...current, ...body.items]);
       setNextCursor(body.nextCursor);
     } catch (caught) {
+      if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
       setError(caught instanceof Error ? caught.message : "暂时无法读取作品");
     } finally {
-      setLoading(false);
+      if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
   }
 

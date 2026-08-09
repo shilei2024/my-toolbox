@@ -89,3 +89,15 @@ export interface AdminDashboard {
   readonly recentJobs: readonly AdminRecentJob[];
   readonly recentAudit: readonly AdminAuditEntry[];
 }
+
+export interface AdminQueueSnapshot {
+  readonly healthy: boolean;
+  readonly redisLatencyMs: number;
+  readonly workers: number;
+  readonly waiting: number;
+  readonly active: number;
+  readonly delayed: number;
+  readonly failed: number;
+  readonly completed: number;
+  readonly checkedAt: string;
+}

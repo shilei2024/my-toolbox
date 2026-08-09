@@ -43,9 +43,9 @@ export async function requestRemoteJson(
       throw new ProviderError({ providerCode: config.providerCode, category: "cancelled", code: "request_aborted", message: "Provider request was cancelled", retryable: false, cause: error });
     }
     if (timeout.aborted) {
-      throw new ProviderError({ providerCode: config.providerCode, category: "timeout", code: "ambiguous_timeout", message: "Provider request timed out with an unknown billing outcome", retryable: false, cause: error });
+      throw new ProviderError({ providerCode: config.providerCode, category: "timeout", code: "provider_timeout", message: "Provider request timed out", retryable: true, cause: error });
     }
-    throw new ProviderError({ providerCode: config.providerCode, category: "unavailable", code: "ambiguous_network_failure", message: "Provider connection failed with an unknown billing outcome", retryable: false, cause: error });
+    throw new ProviderError({ providerCode: config.providerCode, category: "unavailable", code: "provider_network_failure", message: "Provider connection failed", retryable: true, cause: error });
   }
 
   const requestId = header(response, "x-request-id") ?? header(response, "x-goog-request-id") ?? header(response, "x-tt-logid");

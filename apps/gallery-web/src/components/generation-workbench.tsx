@@ -31,16 +31,19 @@ export function GenerationWorkbench() {
   const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef<{ readonly timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const creationAttemptRef = useRef<{ readonly payload: string; readonly key: string } | undefined>(undefined);
+  const mountedRef = useRef(false);
 
   const refreshRecent = useCallback(async () => {
     try {
       const body = await fetch(`/api/generations?limit=${RECENT_LIMIT}`, { cache: "no-store" }).then(readJson) as GenerationPage;
       if (Array.isArray(body.items)) {
-        setRecent(body.items);
-        setRecentState("ready");
+        if (mountedRef.current) {
+          setRecent(body.items);
+          setRecentState("ready");
+        }
       }
     } catch {
-      setRecentState("error");
+      if (mountedRef.current) setRecentState("error");
     }
   }, []);
 
@@ -84,6 +87,7 @@ export function GenerationWorkbench() {
 
   useEffect(() => {
     let active = true;
+    mountedRef.current = true;
     fetchComposerData().then((data) => {
       if (!active) return;
       applyComposerData(data);
@@ -99,7 +103,7 @@ export function GenerationWorkbench() {
         }
       })
       .catch(() => { if (active) setRecentState("error"); });
-    return () => { active = false; if (pollRef.current?.timer) clearTimeout(pollRef.current.timer); };
+    return () => { active = false; mountedRef.current = false; if (pollRef.current?.timer) clearTimeout(pollRef.current.timer); };
   }, [applyComposerData, fetchComposerData]);
 
   function retryLoad() {
@@ -137,10 +141,13 @@ export function GenerationWorkbench() {
   }
 
   function schedulePoll(id: string, nextDelayMs = 2000) {
+    if (!mountedRef.current) return;
     if (pollRef.current?.timer) clearTimeout(pollRef.current.timer);
     const timer = setTimeout(async () => {
+      if (!mountedRef.current) return;
       try {
         const current = await fetch(`/api/generations/${encodeURIComponent(id)}`, { cache: "no-store" }).then(readJson) as GenerationView;
+        if (!mountedRef.current) return;
         setGeneration(current);
         if (current.status === "completed" && current.images.length > 0) {
           void loadPreviews(current.images.map((image) => image.slug));
@@ -148,6 +155,7 @@ export function GenerationWorkbench() {
         if (!terminal.has(current.status)) schedulePoll(id, 2000);
         else void refreshRecent();
       } catch (error) {
+        if (!mountedRef.current) return;
         // Transient failures must not silently stop progress updates; back off
         // and keep polling so the task can still reach its terminal state.
         setMessage(error instanceof Error ? error.message : "任务状态更新失败。");

@@ -1,16 +1,31 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, type FormEvent } from "react";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem } from "@/lib/admin-types";
+import { useEffect, useState, type FormEvent } from "react";
+import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminQueueSnapshot, AdminWorkflowItem } from "@/lib/admin-types";
 
-type AdminTab = "moderation" | "providers" | "workflows" | "jobs" | "audit";
+type AdminTab = "moderation" | "providers" | "workflows" | "jobs" | "operations" | "audit";
 
 export function AdminConsole({ initialDashboard }: { readonly initialDashboard: AdminDashboard }) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [tab, setTab] = useState<AdminTab>("moderation");
   const [busy, setBusy] = useState<string>();
   const [message, setMessage] = useState<string>();
+  const [queue, setQueue] = useState<AdminQueueSnapshot>();
+  const [queueError, setQueueError] = useState<string>();
+
+  useEffect(() => {
+    if (tab !== "operations") return;
+    let active = true;
+    fetch("/api/admin/queue", { cache: "no-store", credentials: "same-origin" })
+      .then(async (response) => {
+        if (!response.ok) throw await apiError(response);
+        return response.json() as Promise<AdminQueueSnapshot>;
+      })
+      .then((snapshot) => { if (active) { setQueue(snapshot); setQueueError(undefined); } })
+      .catch((error: unknown) => { if (active) setQueueError(error instanceof Error ? error.message : "暂时无法读取队列监控。"); });
+    return () => { active = false; };
+  }, [tab]);
 
   async function refresh() {
     const response = await fetch("/api/admin/dashboard", { cache: "no-store", credentials: "same-origin" });
@@ -86,13 +101,14 @@ export function AdminConsole({ initialDashboard }: { readonly initialDashboard: 
     <section className="admin-stats" aria-label="运行概览">{stats.map(([label, value, note], index) => <article className={`admin-stat ${index === 0 && value > 0 ? "attention" : ""}`} key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</section>
     <section className="admin-workspace">
       <nav className="admin-tabs" aria-label="后台功能">{([[
-        "moderation", `内容审核 ${dashboard.overview.pendingModeration}`], ["providers", "Provider"], ["workflows", "工作流"], ["jobs", "生成任务"], ["audit", "审计记录"]] as const).map(([value, label]) => <button key={value} type="button" className={tab === value ? "active" : ""} onClick={() => setTab(value)} aria-pressed={tab === value}>{label}</button>)}</nav>
+        "moderation", `内容审核 ${dashboard.overview.pendingModeration}`], ["providers", "Provider"], ["workflows", "工作流"], ["jobs", "生成任务"], ["operations", "队列监控"], ["audit", "审计记录"]] as const).map(([value, label]) => <button key={value} type="button" className={tab === value ? "active" : ""} onClick={() => setTab(value)} aria-pressed={tab === value}>{label}</button>)}</nav>
       {message && <p className="admin-message" role="status">{message}</p>}
       <div className="admin-section">
         {tab === "moderation" && <ModerationPanel items={dashboard.moderationQueue} busy={busy} onModerate={moderate} onDelete={remove} />}
         {tab === "providers" && <><ProviderPanel items={dashboard.providers} busy={busy} onSubmit={updateProvider} /><ProviderModelsPanel items={dashboard.providers} busy={busy} onSubmit={updateProviderModel} /></>}
         {tab === "workflows" && <WorkflowPanel items={dashboard.workflows} busy={busy} onSubmit={updateWorkflow} />}
         {tab === "jobs" && <JobsPanel dashboard={dashboard} />}
+        {tab === "operations" && <OperationsPanel snapshot={queue} error={queueError} />}
         {tab === "audit" && <AuditPanel dashboard={dashboard} />}
       </div>
     </section>
@@ -139,6 +155,13 @@ function WorkflowPanel({ items, busy, onSubmit }: { readonly items: readonly Adm
 function JobsPanel({ dashboard }: { readonly dashboard: AdminDashboard }) {
   if (!dashboard.recentJobs.length) return <AdminEmpty title="暂无生成任务" copy="最近的任务状态会在这里显示，不包含 Prompt 内容。" />;
   return <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>任务</th><th>工作流</th><th>Provider</th><th>状态</th><th>实际成本</th><th>创建时间</th></tr></thead><tbody>{dashboard.recentJobs.map((item) => <tr key={item.id}><td><code>{shortId(item.id)}</code></td><td>{item.workflowName}</td><td>{item.providerCode || "尚未选择"}</td><td><Status value={item.status} /></td><td>{item.actualCost.toFixed(4)}</td><td>{formatDate(item.createdAt)}</td></tr>)}</tbody></table></div>;
+}
+
+function OperationsPanel({ snapshot, error }: { readonly snapshot?: AdminQueueSnapshot; readonly error?: string }) {
+  if (error) return <AdminEmpty title="队列监控暂不可用" copy={error} />;
+  if (!snapshot) return <AdminEmpty title="正在读取队列监控" copy="只读指标不会修改队列或任务状态。" />;
+  const attention = !snapshot.healthy || (snapshot.waiting > 0 && snapshot.workers === 0);
+  return <section className={`queue-operations ${attention ? "attention" : ""}`}><header><div><p>Generation Queue</p><h2>{snapshot.healthy ? "Redis 与队列连接正常" : "Redis 或队列不可用"}</h2><small>检查时间：{formatDate(snapshot.checkedAt)} · Redis 延迟：{snapshot.redisLatencyMs}ms</small></div><Status value={attention ? "attention" : "healthy"} /></header><div className="queue-operation-stats">{[["Worker", snapshot.workers], ["等待", snapshot.waiting], ["执行中", snapshot.active], ["延迟", snapshot.delayed], ["失败保留", snapshot.failed], ["完成保留", snapshot.completed]].map(([label, value]) => <div key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}</div>{attention ? <p className="queue-attention">队列需要关注：请检查 Worker 进程、Redis 连通性和 Provider 健康状态。此页面不执行恢复操作。</p> : null}</section>;
 }
 
 function AuditPanel({ dashboard }: { readonly dashboard: AdminDashboard }) {

@@ -8,6 +8,7 @@ import { ProductionGenerationPipeline } from "../pipeline/production-generation-
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
 import { MockImageProvider } from "../providers/mock.provider.ts";
 import { PostgresProviderCatalog } from "../providers/postgres-catalog.ts";
+import { ProviderHealthMonitor } from "../providers/provider-health-monitor.ts";
 import { ProviderRegistry } from "../providers/registry.ts";
 import { ProviderSelectionPolicy } from "../providers/selection-policy.ts";
 import { loadPhase9RemoteProviderConfig } from "../remote-providers/config.ts";
@@ -17,6 +18,7 @@ import { WorkflowLoader } from "../workflows/workflow-loader.ts";
 import { loadGenerationQueueConfig } from "./config.ts";
 import { GenerationQueueProcessor } from "./generation-queue-processor.ts";
 import { GenerationWorkerRuntime } from "./generation-worker.ts";
+import { GenerationReconciler } from "./generation-reconciler.ts";
 import { PostgresGenerationJobRepository } from "./postgres-generation-job-repository.ts";
 import { createGenerationRedisConnections } from "./redis-connections.ts";
 import { parseDefaultModeration } from "../generation/types.ts";
@@ -44,7 +46,8 @@ if (boolean("GENERATION_ALLOW_MOCK_PROVIDER", false)) {
   registry.register(new MockImageProvider({ asynchronous: true, latencyMs: integer("GENERATION_MOCK_LATENCY_MS", 1200, 0, 60_000) }));
 }
 if (registry.list().length === 0) throw new Error("No generation provider is configured");
-await new PostgresProviderCatalog(pool).refreshRegistry(registry);
+const catalog = new PostgresProviderCatalog(pool);
+await catalog.refreshRegistry(registry);
 
 const storage = new TencentCosStorage({
   secretId: required("COS_SECRET_ID"), secretKey: required("COS_SECRET_KEY"),
@@ -62,12 +65,22 @@ const processor = new GenerationQueueProcessor(new PostgresGenerationJobReposito
 const redis = createGenerationRedisConnections(queueConfig, logger);
 const runtime = new GenerationWorkerRuntime(processor, redis.worker, redis.subscriber, queueConfig, logger);
 await runtime.start();
+const healthMonitor = new ProviderHealthMonitor(catalog, registry, logger, { failureThreshold: queueConfig.providerHealthFailureThreshold });
+const runHealthCheck = () => healthMonitor.runOnce().catch(() => logger.error("provider.health_check_failed", { failureReason: "provider_health_check_failed" }));
+runHealthCheck();
+const healthTimer = setInterval(runHealthCheck, queueConfig.providerHealthCheckMs);
+const reconciler = new GenerationReconciler(pool, logger, { runningTimeoutMs: queueConfig.runningJobTimeoutMs, batchSize: queueConfig.reconciliationBatchSize });
+const runReconciliation = () => reconciler.runOnce().catch(() => logger.error("queue.generation_reconciliation_failed", { failureReason: "generation_reconciliation_failed" }));
+runReconciliation();
+const reconciliationTimer = setInterval(runReconciliation, queueConfig.reconciliationIntervalMs);
 logger.info("queue.generation_worker_started", { providers: registry.list().map((provider) => provider.descriptor.code), concurrency: queueConfig.concurrency });
 
 let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
+  clearInterval(healthTimer);
+  clearInterval(reconciliationTimer);
   await runtime.close();
   await Promise.allSettled([redis.producer.quit(), redis.publisher.quit()]);
   await pool.end();

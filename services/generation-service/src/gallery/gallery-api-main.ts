@@ -21,6 +21,7 @@ import { createGalleryHttpServer } from "./http-server.ts";
 import { InternalViewerContextCodec } from "./internal-auth.ts";
 import { PostgresGalleryRepository } from "./postgres-gallery-repository.ts";
 import { RedisGalleryCache } from "./redis-gallery-cache.ts";
+import { generationTaskCenter } from "../tasks/task-center-service.ts";
 
 const config = loadGalleryConfig();
 const billingConfig = loadBillingConfig();
@@ -39,7 +40,6 @@ const service = new GalleryService({
   cacheTtlSeconds: config.cacheTtlSeconds,
   deletionRetentionSeconds: config.deletionRetentionSeconds,
 });
-const admin = new AdminService({ repository: new PostgresAdminRepository(pool, assets), logger, onContentChanged: () => service.invalidatePublicData() });
 const paymentProviders = new PaymentProviderRegistry();
 if (billingConfig.stripe) paymentProviders.register(new StripePaymentProvider(billingConfig.stripe.webhookSecret, billingConfig.stripe.secretKey));
 const billing = new BillingService({ repository: new PostgresBillingRepository(pool), providers: paymentProviders, logger, publicBaseUrl: billingConfig.publicBaseUrl, signupGrant: billingConfig.signupGrant });
@@ -50,8 +50,10 @@ const generationQueue = config.redisUrl ? (() => {
   const publisher = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-cancel", maxRetriesPerRequest: 1, enableOfflineQueue: false });
   return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
 })() : undefined;
+const admin = new AdminService({ repository: new PostgresAdminRepository(pool, assets), logger, onContentChanged: () => service.invalidatePublicData(), ...(generationQueue ? { queueObservability: generationQueue } : {}) });
 const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
-const app = await createGalleryHttpServer({ service, admin, billing, generation, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
+const tasks = generationTaskCenter(generation);
+const app = await createGalleryHttpServer({ service, admin, billing, generation, tasks, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
 
 await app.listen({ host: config.host, port: config.port });
 logger.info("gallery.api_started", { host: config.host, port: config.port });

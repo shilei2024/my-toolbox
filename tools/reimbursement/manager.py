@@ -15,7 +15,7 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request, send_file
 from sqlalchemy import case, func, or_
 
-from extensions import csrf, db
+from extensions import db
 from models import (
     ReimbursementAttachment,
     ReimbursementAuxDetail,
@@ -52,8 +52,7 @@ def _owner() -> tuple[str, str]:
 
     if current_user.is_authenticated:
         return "user", str(current_user.id)
-    client_id = (request.headers.get("X-RB-Anon-Id") or "").strip()
-    return "anon", client_id or ensure_anon_id()
+    return "anon", ensure_anon_id()
 
 
 def _payload() -> dict[str, Any]:
@@ -1099,7 +1098,6 @@ def register_routes(bp: Blueprint) -> None:
         )
 
     @bp.post("/api/periods")
-    @csrf.exempt
     def create_period():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1134,7 +1132,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period)), 201
 
     @bp.post("/api/periods/next")
-    @csrf.exempt
     def create_next_period():
         owner_type, owner_id = _owner()
         latest = (
@@ -1177,7 +1174,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period)), 201
 
     @bp.post("/api/periods/<int:period_id>/activate")
-    @csrf.exempt
     def activate_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1188,7 +1184,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period))
 
     @bp.put("/api/periods/<int:period_id>")
-    @csrf.exempt
     def update_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1212,7 +1207,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period))
 
     @bp.delete("/api/periods/<int:period_id>")
-    @csrf.exempt
     def remove_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1238,7 +1232,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(categories=[_category_dict(item) for item in _seed_categories(owner_type, owner_id)])
 
     @bp.post("/api/categories")
-    @csrf.exempt
     def create_category():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1261,7 +1254,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, category=_category_dict(category)), 201
 
     @bp.put("/api/categories/<int:category_id>")
-    @csrf.exempt
     def update_category(category_id: int):
         owner_type, owner_id = _owner()
         category = _owned_category(category_id, owner_type, owner_id)
@@ -1277,7 +1269,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, category=_category_dict(category))
 
     @bp.delete("/api/categories/<int:category_id>")
-    @csrf.exempt
     def remove_category(category_id: int):
         owner_type, owner_id = _owner()
         category = _owned_category(category_id, owner_type, owner_id)
@@ -1304,7 +1295,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(product_lines=[_product_line_dict(item) for item in rows])
 
     @bp.post("/api/product-lines")
-    @csrf.exempt
     def create_product_line():
         owner_type, owner_id = _owner()
         _seed_product_lines(owner_type, owner_id)
@@ -1339,7 +1329,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, product_line=_product_line_dict(item)), 201
 
     @bp.put("/api/product-lines/<int:product_line_id>")
-    @csrf.exempt
     def update_product_line(product_line_id: int):
         owner_type, owner_id = _owner()
         item = _owned_product_line(product_line_id, owner_type, owner_id)
@@ -1388,7 +1377,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, product_line=_product_line_dict(item))
 
     @bp.delete("/api/product-lines/<int:product_line_id>")
-    @csrf.exempt
     def remove_product_line(product_line_id: int):
         owner_type, owner_id = _owner()
         item = _owned_product_line(product_line_id, owner_type, owner_id)
@@ -1430,7 +1418,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(offices=[_office_dict(item) for item in rows])
 
     @bp.post("/api/offices")
-    @csrf.exempt
     def create_office():
         owner_type, owner_id = _owner()
         _seed_offices(owner_type, owner_id)
@@ -1458,7 +1445,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, office=_office_dict(office)), 201
 
     @bp.put("/api/offices/<int:office_id>")
-    @csrf.exempt
     def update_office(office_id: int):
         owner_type, owner_id = _owner()
         office = _owned_office(office_id, owner_type, owner_id)
@@ -1491,7 +1477,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, office=_office_dict(office))
 
     @bp.delete("/api/offices/<int:office_id>")
-    @csrf.exempt
     def remove_office(office_id: int):
         owner_type, owner_id = _owner()
         office = _owned_office(office_id, owner_type, owner_id)
@@ -1577,7 +1562,6 @@ def register_routes(bp: Blueprint) -> None:
         return None
 
     @bp.post("/api/invoices")
-    @csrf.exempt
     def create_invoice():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1593,7 +1577,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, invoice=_invoice_dict(invoice)), 201
 
     @bp.put("/api/invoices/<int:invoice_id>")
-    @csrf.exempt
     def update_invoice(invoice_id: int):
         owner_type, owner_id = _owner()
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
@@ -1609,7 +1592,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, invoice=_invoice_dict(invoice))
 
     @bp.delete("/api/invoices/<int:invoice_id>")
-    @csrf.exempt
     def remove_invoice(invoice_id: int):
         owner_type, owner_id = _owner()
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
@@ -1675,7 +1657,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, summary=_summary(period), aux=_aux_rows(period.id))
 
     @bp.put("/api/aux/<int:period_id>")
-    @csrf.exempt
     def save_aux(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)

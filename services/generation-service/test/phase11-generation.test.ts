@@ -83,6 +83,18 @@ describe("M1 generation API domain", () => {
     assert.equal(repository.finalized, "job-1");
   });
 
+  it("finalizes cancellation after removing a pending queue job", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({
+      repository,
+      cancellation: { requestCancellation: () => Promise.resolve({ mode: "removed" }) },
+    });
+    repository.requestCancellation = () => Promise.resolve({ generation: { ...generation, cancelRequested: true }, accepted: true, signalWorker: true });
+    const result = await service.cancel("job-1", viewer);
+    assert.equal(result.generation.status, "cancelled");
+    assert.equal(repository.finalized, "job-1");
+  });
+
   it("does not finalize while the worker is still signalled", async () => {
     const repository = new FakeRepository();
     const service = new GenerationService({

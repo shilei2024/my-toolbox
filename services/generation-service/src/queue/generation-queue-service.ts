@@ -1,6 +1,7 @@
 import { Queue, type JobState } from "bullmq";
 import type { Redis } from "ioredis";
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
+import { GenerationQueueObservability, type GenerationQueueSnapshot } from "./queue-observability.ts";
 import type { GenerationQueueConfig } from "./config.ts";
 import { GENERATION_QUEUE_JOB_NAME, QUEUE_SCHEMA_VERSION, parseGenerationQueueJobData, type GenerationQueueJobData, type GenerationQueueResult, type GenerationQueueStatus } from "./types.ts";
 
@@ -47,6 +48,11 @@ export class GenerationQueueService {
       attemptsMade: job.attemptsMade,
       ...(job.failedReason ? { failedReason: safeFailure(job.failedReason) } : {}),
     };
+  }
+
+  /** Read-only operational summary for the unified administrator control plane. */
+  async snapshot(): Promise<GenerationQueueSnapshot> {
+    return new GenerationQueueObservability(this.#queue, this.#publisher).snapshot();
   }
 
   async requestCancellation(jobId: string, reason = "user_requested"): Promise<CancellationReceipt> {

@@ -91,6 +91,17 @@ describe("Phase 10 billing boundary", () => {
     assert.equal("subscriptionId" in event.data ? event.data.subscriptionId : undefined, "sub_1");
   });
 
+  it("normalizes delayed Checkout and owned payment-intent success events", () => {
+    const delayed = normalizeStripeEvent({ id: "evt_async", created: 1_786_000_000, type: "checkout.session.async_payment_succeeded", data: { object: { id: "cs_async", mode: "payment", payment_status: "paid", payment_intent: "pi_1", metadata: { order_id: "order-async" } } } } as never);
+    assert.equal(delayed.eventType, "checkout.completed");
+    assert.equal(delayed.data.orderId, "order-async");
+    const intent = normalizeStripeEvent({ id: "evt_pi", created: 1_786_000_000, type: "payment_intent.succeeded", data: { object: { id: "pi_2", metadata: { order_id: "order-intent" } } } } as never);
+    assert.equal(intent.eventType, "checkout.completed");
+    assert.equal(intent.data.orderId, "order-intent");
+    const foreign = normalizeStripeEvent({ id: "evt_foreign", created: 1_786_000_000, type: "payment_intent.succeeded", data: { object: { id: "pi_foreign", metadata: {} } } } as never);
+    assert.equal(foreign.eventType, "ignored");
+  });
+
   it("keeps Stripe disabled by default and rejects partial secret configuration", () => {
     assert.equal(loadBillingConfig({}).stripe, undefined);
     assert.throws(() => loadBillingConfig({ BILLING_STRIPE_ENABLED: "true", STRIPE_SECRET_KEY: "sk_test_only" }), /STRIPE_SECRET_KEY/);

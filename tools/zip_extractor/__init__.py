@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from auth.decorators import remaining_for
-from extensions import csrf, limiter
+from extensions import limiter
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +33,36 @@ MAX_REQUEST_ZIP_BYTES = 3 * 1024 * 1024       # 3 MB（本批 zip 总大小上�
 MAX_RESPONSE_B64_BYTES = 3 * 1024 * 1024      # 3 MB（返回 PDF base64 总大小上限）
 MAX_SINGLE_FILE_BYTES = 4 * 1024 * 1024       # 4 MB（单 zip 上限，超出直接拒收）
 MAX_DEPTH = 8                                 # 递归层数上限
+# Limits apply before decompression. The upload limit alone cannot protect a
+# worker from a highly-compressible ZIP expanding into gigabytes of memory.
+MAX_ENTRY_UNCOMPRESSED_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 100
+
+
+class _ExtractionBudget:
+    def __init__(self, limit: int = MAX_ARCHIVE_UNCOMPRESSED_BYTES) -> None:
+        self.remaining = limit
+
+    def reserve(self, size: int) -> bool:
+        if size < 0 or size > self.remaining:
+            return False
+        self.remaining -= size
+        return True
+
+
+def _safe_to_extract(info: zipfile.ZipInfo, budget: _ExtractionBudget) -> bool:
+    """Reject dangerous ZIP members without materialising their payload."""
+    if info.file_size > MAX_ENTRY_UNCOMPRESSED_BYTES:
+        log.warning("ZIP member exceeds uncompressed limit: %s (%d bytes)", info.filename, info.file_size)
+        return False
+    if info.file_size and (info.compress_size == 0 or info.file_size / info.compress_size > MAX_COMPRESSION_RATIO):
+        log.warning("ZIP member exceeds compression-ratio limit: %s", info.filename)
+        return False
+    if not budget.reserve(info.file_size):
+        log.warning("ZIP archive exceeds cumulative extraction limit at: %s", info.filename)
+        return False
+    return True
 
 
 @tool_bp.route("/")
@@ -53,13 +83,19 @@ def index():
 # ---------------------------------------------------------------------------
 # 递归解压核心
 # ---------------------------------------------------------------------------
-def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[dict]:
+def _extract_deep(
+    zip_bytes: bytes,
+    source_name: str,
+    depth: int = 0,
+    budget: _ExtractionBudget | None = None,
+) -> list[dict]:
     """
     递归解压 zip 字节流，最深 8 层。
     返回找到的所有 PDF 文件列表 [{filename, size, path_chain, data}].
     """
     if depth > MAX_DEPTH:
         return []
+    budget = budget or _ExtractionBudget()
 
     results = []
     try:
@@ -70,6 +106,9 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
                 if info.is_dir() or name.startswith("__MACOSX") or Path(name).name.startswith("."):
                     continue
                 basename = Path(name).name
+
+                if not _safe_to_extract(info, budget):
+                    continue
 
                 if basename.lower().endswith(".pdf"):
                     try:
@@ -87,7 +126,7 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
                     try:
                         inner_data = zf.read(info)
                         inner_source = f"{source_name} → {basename}"
-                        results.extend(_extract_deep(inner_data, inner_source, depth + 1))
+                        results.extend(_extract_deep(inner_data, inner_source, depth + 1, budget))
                     except Exception as e:
                         log.warning("read inner zip failed %s: %s", info.filename, e)
 
@@ -103,7 +142,6 @@ def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[di
 # API：上传并分析
 # ---------------------------------------------------------------------------
 @tool_bp.post("/analyze")
-@csrf.exempt
 @limiter.limit(lambda: "20/minute")
 def analyze():
     """接收本批 zip 文件，递归解压找出 PDF，按大小上限截断返回。

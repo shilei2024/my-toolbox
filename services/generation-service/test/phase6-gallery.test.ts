@@ -82,12 +82,22 @@ describe("Phase 6 Gallery service", () => {
     await assert.rejects(service.setFavorite(IMAGE_ID, true, viewer("guest")), (error: unknown) => error instanceof GalleryError && error.code === "authentication_required");
   });
 
-  it("invalidates public feed cache after interactions and soft deletion", async () => {
+  it("keeps the public feed cache on interactions and invalidates it on deletion", async () => {
     const cache = new MemoryGalleryCache();
     const service = serviceFor(new FakeGalleryRepository(), cache);
     await service.setFavorite(IMAGE_ID, true, viewer("user", 8));
+    assert.equal(cache.versions.get("gallery:public-feed") ?? 0, 0);
     await service.deleteImage(IMAGE_ID, viewer("admin", 1));
-    assert.equal(cache.versions.get("gallery:public-feed"), 2);
+    assert.equal(cache.versions.get("gallery:public-feed"), 1);
+  });
+
+  it("invalidates only the affected guest detail cache entry", async () => {
+    const cache = new MemoryGalleryCache();
+    const service = serviceFor(new FakeGalleryRepository(), cache);
+    await service.getBySlug("asset-preview", viewer("guest"));
+    assert.ok(cache.values.has("gallery:detail:asset-preview"));
+    await service.setLike(IMAGE_ID, true, viewer("user", 8));
+    assert.equal(cache.values.has("gallery:detail:asset-preview"), false);
   });
 });
 

@@ -31,7 +31,7 @@ export function SiteHeader() {
   const returnTo = typeof window === "undefined" ? "/gallery" : `${window.location.pathname}${window.location.search}`;
   return <header className="site-header"><div className="header-inner">
     <Link className="brand-lockup" href="/gallery" aria-label="Mavis Gallery 首页"><Image src="/brand/mavis-mark.svg" alt="Mavis" width={32} height={32} /><span>Mavis Gallery</span></Link>
-    <nav className="nav-links" aria-label="主导航"><Link className="nav-link" href="/gallery">发现</Link><Link className="nav-link" href="/my-images">我的图片</Link><Link className="nav-link" href="/favorites">收藏</Link><Link className="nav-link" href="/pricing">会员</Link></nav>
+    <nav className="nav-links" aria-label="主导航"><Link className="nav-link" href="/gallery">发现</Link><Link className="nav-link" href="/my-images">我的图片</Link><Link className="nav-link" href="/tasks">任务中心</Link><Link className="nav-link" href="/favorites">收藏</Link><Link className="nav-link" href="/pricing">会员</Link></nav>
     <div className="header-actions">
       {session === undefined ? null : authenticated
         ? <Link className="nav-link auth-link" href="/billing">{session.nickname || session.email || "我的账号"}</Link>

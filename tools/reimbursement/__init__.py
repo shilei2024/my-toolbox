@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -16,10 +17,27 @@ from flask import Blueprint, current_app, jsonify, render_template, request, ses
 import requests
 
 from auth.decorators import commit_usage, remaining_for, require_usage
-from extensions import csrf, db, limiter
+from extensions import db, limiter
 from models import ReimbursementAttachment, ReimbursementRecord
 
 tool_bp = Blueprint("reimbursement", __name__)
+_ATTACHMENT_NAME_RE = re.compile(
+    r"^(?P<file_id>[0-9a-f]{12})(?:_(?:thumb|full))?(?:\.[a-z0-9]+)?$",
+    re.IGNORECASE,
+)
+
+
+def _owned_attachment_for_name(filename: str) -> ReimbursementAttachment | None:
+    """Resolve an attachment name only within the requesting owner's namespace."""
+    match = _ATTACHMENT_NAME_RE.fullmatch(filename)
+    if not match:
+        return None
+    owner_type, owner_id = _rb_owner()
+    return (
+        ReimbursementAttachment.query.filter_by(owner_type=owner_type, owner_id=owner_id)
+        .filter(ReimbursementAttachment.stored_name.like(f"{match.group('file_id')}.%"))
+        .one_or_none()
+    )
 
 # ---------------------------------------------------------------------------
 # 参考数据 — 来自公司 ERP 系统的产品线/办事处/部门
@@ -253,7 +271,6 @@ def index():
 
 
 @tool_bp.post("/upload")
-@csrf.exempt
 @limiter.limit(lambda: "20/minute")
 @require_usage("reimbursement")
 def upload():
@@ -362,9 +379,11 @@ def preview(filename):
     """返回上传文件的缩略图/预览。"""
     from flask import send_file
 
-    # 安全校验：防止路径遍历
-    if ".." in filename or "/" in filename or "\\" in filename:
-        return jsonify(error="非法文件名"), 400
+    attachment = _owned_attachment_for_name(filename)
+    if not attachment:
+        # Keep the response indistinguishable from a missing file so callers
+        # cannot enumerate another owner's attachment names.
+        return jsonify(error="文件不存在"), 404
 
     filepath = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement" / filename
     # 确保解析后的路径仍在上传目录内
@@ -375,16 +394,7 @@ def preview(filename):
 
     if not filepath.exists():
         import io
-        import re
-
         file_id = re.sub(r"_(?:thumb|full)$", "", Path(filename).stem)
-        attachment = ReimbursementAttachment.query.filter_by(stored_name=filename).first()
-        if not attachment:
-            attachment = ReimbursementAttachment.query.filter(
-                ReimbursementAttachment.stored_name.like(f"{file_id}.%")
-            ).first()
-        if not attachment:
-            return jsonify(error="文件不存在"), 404
         return send_file(
             io.BytesIO(attachment.content),
             mimetype=attachment.mime_type,
@@ -410,7 +420,6 @@ def preview(filename):
 
 
 @tool_bp.post("/ocr")
-@csrf.exempt
 @limiter.limit(lambda: "10/minute")
 @require_usage("reimbursement")
 def ocr():
@@ -425,16 +434,15 @@ def ocr():
     img_bytes = None
 
     # 方案 A：通过 file_id 读取服务器上的原始文件（质量最高，推荐）
-    file_id = (data.get("file_id") or "").strip()
+    file_id = (data.get("file_id") or "").strip().lower()
     if file_id:
-        upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
-        filepath = None
-        for p in upload_dir.glob(f"{file_id}.*"):
-            filepath = p
-            break
-        if filepath and filepath.exists():
-            img_bytes = filepath.read_bytes()
-            current_app.logger.info("OCR using original file: %s (%d bytes)", filepath.name, len(img_bytes))
+        if not re.fullmatch(r"[0-9a-f]{12}", file_id):
+            return jsonify(error="文件标识无效"), 400
+        attachment = _owned_attachment_for_name(file_id)
+        if not attachment:
+            return jsonify(error="文件不存在"), 404
+        img_bytes = attachment.content
+        current_app.logger.info("OCR using owned attachment: %s (%d bytes)", attachment.stored_name, len(img_bytes))
 
     # 方案 B：base64 直接传入（Vercel 兼容，或前端降级）
     if not img_bytes:
@@ -1077,7 +1085,7 @@ def reference_data():
 # ---------------------------------------------------------------------------
 def _rb_owner() -> tuple[str, str]:
     """获取当前用户的 owner 标识。
-    优先用 X-RB-Anon-Id 头（前端 localStorage），回退到 Flask session 的 anon_id。
+    登录用户使用账号 ID；匿名用户使用由 Flask 签名会话管理的 anon_id。
     """
     from auth.decorators import ensure_anon_id
     from flask_login import current_user
@@ -1085,16 +1093,10 @@ def _rb_owner() -> tuple[str, str]:
     if current_user.is_authenticated:
         return ("user", str(current_user.id))
 
-    # Vercel serverless 会在冷启动时丢失会话 cookie——强制从客户端读取
-    header_aid = (request.headers.get("X-RB-Anon-Id") or "").strip()
-    if header_aid:
-        return ("anon", header_aid)
-
     return ("anon", ensure_anon_id())
 
 
 @tool_bp.post("/save")
-@csrf.exempt
 def save_state():
     """保存当前期间的完整报销状态。JSON: {period, data: {...}}"""
     payload = request.get_json(silent=True) or {}
@@ -1167,7 +1169,6 @@ def list_periods():
 
 
 @tool_bp.post("/delete-period")
-@csrf.exempt
 def delete_period():
     """删除指定期间的全部数据。JSON: {period}"""
     payload = request.get_json(silent=True) or {}
@@ -1196,7 +1197,6 @@ def delete_period():
 
 
 @tool_bp.post("/rename-period")
-@csrf.exempt
 def rename_period():
     """重命名期间。JSON: {old_period, new_period}"""
     payload = request.get_json(silent=True) or {}
@@ -1241,7 +1241,6 @@ def debug_info():
 
 
 @tool_bp.post("/cover-data")
-@csrf.exempt
 def cover_data():
     """
     接收前端传来的完整报销数据，返回封面所需的汇总计算结果。
@@ -1882,7 +1881,6 @@ def _build_detail_file(cover_data, entertainment, vehicles, travels):
 
 
 @tool_bp.post("/export-cover")
-@csrf.exempt
 def export_cover():
     """导出文件1：报销封面及费用分类表.xlsx（2张表：封面 + 费用分类表）"""
     from flask import send_file
@@ -1903,7 +1901,6 @@ def export_cover():
 
 
 @tool_bp.post("/export-details")
-@csrf.exempt
 def export_details():
     """导出文件2：应酬费_出差明细_派车单.xlsx（3张表：应酬费明细 + 派车单 + 出差明细）"""
     from flask import send_file

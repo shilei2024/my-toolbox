@@ -39,7 +39,7 @@ const binding: ProviderBinding = {
   workflowVersionId: request.workflow.workflowVersionId,
   providerWorkflowRef: "portrait-v1",
   providerModel: "sdxl.safetensors",
-  providerConfig: {},
+  providerConfig: { steps: 24, cfg: 7, sampler: "euler", scheduler: "normal" },
   priority: 10,
   estimatedCost: 0.02,
   timeoutSeconds: 300,
@@ -150,6 +150,19 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("ComfyUI uses catalog binding controls instead of client parameters", async () => {
+  let submitted: Record<string, unknown> | undefined;
+  const client = new ComfyUIClient(comfyConfig(workflowDirectory), (async (_input, init) => {
+    submitted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return Response.json({ prompt_id: "prompt-secure" });
+  }) as typeof fetch);
+  const provider = new ComfyUIProvider(client, new WorkflowLoader(workflowDirectory));
+  await provider.generate({ ...request, parameters: { model: "unapproved.safetensors", lora: "unapproved.safetensors", steps: 999, cfg: 99, sampler: "unsafe" } }, { ...binding, providerConfig: { steps: 22, cfg: 6, sampler: "euler", scheduler: "normal", lora: "approved.safetensors" } }, context);
+  const serialized = JSON.stringify(submitted);
+  assert.match(serialized, /sdxl\.safetensors/);
+  assert.doesNotMatch(serialized, /unapproved|999|unsafe/);
 });
 
 test("COS persistence organizes objects under the owner key when present", async () => {

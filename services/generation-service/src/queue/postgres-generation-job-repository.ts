@@ -153,10 +153,13 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`UPDATE ai.generation_attempts SET status = 'failed', error_class = $2, error_code = $3, error_message = $4, retryable = $5, finished_at = now()
-        WHERE id = $1 AND job_id = $6`, [attemptId, failure.category, failure.code, safeMessage(failure.message), failure.retryable, jobId]);
       const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>(`UPDATE ai.generation_jobs SET status = $2, error_code = $3, error_message = $4,
-        finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE NULL END WHERE id = $1 RETURNING credits_reserved, credit_tier`, [jobId, willRetry ? "pending" : "failed", failure.code, safeMessage(failure.message)]);
+        finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE NULL END
+        WHERE id = $1 AND status = 'running' RETURNING credits_reserved, credit_tier`, [jobId, willRetry ? "pending" : "failed", failure.code, safeMessage(failure.message)]);
+      if (job.rowCount) {
+        await client.query(`UPDATE ai.generation_attempts SET status = 'failed', error_class = $2, error_code = $3, error_message = $4, retryable = $5, finished_at = now()
+          WHERE id = $1 AND job_id = $6 AND status = 'running'`, [attemptId, failure.category, failure.code, safeMessage(failure.message), failure.retryable, jobId]);
+      }
       if (!willRetry && Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId, job.rows[0]!.credit_tier);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
@@ -167,8 +170,10 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("UPDATE ai.generation_attempts SET status = 'cancelled', error_code = $2, finished_at = now() WHERE id = $1 AND job_id = $3", [attemptId, reason.slice(0, 128), jobId]);
-      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1 RETURNING credits_reserved, credit_tier", [jobId]);
+      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>("UPDATE ai.generation_jobs SET status = 'cancelled', cancel_requested_at = COALESCE(cancel_requested_at, now()), finished_at = now() WHERE id = $1 AND status IN ('pending', 'running') RETURNING credits_reserved, credit_tier", [jobId]);
+      if (job.rowCount) {
+        await client.query("UPDATE ai.generation_attempts SET status = 'cancelled', error_code = $2, finished_at = now() WHERE id = $1 AND job_id = $3 AND status = 'running'", [attemptId, reason.slice(0, 128), jobId]);
+      }
       if (Number(job.rows[0]?.credits_reserved ?? 0) > 0) await releaseCredits(client, jobId, job.rows[0]!.credit_tier);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }

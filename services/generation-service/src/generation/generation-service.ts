@@ -70,11 +70,11 @@ export class GenerationService {
     const receipt = result.signalWorker && this.#cancellation
       ? await this.#cancellation.requestCancellation(result.generation.id, "user_requested").catch(() => undefined)
       : undefined;
-    // When the queue has no live job left (worker restart, stall, retention or
-    // an already terminal BullMQ job), nobody will finalize the cancellation,
-    // so the database state must be flipped here; otherwise the task would
-    // stay "running" forever and the UI would keep polling.
-    if (result.signalWorker && receipt && (receipt.mode === "terminal" || receipt.mode === "missing")) {
+    // A removed BullMQ job has no worker left to settle the database row. The
+    // same is true for missing/terminal jobs and for deployments without a
+    // queue cancellation adapter. Finalize all of these paths here so the
+    // credit reservation cannot remain active indefinitely.
+    if (result.signalWorker && (!receipt || receipt.mode === "removed" || receipt.mode === "terminal" || receipt.mode === "missing")) {
       const finalized = await this.#repository.finalizeCancellation(result.generation.id, userId, viewer.role === "admin");
       if (finalized) return { generation: finalized, accepted: true };
     }

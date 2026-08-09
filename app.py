@@ -195,12 +195,9 @@ def create_app() -> Flask:
 
     @app.get("/diag")
     def diag():
-        """Deployment diagnostics — reveals why tool pages may not load.
-
-        Public (no auth) so it can be checked on Vercel without logging in.
-        Reports Python version, how many tools registered vs failed to import,
-        and the exact import error for each failed tool.
-        """
+        """Deployment diagnostics for local development and administrators only."""
+        if not app.debug and not (current_user.is_authenticated and getattr(current_user, "is_admin", False)):
+            abort(404)
         import platform
         diag = app.config.get("TOOL_DIAG", {})
         tool_routes = sorted(

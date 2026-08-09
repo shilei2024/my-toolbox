@@ -150,14 +150,12 @@ Windows 也可使用 `py -3 app.py`。按 `.env.example` 的默认配置，访�
 | `RATELIMIT_DEFAULT` | `120/minute` | 全局 IP 限速 |
 | `RATELIMIT_TOOL` | `20/minute` | 工具处理接口限速 |
 | `RATELIMIT_STORAGE_URI` | `memory://` | 限速存储；多实例建议使用 Redis |
-| `AI_PROVIDER` | `pollinations` | `pollinations`、`openai`、`siliconflow` 或 `mock` |
-| `AI_API_KEY` | 空 | AI 服务密钥 |
-| `AI_BASE_URL` | Pollinations 地址 | AI 服务基础地址 |
-| `AI_MODEL` | 空 | AI 模型名称 |
 | `DISPLAY_TIMEZONE` | `Asia/Shanghai` | 显示时区配置 |
 | `SESSION_COOKIE_SECURE` | `False` | HTTPS 生产环境设为 `True` |
 
 环境变量是初始默认值。管理员在后台保存“站点与限额”后，数据库值优先。
+
+图像生成服务的 Provider、模型和密钥配置已迁移至 `services/generation-service/.env.example`；主站不再读取 `AI_PROVIDER`、`AI_API_KEY`、`AI_BASE_URL` 或 `AI_MODEL`。
 
 ## 测试
 
