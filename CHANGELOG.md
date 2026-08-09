@@ -8,6 +8,9 @@
   disabled，未启用前 API 模式不会出现在创作目录。
 - **默认公开**：新任务的作品可见性与 Prompt 默认均为公开（前端初始值、
   workflow defaults、服务端解析回退三层一致）；历史私有/隐藏作品不回填。
+- **主站入口修复**：主站 `/create`、`/gallery` 由 404 改为 302 跳转到独立部署的
+  Gallery（`AI_IMAGE_EXTERNAL_URL` 未配置时保持 404 fail-closed），避免用户从
+  主站路径或旧书签进入时打不开。
 - **文档与验证**：新增 ADR-0024；OpenAPI、M1 架构与 changelog 同步；Generation
   Service typecheck + 测试、Gallery lint/测试/生产构建通过。
 

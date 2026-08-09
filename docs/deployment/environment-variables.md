@@ -78,7 +78,7 @@ Flask 主站与 Vercel Gallery Web 通过共享 Cookie 与签名会话内省识�
 
 | 变量 | 归属 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `AI_IMAGE_EXTERNAL_URL` | Flask 主站 | 空 | Gallery 公网 HTTPS URL（如 `https://gallery.example.com/create`）；未配置时首页隐藏 AI 作图入口 |
+| `AI_IMAGE_EXTERNAL_URL` | Flask 主站 | 空 | Gallery 公网 HTTPS URL（如 `https://gallery.example.com/create`）；未配置时首页隐藏 AI 作图入口，主站 `/create`、`/gallery` 保持 404（fail-closed） |
 | `GALLERY_INTROSPECTION_SECRET` | Flask + Vercel | 空 | 内部会话内省共享密钥，至少 32 个 UTF-8 字节；只保存在服务端，禁止 `NEXT_PUBLIC_` |
 | `APP_BASE_URL` | Flask 主站 | `http://localhost:8000` | 主站公网 HTTPS Origin；预检用它校验双方同处 `SESSION_COOKIE_DOMAIN` 之下 |
 | `SESSION_COOKIE_DOMAIN` | Flask 主站 | 空 | 双方共享受控父域（如 `.example.com`）；`*.vercel.app` 无法共享业务 Cookie |

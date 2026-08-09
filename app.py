@@ -187,6 +187,22 @@ def create_app() -> Flask:
     def healthz():
         return jsonify(status="ok", time=utc_today_str())
 
+    @app.get("/create")
+    @app.get("/gallery")
+    def gallery_external_redirect():
+        """Route main-site /create and /gallery to the independently deployed Gallery.
+
+        The homepage AI card already links to AI_IMAGE_EXTERNAL_URL; these
+        routes cover bookmarks or typed main-site paths so they no longer 404.
+        Fail closed (404) when the Gallery URL is not configured.
+        """
+        base = str(app.config.get("AI_IMAGE_EXTERNAL_URL", "") or "").strip()
+        parsed = urlsplit(base)
+        if not base or parsed.scheme not in {"https", "http"} or not parsed.netloc:
+            abort(404)
+        target = base.replace("/create", "/gallery", 1) if request.path == "/gallery" else base
+        return redirect(target, code=302)
+
     @app.get("/favicon.ico")
     def favicon_ico():
         # Browsers auto-request /favicon.ico even when pages declare the SVG
