@@ -12,22 +12,6 @@
   reverse_proxy api:3101
 }
 
-# Gallery runs in the same Tencent Cloud Docker network. The public domain is
-# intentionally configurable so staging can use its own controlled subdomain.
-{$GALLERY_WEB_DOMAIN:gallery.mindfulpenpal.com} {
-  encode zstd gzip
-
-  header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    X-Content-Type-Options "nosniff"
-    X-Frame-Options "DENY"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    -Server
-  }
-
-  reverse_proxy gallery:3000
-}
-
 # Main site Flask (systemd on the host, gunicorn 0.0.0.0:8000; containers reach
 # it through host.docker.internal:8000).
 mindfulpenpal.com {

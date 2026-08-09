@@ -28,6 +28,18 @@
 
 后续工具应复用 `safe_filename` 与 `safe_download_path`，不可自行用短随机文件名发布下载。若需要跨设备或长时下载，应升级为带审计记录的数据库授权/对象存储短签名 URL，而不是放宽 session 校验。若 Gallery 部署为多实例，BFF 本地桶不能替代 Generation Service 的全局限制。
 
+## 更新（2026-08-09）：CSP 改为 per-request nonce
+
+初版将 Gallery CSP 静态设置为 `default-src 'self'`，会拦截 Next.js App Router
+流式渲染用于揭示正文的内联脚本（`$RS` 等），导致 `/gallery` 只显示头部与加载骨架，
+正文永远不出现；同时 `img-src` 也会拦截腾讯云 COS/CDN 作品图。
+
+修复：由 `src/proxy.ts`（Next.js 16 Proxy）为每个请求生成随机 nonce，并把 CSP
+写入请求与响应头；Next.js 自动把 nonce 应用到框架脚本、页面 JS 与内联脚本，
+`style-src` 保留 `'unsafe-inline'`（组件使用 React 内联样式），`img-src` 放开
+`https:`（Generation Service 已按 `GALLERY_ASSET_HOSTS` 白名单校验所有资源 URL，
+浏览器拿到的 URL 不可能来自未允许的存储/CDN 主机）。
+
 ## Performance
 
 附件属主查询为带 owner 条件的单次数据库查询；ZIP 限制发生在解压前，避免内存和 CPU 放大。BFF 节流为 O(1) 内存访问，定期清除过期桶。

@@ -33,7 +33,7 @@ export class GeminiImageProvider implements ImageProvider {
       if (geminiSafetyBlocked(response.data)) throw new ProviderError({ providerCode: "gemini", category: "content_policy", code: "content_policy_blocked", message: "Image generation was blocked by provider safety policy", retryable: false });
       const images = geminiImages(response.data);
       if (images.length !== 1) throw new ProviderError({ providerCode: "gemini", category: "upstream", code: "no_output", message: "Gemini returned no image output", retryable: false });
-      const output = base64ImageOutput("gemini", images[0]!, this.#config.maxResponseBytes);
+      const output = await base64ImageOutput("gemini", images[0]!, this.#config.maxResponseBytes);
       const externalRequestId = response.requestId ?? context.attemptId;
       return { externalRequestId, state: "succeeded", outputs: [output], providerMetadata: { model, outputCount: 1, aspectRatio, imageSize, upstreamRequestId: response.requestId ?? null } };
     } catch (error) { throw mapRemoteHttpError(error, "gemini", geminiSafetyBlocked); }

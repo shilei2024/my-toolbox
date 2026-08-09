@@ -29,4 +29,6 @@
 | [0019](0019-phase-d-code-quality-and-governance.md) | Phase D Code Quality and Governance Cleanup |
 | [0020](0020-m3-task-center-adapter-contract.md) | M3 Task Center Adapter Contract |
 | [0021](0021-m5-unified-queue-observability.md) | M5 Unified Queue Observability |
-| [0022](0022-gallery-mainland-access-via-tencent-self-hosting.md) | Gallery mainland access via Tencent self-hosting |
+| [0022](0022-gallery-mainland-access-via-tencent-self-hosting.md) | Gallery mainland access via Tencent self-hosting（已被 0023 撤销） |
+| [0023](0023-gallery-deployment-stays-on-vercel.md) | Gallery 仅部署 Vercel，撤销腾讯云自托管 |
+| [0024](0024-creation-workflow-api-separation-public-defaults.md) | 生图创作目录「工作流 / API」分离与公开默认值 |

@@ -1,12 +1,14 @@
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
+export type GenerationMode = "workflow" | "api";
 
 export interface GenerationWorkflow {
   readonly slug: string;
   readonly name: string;
   readonly description: string;
   readonly category: string;
-  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility };
+  readonly mode: GenerationMode;
+  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility; readonly promptVisibility: "public" | "hidden" };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];
   readonly creditCost: string;

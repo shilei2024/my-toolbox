@@ -7,7 +7,7 @@ import { clampToBounds, workflowBounds, workflowSizePresets } from "../src/gener
 import { createGalleryHttpServer } from "../src/gallery/http-server.ts";
 import { InternalViewerContextCodec, USER_CONTEXT_HEADER, USER_CONTEXT_SIGNATURE_HEADER } from "../src/gallery/internal-auth.ts";
 import type { GenerationRepository } from "../src/generation/repository.ts";
-import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerationInput, type GenerationPageResult, type GenerationView, type GenerationWorkflowView } from "../src/generation/types.ts";
+import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerationInput, type GenerationMode, type GenerationPageResult, type GenerationView, type GenerationWorkflowView } from "../src/generation/types.ts";
 
 const generation: GenerationView = {
   id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像",
@@ -21,10 +21,13 @@ class FakeRepository implements GenerationRepository {
   cancelled?: string;
   finalized?: string;
   page: GenerationPageResult = { items: [] };
-  listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
+  workflowMode: GenerationMode | undefined;
+  listWorkflows(defaultCreditCost: string, mode?: GenerationMode): Promise<readonly GenerationWorkflowView[]> {
+    this.workflowMode = mode;
     return Promise.resolve([{
       slug: "portrait-v1", name: "质感人像", description: "", category: "portrait",
-      defaults: { width: 1024, height: 1024, count: 1, visibility: "private" },
+      mode: "workflow",
+      defaults: { width: 1024, height: 1024, count: 1, visibility: "public", promptVisibility: "public" },
       countRange: { min: 1, max: 4 },
       sizes: [
         { width: 1024, height: 1024 }, { width: 768, height: 1024 }, { width: 1024, height: 768 },
@@ -51,7 +54,22 @@ describe("M1 generation API domain", () => {
     assert.equal(repository.created?.userId, 7);
     assert.equal(repository.created?.idempotencyKey, "create-attempt-1");
     assert.equal("provider" in validBody, false);
-    assert.equal((await service.listWorkflows())[0]?.creditCost, "2.0000");
+    const workflow = (await service.listWorkflows())[0];
+    assert.equal(workflow?.creditCost, "2.0000");
+    assert.equal(workflow?.mode, "workflow");
+    assert.equal(workflow?.defaults.visibility, "public");
+    assert.equal(workflow?.defaults.promptVisibility, "public");
+  });
+
+  it("filters the creation catalog by workflow or api mode", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({ repository });
+    await service.listWorkflows("api");
+    assert.equal(repository.workflowMode, "api");
+    await service.listWorkflows("workflow");
+    assert.equal(repository.workflowMode, "workflow");
+    await service.listWorkflows();
+    assert.equal(repository.workflowMode, undefined);
   });
 
   it("rejects guests, unknown fields and unsafe dimensions", async () => {
@@ -171,6 +189,10 @@ describe("M1 generation API domain", () => {
     const guest = auth.issue({ role: "guest" });
     const workflows = await app.inject({ method: "GET", url: "/v1/generation/workflows", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
     assert.equal(workflows.statusCode, 200);
+    const apiWorkflows = await app.inject({ method: "GET", url: "/v1/generation/workflows?mode=api", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
+    assert.equal(apiWorkflows.statusCode, 200);
+    const invalidMode = await app.inject({ method: "GET", url: "/v1/generation/workflows?mode=model", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
+    assert.equal(invalidMode.statusCode, 400);
     const user = auth.issue({ role: "user", userId: 7 });
     const created = await app.inject({ method: "POST", url: "/v1/generations", headers: { [USER_CONTEXT_HEADER]: user.context, [USER_CONTEXT_SIGNATURE_HEADER]: user.signature, "idempotency-key": "create-attempt-http-1" }, payload: validBody });
     assert.equal(created.statusCode, 202);

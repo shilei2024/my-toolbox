@@ -66,6 +66,18 @@
 
 验证：Generation Service typecheck + 67 项测试；Python 新增 `test_tools_external_url.py` 3 项通过；本地端到端冒烟（登录 → 积分 → 创建 → completed → 画廊取图）通过。
 
+## M1.5 工作流 / API 分开与公开默认值
+
+- **目录分离**：迁移 0012 为 `ai.workflows` 增加 `mode`（workflow/api）；每个已启用
+  Provider 模型生成一个 API 模式工作流，绑定且仅绑定该 Provider + 该模型。
+  `GET /v1/generation/workflows` 返回带 `mode` 的完整目录并支持
+  `?mode=workflow|api` 过滤；`/create` 以「工作流 / API 模型」Tab 分开选择，
+  统一后台与本地管理控制台显示模式标签。Provider 保持 disabled，未启用前 API
+  模式不出现在创作目录。
+- **公开默认值**：新任务 `visibility` 与 `prompt_visibility` 默认公开（前端初始
+  值、workflow defaults、服务端解析回退三层一致）；历史私有/隐藏作品不回填。
+- **验证**：Generation Service typecheck + 测试、Gallery lint/测试/生产构建通过。
+
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。

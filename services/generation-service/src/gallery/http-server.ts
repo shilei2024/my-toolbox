@@ -50,7 +50,7 @@ export async function createGalleryHttpServer(options: {
   if (options.generation) {
     app.get("/v1/generation/workflows", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       viewer(request, options.auth);
-      return { items: await options.generation!.listWorkflows() };
+      return { items: await options.generation!.listWorkflows(parseWorkflowMode(request.query)) };
     });
     app.get("/v1/generations", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       return options.generation!.list(parseGenerationListRequest(request.query), viewer(request, options.auth));
@@ -163,6 +163,14 @@ function parseGenerationListRequest(value: unknown): GenerationListRequest {
     ...(limit ? { limit: Number(limit) } : {}),
     ...(status ? { status: status as GenerationStatus } : {}),
   };
+}
+
+function parseWorkflowMode(value: unknown): "workflow" | "api" | undefined {
+  const query = record(value);
+  const mode = scalar(query.mode);
+  if (mode === undefined) return undefined;
+  if (mode !== "workflow" && mode !== "api") throw new GalleryError("invalid_request", "mode must be 'workflow' or 'api'", 400);
+  return mode;
 }
 
 function parseTaskListRequest(value: unknown): TaskListRequest {

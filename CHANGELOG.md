@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.7.19 · 生图「工作流 / API」分开 + 默认公开到画廊 / 2026-08-09
+- **创作目录分离**：`ai.workflows` 新增 `mode`（workflow/api）；每个已启用的
+  Provider 模型自动生成一个 API 模式工作流（绑定唯一模型），`/create` 以
+  「工作流 / API 模型」两个 Tab 分开选择；`GET /v1/generation/workflows` 支持
+  `?mode=workflow|api` 过滤，统一后台工作流卡片显示模式标签。Provider 默认
+  disabled，未启用前 API 模式不会出现在创作目录。
+- **默认公开**：新任务的作品可见性与 Prompt 默认均为公开（前端初始值、
+  workflow defaults、服务端解析回退三层一致）；历史私有/隐藏作品不回填。
+- **主站入口修复**：主站 `/create`、`/gallery` 由 404 改为 302 跳转到独立部署的
+  Gallery（`AI_IMAGE_EXTERNAL_URL` 未配置时保持 404 fail-closed），避免用户从
+  主站路径或旧书签进入时打不开。
+- **文档与验证**：新增 ADR-0024；OpenAPI、M1 架构与 changelog 同步；Generation
+  Service typecheck + 测试、Gallery lint/测试/生产构建通过。
+
+## 0.7.18 · Gallery 仅部署 Vercel，撤销腾讯云自托管 / 2026-08-09
+- **决策**：`gallery.mindfulpenpal.com` 保持 CNAME → Vercel；腾讯云服务器不再运行
+  Gallery 容器（ADR-0023 覆盖 ADR-0022）。
+- **代码**：删除 `apps/gallery-web/Dockerfile` 与 `.dockerignore`，移除
+  `next.config.ts` 的 `output: "standalone"`；`deploy/docker-compose.production.yml`
+  移除 gallery 服务与 Caddy 依赖；`Caddyfile.production` 移除 Gallery 站点；
+  `deploy/.env.production.example` 移除 `GALLERY_WEB_*` 等服务器端变量。
+- **文档**：新增 ADR-0023；`gallery-tencent-self-hosting.md` 改为“已撤销 + 服务器
+  清理指南”；腾讯云两篇部署指南、Cloudflare 隧道文档、Vercel 部署指南与 ADR 索引
+  同步更新。
+
+## 0.7.17 · 修复 CI 三个任务失败 / 2026-08-09
+- **Gallery Web / Generation Service 依赖审计失败**：
+  - Gallery：postcss 间接依赖的 `nanoid@3.3.16` 命中高危
+    GHSA-2v37-7h3g-55p8，通过 overrides 固定为 `3.3.17`。
+  - Generation：`image-size` 无修复版本（ICNS / JXL / HEIF 解析器存在死循环
+    DoS），改用 `sharp` 读取图片尺寸，覆盖 Base64 输出与 ComfyUI 本地文件两条
+    路径；三个同步 Provider 调用点改为 `await`。
+- **Python 测试套件失败**：
+  - `config.py` 此前只接受 Postgres 形式的 `DATABASE_URL`，导致
+    `sqlite:///:memory:` 被忽略、unittest 进程共享 `instance/app.db`，admin id
+    断言变得依赖执行顺序；现在 `sqlite://` 也作为合法覆盖值。
+  - 新增 `tests/__init__.py` 并让 CI 使用 `--top-level-directory .`，配合
+    `DATABASE_URL=sqlite:///:memory:` 保证测试隔离。
+  - 腾讯云 OCR 错误不再把上游 `Message` 拼进异常，避免泄漏响应内容。
+- **验证**：Python 112 项测试全部通过；Generation Service typecheck + 87 项
+  测试通过；Gallery lint / 生产构建通过；两个项目 `npm install` 审计均为
+  0 漏洞。
+
+## 0.7.16 · 修复 Gallery 页面显示不完整（CSP 拦截流式渲染）/ 2026-08-09
+- **根因**：`next.config.ts` 静态设置的 CSP `default-src 'self'` 会拦截 Next.js
+  App Router 流式渲染用来揭示正文的内联脚本（`$RS` 等），页面打开后停留在头部 +
+  加载骨架；`img-src` 同时也会拦截腾讯云 COS/CDN 作品图。
+- **修复**：新增 `apps/gallery-web/src/proxy.ts`，用 Next.js 16 Proxy 为每次请求
+  生成随机 nonce，并写入请求/响应 CSP 头；Next.js 自动把 nonce 应用到框架脚本、
+  页面 JS 与内联脚本。`style-src` 保留 `'unsafe-inline'`（React 内联样式），
+  `img-src` 放开 `https:`（Generation Service 已按 `GALLERY_ASSET_HOSTS` 白名单
+  校验资源 URL）。
+- **验证**：生产构建、单测通过；本地生产模式 + mock Gallery API + 无头浏览器确认
+  流式占位节点被移除、作品卡片正常渲染、控制台无 CSP 违规。
+
 ## 0.7.15 — M5 unified queue observability / 2026-08-09
 - Connected the existing bounded BullMQ/Redis queue snapshot to the unified admin control plane at `GET /v1/admin/queue` and the BFF at `GET /api/admin/queue`.
 - Added an on-demand Queue Monitoring tab showing Redis latency, workers, backlog, active/delayed jobs, and retained terminal counts; it is read-only and admin-only.

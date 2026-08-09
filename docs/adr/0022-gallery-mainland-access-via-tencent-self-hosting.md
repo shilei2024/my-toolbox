@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — rollout requires the documented DNS and server change.
+Superseded by ADR-0023 (2026-08-09) — Gallery stays on Vercel; Tencent self-hosting is withdrawn.
 
 ## Why
 

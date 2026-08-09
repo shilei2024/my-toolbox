@@ -4,6 +4,7 @@ import type { CreditTier } from "../providers/types.ts";
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
 export type PromptVisibility = "public" | "hidden";
+export type GenerationMode = "workflow" | "api";
 export type DefaultModerationStatus = "pending" | "approved";
 
 export function parseDefaultModeration(value: string | undefined, fallback: DefaultModerationStatus = "pending"): DefaultModerationStatus {
@@ -18,11 +19,13 @@ export interface GenerationWorkflowView {
   readonly name: string;
   readonly description: string;
   readonly category: string;
+  readonly mode: GenerationMode;
   readonly defaults: {
     readonly width: number;
     readonly height: number;
     readonly count: number;
     readonly visibility: GenerationVisibility;
+    readonly promptVisibility: PromptVisibility;
   };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];

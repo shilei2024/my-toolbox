@@ -3,7 +3,7 @@ import type { ViewerContext } from "../gallery/types.ts";
 import type { JsonObject } from "../providers/types.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
-import type { GenerationListRequest, GenerationPage, GenerationStatus, GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
+import type { GenerationListRequest, GenerationMode, GenerationPage, GenerationStatus, GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
 
 export interface GenerationCancellationPort {
   requestCancellation(jobId: string, reason?: string): Promise<{ readonly mode: "removed" | "signalled" | "terminal" | "missing" } | undefined>;
@@ -24,7 +24,7 @@ export class GenerationService {
     this.#cursor = options.cursor;
   }
 
-  listWorkflows() { return this.#repository.listWorkflows(this.#defaultCreditCost); }
+  listWorkflows(mode?: GenerationMode) { return this.#repository.listWorkflows(this.#defaultCreditCost, mode); }
 
   async create(body: unknown, idempotencyKey: string | undefined, viewer: ViewerContext): Promise<GenerationView> {
     if (!this.#ready) {

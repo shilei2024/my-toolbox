@@ -3,6 +3,7 @@
 | 现象 | 首先检查 | 恢复动作 |
 | --- | --- | --- |
 | Gallery 返回 401 | HMAC secret、时间偏差、Viewer Context | 同步时间并确认 Flask/Next/Generation 使用同一组环境配置 |
+| Gallery 打开后只显示头部与加载骨架 | 响应头 CSP 是否包含 `nonce-`；旧构建可能在 `next.config.ts` 写死 `default-src 'self'` | 使用含 `src/proxy.ts` 的构建重新部署；确认 `/gallery` 响应头出现 `script-src ... 'nonce-...'` |
 | 写操作返回 403 | 登录态、角色、`Origin` | 使用同源请求；不得关闭 Origin 校验绕过问题 |
 | Sitemap 失败 | Gallery 内网连接、HMAC、COS/CDN allowlist | 修正内网地址和 hostname allowlist 后重新构建 |
 | BullMQ 任务不消费 | Worker、Redis、queue name/prefix | 恢复 Worker；禁止通过 `FLUSHDB` 清队列 |

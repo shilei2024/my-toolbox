@@ -33,7 +33,7 @@ export class OpenAIImageProvider implements ImageProvider {
       }, this.#fetcher);
       const images = openAIImages(response.data);
       if (images.length !== 1) throw invalid("no_output", "OpenAI returned no image output");
-      const output = base64ImageOutput("openai", images[0]!, this.#config.maxResponseBytes);
+      const output = await base64ImageOutput("openai", images[0]!, this.#config.maxResponseBytes);
       const externalRequestId = response.requestId ?? context.attemptId;
       return { externalRequestId, state: "succeeded", outputs: [output], providerMetadata: { model, outputCount: 1, upstreamRequestId: response.requestId ?? null } };
     } catch (error) { throw mapRemoteHttpError(error, "openai", openAIContentPolicy); }
