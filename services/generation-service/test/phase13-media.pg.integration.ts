@@ -13,6 +13,11 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   const pool = new Pool({ connectionString: databaseUrl });
 
   before(async () => {
+    await pool.query("DELETE FROM ai.generation_assets WHERE job_id = $1", [JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_jobs WHERE id = $1", [JOB_ID]);
+    await pool.query("DELETE FROM ai.workflow_versions WHERE id = $1", [VERSION_ID]);
+    await pool.query("DELETE FROM ai.workflows WHERE id = $1", [WORKFLOW_ID]);
+    await pool.query("DELETE FROM public.users WHERE id = $1", [USER_ID]);
     await pool.query("INSERT INTO public.users (id, email) VALUES ($1, 'phase13-media@example.test')", [USER_ID]);
     await pool.query(
       `INSERT INTO ai.workflows (id, slug, name, category, mode, media_type, is_enabled)
@@ -62,7 +67,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
       object_key: string;
       url: string;
       mime_type: string;
-      byte_size: number;
+      byte_size: string;
       width: number;
       height: number;
       duration_seconds: string;
@@ -76,7 +81,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
     assert.equal(assets.rows.length, 1);
     assert.equal(assets.rows[0]?.object_key, "videos/9013/job/0.mp4");
     assert.equal(assets.rows[0]?.mime_type, "video/mp4");
-    assert.equal(assets.rows[0]?.byte_size, 1024);
+    assert.equal(assets.rows[0]?.byte_size, "1024");
     assert.equal(assets.rows[0]?.width, 960);
     assert.equal(assets.rows[0]?.height, 544);
     assert.equal(assets.rows[0]?.duration_seconds, "5.000");
