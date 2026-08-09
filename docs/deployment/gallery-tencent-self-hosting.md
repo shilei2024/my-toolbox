@@ -126,6 +126,10 @@ curl.exe https://gallery.mindfulpenpal.com/api/me/session
 在中国大陆网络完成以下检查：
 
 1. 访问 `/`、`/gallery`、`/create`、`/tasks` 均可打开；刷新页面不会白屏。
+   - 若 `/gallery` 只显示头部与加载骨架（正文不出现），说明部署的是旧构建：
+     CSP 静态 `default-src 'self'` 会拦截 Next.js 流式渲染的内联脚本。必须重新
+     构建含 `apps/gallery-web/src/proxy.ts` 的镜像，新构建的响应头
+     `Content-Security-Policy` 应包含 `script-src ... 'nonce-...'`。
 2. 未登录状态下 `/api/me/session` 返回 guest，登录后返回正确角色。
 3. 创建任务、取消任务、查看任务中心；确认 Gallery BFF 仍只通过 HMAC 调用 Generation API。
 4. 浏览一张 COS 图片，确认图片请求走预期的 COS/CDN 域名，而不是泄露私有桶对象键。
