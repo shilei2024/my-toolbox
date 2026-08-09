@@ -58,7 +58,7 @@ def _auto_db_url() -> str:
         normalized = _strip_prisma_pool_params(
             candidate.replace("postgres://", "postgresql://")
         )
-        if normalized.startswith(("postgres://", "postgresql://")):
+        if normalized.startswith(("postgres://", "postgresql://", "sqlite://")):
             return normalized
     return "sqlite:///app.db"
 

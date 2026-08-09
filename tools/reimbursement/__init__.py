@@ -618,7 +618,10 @@ def _tencent_ocr_from_bytes(img_bytes: bytes, secret_id: str, secret_key: str, r
     response = data.get("Response") or {}
     error = response.get("Error") or {}
     if resp.status_code != 200 or error:
-        raise RuntimeError(f"Tencent OCR error: {error.get('Code', resp.status_code)} {error.get('Message', '')}")
+        # Never surface the upstream Message in the error: it may echo request
+        # content or provider internals. The code alone is enough to diagnose.
+        code = str(error.get("Code") or resp.status_code)
+        raise RuntimeError(f"Tencent OCR error: {code}") from None
     infos = response.get("VatInvoiceInfos") or []
 
     def _find(*names: str) -> str:

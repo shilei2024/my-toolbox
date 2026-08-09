@@ -60,7 +60,7 @@ export class JimengImageProvider implements ImageProvider {
         }, this.#fetcher);
         const images = jimengImages(response.data);
         if (images.length !== 1) throw new ProviderError({ providerCode: "jimeng", category: "upstream", code: "no_output", message: "Jimeng returned no image output", retryable: false });
-        outputs.push(base64ImageOutput("jimeng", images[0]!, this.#config.maxResponseBytes));
+        outputs.push(await base64ImageOutput("jimeng", images[0]!, this.#config.maxResponseBytes));
         if (response.requestId) {
           externalRequestId = response.requestId;
           upstreamRequestId = response.requestId;

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { imageSizeFromFile } from "image-size/fromFile";
+import sharp from "sharp";
 import { assertRequestSupported } from "../providers/capabilities.ts";
 import { ProviderError, normalizeProviderError } from "../providers/errors.ts";
 import type { ImageProvider } from "../providers/image-provider.ts";
@@ -44,9 +44,11 @@ export class ComfyUIProvider implements ImageProvider {
         const filename = `${context.attemptId}-${index}${extension}`;
         const destination = safeChild(this.#client.config.downloadDirectory, filename);
         await this.#client.downloadImage(ref, destination, context.signal);
-        const dimensions = await imageSizeFromFile(destination);
-        if (!dimensions.width || !dimensions.height) throw this.error("validation", "invalid_image_dimensions", "ComfyUI output dimensions are invalid");
-        outputs.push({ kind: "local-file", path: destination, mimeType: mime(extension), width: dimensions.width, height: dimensions.height });
+        const metadata = await sharp(destination).metadata();
+        const width = metadata.width;
+        const height = metadata.height;
+        if (!width || !height) throw this.error("validation", "invalid_image_dimensions", "ComfyUI output dimensions are invalid");
+        outputs.push({ kind: "local-file", path: destination, mimeType: mime(extension), width, height });
       }
       return this.status(externalRequestId, "succeeded", outputs, { outputCount: outputs.length }, 1);
     } catch (error) { throw this.map(error); }
