@@ -1,7 +1,7 @@
 import type { JsonValue } from "../providers/types.ts";
 
 export const WORKFLOW_PLACEHOLDERS = [
-  "prompt", "negative_prompt", "seed", "steps", "cfg", "sampler", "scheduler",
+  "prompt", "negative_prompt", "seed", "steps", "cfg", "mu", "std", "sampler", "scheduler",
   "width", "height", "model", "lora", "duration_seconds", "frame_count", "fps",
 ] as const;
 export type WorkflowPlaceholder = (typeof WORKFLOW_PLACEHOLDERS)[number];

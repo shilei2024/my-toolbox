@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.6 · Ideogram 4 切回 Quality 预设 / 2026-08-10
+- Provider 绑定新增 `mu`/`std` 采样参数（仅服务端 binding 可控）。
+- `ideogram4-t2i-v1` 从 Default（20 步）切回 Work-Fisher 原工作流的 Quality
+  预设（48 步 / mu 0 / std 1.5），默认分辨率 1376×768，积分 3；
+  对齐本地运行的效果与耗时。
+
 ## 0.8.5 · Ideogram 4 文生图工作流 / 2026-08-10
 - 新增 `ideogram4-t2i-v1` 工作流（迁移 0017）：Ideogram 4 双模型 CFG 引导 +
   Ideogram4Scheduler（Default：20 步 / mu 0 / std 1.75）+ euler_ancestral；
