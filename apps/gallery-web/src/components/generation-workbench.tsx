@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BillingSummary } from "@/lib/billing-types";
-import type { GenerationMode, GenerationPage, GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
+import type { GenerationMediaType, GenerationMode, GenerationPage, GenerationView, GenerationVisibility, GenerationWorkflow } from "@/lib/generation-types";
 
 type LoadState = "loading" | "ready" | "error";
 const terminal = new Set(["completed", "failed", "cancelled"]);
@@ -18,10 +19,12 @@ export function GenerationWorkbench() {
   const [previewUrls, setPreviewUrls] = useState<Readonly<Record<string, string>>>({});
   const [selected, setSelected] = useState("");
   const [mode, setMode] = useState<GenerationMode>("workflow");
+  const [mediaType, setMediaType] = useState<GenerationMediaType>("image");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
   const [count, setCount] = useState(1);
+  const [durationSeconds, setDurationSeconds] = useState(5);
   const [visibility, setVisibility] = useState<GenerationVisibility>("public");
   const [promptVisibility, setPromptVisibility] = useState<"public" | "hidden">("public");
   const [creditTier, setCreditTier] = useState<"free" | "member">("free");
@@ -46,6 +49,15 @@ export function GenerationWorkbench() {
     } catch {
       if (mountedRef.current) setRecentState("error");
     }
+  }, []);
+
+  const refreshBilling = useCallback(async () => {
+    try {
+      const response = await fetch("/api/billing/summary", { cache: "no-store" });
+      if (!response.ok) return;
+      const body = await response.json() as BillingSummary;
+      if (mountedRef.current) setBilling(body);
+    } catch { /* Keep the last known balance when billing is temporarily unavailable. */ }
   }, []);
 
   const loadPreviews = useCallback(async (slugs: readonly string[]) => {
@@ -80,12 +92,15 @@ export function GenerationWorkbench() {
     setSelected(item.slug);
     setSize(initialSize(item));
     setCount(initialCount(item));
+    setMediaType(item.mediaType ?? "image");
+    setDurationSeconds(item.defaults.durationSeconds ?? item.durations?.[0] ?? 5);
     setVisibility(item.defaults.visibility ?? "public");
     setPromptVisibility(item.defaults.promptVisibility ?? "public");
   }, []);
 
   const applyComposerData = useCallback((data: Awaited<ReturnType<typeof fetchComposerData>>) => {
     setWorkflows(data.workflows);
+    setMediaType(data.workflows[0]!.mediaType ?? "image");
     setMode(data.workflows[0]!.mode ?? "workflow");
     selectWorkflow(data.workflows[0]!);
     setSession(data.session);
@@ -94,9 +109,19 @@ export function GenerationWorkbench() {
 
   const switchMode = useCallback((next: GenerationMode) => {
     setMode(next);
-    const first = workflows.find((item) => (item.mode ?? "workflow") === next);
-    if (first) selectWorkflow(first);
-  }, [selectWorkflow, workflows]);
+    const first = workflows.find((item) => (item.mediaType ?? "image") === mediaType && (item.mode ?? "workflow") === next);
+    if (first) selectWorkflow(first); else setSelected("");
+  }, [mediaType, selectWorkflow, workflows]);
+
+  const switchMediaType = useCallback((next: GenerationMediaType) => {
+    setMediaType(next);
+    const firstInMode = workflows.find((item) => (item.mediaType ?? "image") === next && (item.mode ?? "workflow") === mode);
+    const first = firstInMode ?? workflows.find((item) => (item.mediaType ?? "image") === next);
+    if (first) {
+      setMode(first.mode ?? "workflow");
+      selectWorkflow(first);
+    } else setSelected("");
+  }, [mode, selectWorkflow, workflows]);
 
   useEffect(() => {
     let active = true;
@@ -128,8 +153,8 @@ export function GenerationWorkbench() {
     void refreshRecent();
   }
 
-  const workflow = useMemo(() => workflows.find((item) => item.slug === selected), [workflows, selected]);
-  const visibleWorkflows = useMemo(() => workflows.filter((item) => (item.mode ?? "workflow") === mode), [mode, workflows]);
+  const workflow = useMemo(() => workflows.find((item) => item.slug === selected && (item.mediaType ?? "image") === mediaType && (item.mode ?? "workflow") === mode), [mediaType, mode, workflows, selected]);
+  const visibleWorkflows = useMemo(() => workflows.filter((item) => (item.mediaType ?? "image") === mediaType && (item.mode ?? "workflow") === mode), [mediaType, mode, workflows]);
   const estimate = workflow ? (Number(workflow.creditCost) * count).toFixed(4).replace(/\.0+$/, "") : "—";
   const loggedIn = (session !== undefined && session.role !== "guest") || billing?.account !== undefined;
 
@@ -138,7 +163,8 @@ export function GenerationWorkbench() {
     setSubmitting(true); setMessage("");
     const [width, height] = size.split("x").map(Number) as [number, number];
     try {
-      const payload = JSON.stringify({ workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility, promptVisibility, creditTier, parameters: {} });
+      const parameters = workflow.mediaType === "video" ? { durationSeconds } : {};
+      const payload = JSON.stringify({ workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility: workflow.mediaType === "video" ? "private" : visibility, promptVisibility: workflow.mediaType === "video" ? "hidden" : promptVisibility, creditTier, parameters });
       if (creationAttemptRef.current?.payload !== payload) creationAttemptRef.current = { payload, key: crypto.randomUUID() };
       const response = await fetch("/api/generations", {
         method: "POST",
@@ -149,6 +175,7 @@ export function GenerationWorkbench() {
       creationAttemptRef.current = undefined;
       setGeneration(created);
       void refreshRecent();
+      void refreshBilling();
       schedulePoll(created.id);
     } catch (error) { setMessage(error instanceof Error ? error.message : "任务创建失败，请稍后重试。"); }
     finally { setSubmitting(false); }
@@ -167,7 +194,10 @@ export function GenerationWorkbench() {
           void loadPreviews(current.images.map((image) => image.slug));
         }
         if (!terminal.has(current.status)) schedulePoll(id, 2000);
-        else void refreshRecent();
+        else {
+          void refreshRecent();
+          void refreshBilling();
+        }
       } catch (error) {
         if (!mountedRef.current) return;
         // Transient failures must not silently stop progress updates; back off
@@ -186,6 +216,7 @@ export function GenerationWorkbench() {
       const result = await fetch(`/api/generations/${encodeURIComponent(generation.id)}`, { method: "DELETE" }).then(readJson) as { generation: GenerationView; accepted: boolean };
       setGeneration(result.generation);
       void refreshRecent();
+      void refreshBilling();
       if (!terminal.has(result.generation.status)) schedulePoll(result.generation.id);
     } catch (error) { setMessage(error instanceof Error ? error.message : "取消请求失败。"); }
   }
@@ -205,6 +236,7 @@ export function GenerationWorkbench() {
       if (generation?.id === item.id) setGeneration(result.generation);
       if (!terminal.has(result.generation.status)) schedulePoll(result.generation.id);
       void refreshRecent();
+      void refreshBilling();
     } catch (error) { setMessage(error instanceof Error ? error.message : "取消请求失败。"); }
   }
 
@@ -215,6 +247,7 @@ export function GenerationWorkbench() {
       return;
     }
     setMode(target.mode ?? "workflow");
+    setMediaType(target.mediaType ?? "image");
     setSelected(target.slug);
     setSize(`${item.width}x${item.height}`);
     setCount(item.count);
@@ -227,16 +260,19 @@ export function GenerationWorkbench() {
 
   return <main className="create-shell">
     <section className="create-heading" aria-labelledby="create-title">
-      <div><p className="eyebrow"><span className="eyebrow-dot" />AI IMAGE STUDIO</p><h1 id="create-title">把一个想法，变成一张<span>值得留下的图。</span></h1><p>选择创作方式并描述画面。实际模型、供应商选择和故障降级由平台统一处理。</p></div>
+      <div><p className="eyebrow"><span className="eyebrow-dot" />AI CREATION STUDIO</p><h1 id="create-title">把一个想法，变成<span>图片或视频。</span></h1><p>选择媒体与创作方式并描述画面。模型、供应商选择和故障降级由平台统一处理。</p></div>
       <div className="create-account-note" aria-label="账户状态"><span>当前账户</span><strong>{loggedIn ? (billing?.account ? `${billing.account.availableAmount} 可用积分` : "已登录") : "登录后可开始创作"}</strong><small>{loggedIn ? (billing?.account ? `${billing.account.reservedAmount} 积分正在任务中` : "积分余额暂时无法显示") : "与工具网站共用同一用户账户"}</small></div>
     </section>
 
     <div className="workbench-grid">
-      <form className="composer-panel" aria-label="AI 生图创作参数" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <form className="composer-panel" aria-label="AI 图片和视频创作参数" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="panel-heading"><div><span className="step-index">01</span><h2>选择创作方式</h2></div><span className="panel-hint">工作流与 API 模型分开选择</span></div>
         {loadState === "loading" ? <div className="workflow-loading">正在读取平台工作流…</div> : loadState === "error" ? <div className="inline-error-row"><div className="inline-error">{message}</div><button className="button" type="button" onClick={retryLoad}>重试</button></div> : <>
+          <div className="creation-mode-tabs" role="tablist" aria-label="输出媒体类型">
+            {(["image", "video"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mediaType === value} className={`mode-tab${mediaType === value ? " active" : ""}`} onClick={() => switchMediaType(value)}>{value === "image" ? "生图" : "生视频"}<span className="mode-count">{workflows.filter((item) => (item.mediaType ?? "image") === value).length}</span></button>)}
+          </div>
           <div className="creation-mode-tabs" role="tablist" aria-label="创作方式分类">
-            {(["workflow", "api"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`mode-tab${mode === value ? " active" : ""}`} onClick={() => switchMode(value)}>{value === "workflow" ? "工作流" : "API 模型"}<span className="mode-count">{workflows.filter((item) => item.mode === value).length}</span></button>)}
+            {(["workflow", "api"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`mode-tab${mode === value ? " active" : ""}`} onClick={() => switchMode(value)}>{value === "workflow" ? "工作流" : "API 模型"}<span className="mode-count">{workflows.filter((item) => (item.mediaType ?? "image") === mediaType && item.mode === value).length}</span></button>)}
           </div>
           {visibleWorkflows.length === 0
             ? <div className="workflow-loading">该分类暂无可用方式，请切换分类或稍后再试。</div>
@@ -253,9 +289,9 @@ export function GenerationWorkbench() {
         <div className="composer-section parameter-section"><div className="panel-heading compact"><div><span className="step-index">03</span><h2>画面设置</h2></div></div><div className="parameter-grid">
           <label><span>积分档位</span><select value={creditTier} onChange={(event) => setCreditTier(event.target.value as "free" | "member")}><option value="free">免费积分</option><option value="member">会员积分</option></select></label>
           <label><span>画面比例</span><select value={size} onChange={(event) => setSize(event.target.value)}>{workflow?.sizes?.length ? workflow.sizes.map((item) => { const key = sizeKey(item); return <option key={key} value={key}>{sizeLabel(key)}</option>; }) : <option value={size}>加载中…</option>}</select></label>
-          <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>
-          <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>
-        </div><label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label></div>
+          {workflow?.mediaType === "video" ? <label><span>视频时长</span><select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>{(workflow.durations?.length ? workflow.durations : [5]).map((value) => <option key={value} value={value}>{value} 秒</option>)}</select></label> : <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>}
+          {workflow?.mediaType === "video" ? <label><span>作品可见性</span><select value="private" disabled><option value="private">仅自己可见</option></select></label> : <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>}
+        </div>{workflow?.mediaType === "video" ? <p className="panel-hint">视频暂只在本人创作记录和任务中心可见。</p> : <label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label>}</div>
 
         {message && loadState !== "error" ? <div className="inline-error" role="alert">{message}</div> : null}
         <div className="composer-submit"><div><span>本次预计</span><strong>{estimate} 积分</strong></div>{loggedIn
@@ -265,17 +301,19 @@ export function GenerationWorkbench() {
 
       <aside className="creation-preview" aria-labelledby="preview-title">
         <div className={`preview-stage${generation ? ` task-${generation.status}` : ""}`}>
-          {generation?.status === "completed" && generation.images.length > 0 ? (
+          {generation?.status === "completed" && generation.mediaType === "video" && generation.outputs[0] ? (
+            <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}><video src={generation.outputs[0].url} controls preload="metadata" playsInline aria-label="生成的视频" /></div>
+          ) : generation?.status === "completed" && generation.images.length > 0 ? (
             <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}>
               {generation.images.map((image, index) => {
                 const url = previewUrls[image.slug];
-                return <Link className={`preview-image${url ? "" : " pending"}`} key={image.id} href={`/gallery/${image.slug}`} aria-label={`查看作品 ${index + 1}`}>{url ? <img src={url} alt={`作品 ${index + 1}`} loading="lazy" /> : <span>作品 {index + 1}</span>}</Link>;
+                return <Link className={`preview-image${url ? "" : " pending"}`} key={image.id} href={`/gallery/${image.slug}`} aria-label={`查看作品 ${index + 1}`}>{url ? <Image src={url} alt={`作品 ${index + 1}`} width={generation.width} height={generation.height} sizes="(max-width: 900px) 100vw, 44vw" unoptimized /> : <span>作品 {index + 1}</span>}</Link>;
               })}
             </div>
           ) : (<><div className="preview-orbit" aria-hidden="true"><span /><span /><span /></div><div className="preview-copy">{generation ? <span className="preview-kicker">{statusLabel(generation.status).toUpperCase()}</span> : null}<h2 id="preview-title">{generation ? statusLabel(generation.status) : "生成结果将显示在这里"}</h2><p>{generation ? taskDescription(generation) : ""}</p></div></>)}
           {generation?.images.length ? <div className="generated-links">{generation.images.map((image, index) => <Link key={image.id} href={`/gallery/${image.slug}`}>查看作品 {index + 1}</Link>)}</div> : null}
         </div>
-        <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
+        <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) && !(generation.mediaType === "video" && generation.status === "running") ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
       </aside>
     </div>
 
@@ -289,12 +327,12 @@ export function GenerationWorkbench() {
           return <div className="recent-item" key={item.id}>
             <button className="recent-select" type="button" onClick={() => selectTask(item)}>
               <span className={`task-indicator ${item.status}`} />
-              <span className="recent-thumb">{firstUrl ? <img src={firstUrl} alt="" loading="lazy" /> : <span>{item.status === "failed" ? "失败" : item.images.length ? `${item.images.length} 张` : "…"}</span>}</span>
+              <span className="recent-thumb">{firstUrl ? <Image src={firstUrl} alt="" width={96} height={64} sizes="96px" unoptimized /> : <span>{item.status === "failed" ? "失败" : item.mediaType === "video" && item.outputs.length ? "视频" : item.images.length ? `${item.images.length} 张` : "…"}</span>}</span>
               <span className="recent-main"><strong>{item.workflowName}</strong><small>{promptSummary(item.prompt)}</small></span>
               <span className="recent-meta"><em>{statusLabel(item.status)}</em><time>{formatTime(item.createdAt)}</time></span>
             </button>
             <div className="recent-actions">
-              {!terminal.has(item.status) ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
+              {!terminal.has(item.status) && !(item.mediaType === "video" && item.status === "running") ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
               {item.status === "failed" ? <button className="button primary recent-action" type="button" onClick={() => retryTask(item)}>重新创作</button> : null}
             </div>
           </div>;

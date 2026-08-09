@@ -26,6 +26,8 @@
 | 8 | — | [管理后台部署](phase-8-deployment.md) |
 | 9 | [多 Provider 配置](phase-9-configuration.md) | [Phase 9 部署](phase-9-deployment.md) |
 | 10 | [支付、积分、会员配置与部署](phase-10-configuration-and-deployment.md) | 同左 |
+| M4 | [Gallery 图片/视频生成部署](m4-media-generation.md) | 同左 |
+| M4 本地 | [Gallery 调用本机 ComfyUI 生图/生视频](gallery-local-comfyui.md) | 同左 |
 
 ## 部署前必须准备
 

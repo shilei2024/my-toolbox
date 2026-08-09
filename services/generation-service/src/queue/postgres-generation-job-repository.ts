@@ -9,7 +9,7 @@ import type { GenerationJobClaim, GenerationJobRepository, QueueAttemptDescripto
 
 interface ClaimRow extends QueryResultRow {
   id: string; status: "pending" | "running" | "completed" | "failed" | "cancelled"; cancel_requested_at: Date | null; credits_reserved: string;
-  workflow_version_id: string; workflow_id: string; workflow_version: number; workflow_kind: string; user_id: number | null; owner_email: string | null;
+  workflow_version_id: string; workflow_id: string; workflow_version: number; workflow_kind: string; media_type: "image" | "video"; user_id: number | null; owner_email: string | null; credit_tier: "free" | "member";
   prompt: string; negative_prompt: string; input_params: JsonObject; requested_width: number; requested_height: number; requested_count: number;
   request_id: string | null;
 }
@@ -30,8 +30,8 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     try {
       await client.query("BEGIN");
       const result = await client.query<ClaimRow>(`SELECT j.id, j.status, j.cancel_requested_at, j.credits_reserved, j.workflow_version_id,
-          w.id AS workflow_id, v.version AS workflow_version, w.category AS workflow_kind,
-          j.user_id, u.email AS owner_email,
+          w.id AS workflow_id, v.version AS workflow_version, w.category AS workflow_kind, w.media_type,
+          j.user_id, u.email AS owner_email, j.credit_tier,
           j.prompt, j.negative_prompt, j.input_params, j.requested_width, j.requested_height, j.requested_count,
           (SELECT payload->>'requestId' FROM ai.outbox_events WHERE aggregate_id = j.id AND event_type = 'generation.requested' ORDER BY created_at LIMIT 1) AS request_id
         FROM ai.generation_jobs j
@@ -42,8 +42,10 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
       row = result.rows[0];
       if (!row) throw new Error("generation_job_not_found");
       if (row.status === "completed") {
-        const assets = await client.query<{ url: string }>(`SELECT COALESCE(a.public_url, '') AS url FROM ai.images i
-          JOIN ai.image_assets a ON a.image_id = i.id AND a.variant = 'original' WHERE i.job_id = $1 ORDER BY i.created_at`, [jobId]);
+        const assets = row.media_type === "video"
+          ? await client.query<{ url: string }>("SELECT asset_url AS url FROM ai.generation_assets WHERE job_id = $1 ORDER BY position", [jobId])
+          : await client.query<{ url: string }>(`SELECT COALESCE(a.public_url, '') AS url FROM ai.images i
+              JOIN ai.image_assets a ON a.image_id = i.id AND a.variant = 'original' WHERE i.job_id = $1 ORDER BY i.created_at`, [jobId]);
         const provider = await client.query<{ code: string }>("SELECT p.code FROM ai.generation_jobs j JOIN ai.providers p ON p.id = j.selected_provider_id WHERE j.id = $1", [jobId]);
         await client.query("COMMIT");
         return { kind: "completed", assetUrls: assets.rows.map((item) => item.url).filter(Boolean), ...(provider.rows[0]?.code ? { providerCode: provider.rows[0].code } : {}) };
@@ -70,10 +72,11 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const request: GenerationRequest = {
       jobId: row.id,
       workflow: { workflowId: row.workflow_id, workflowVersionId: row.workflow_version_id, version: row.workflow_version, kind: row.workflow_kind },
-      mode: "text-to-image", prompt: row.prompt, negativePrompt: row.negative_prompt,
+      mediaType: row.media_type, mode: row.media_type === "video" ? "text-to-video" : "text-to-image", prompt: row.prompt, negativePrompt: row.negative_prompt,
       width: row.requested_width, height: row.requested_height, count: row.requested_count,
       ...(owner === undefined ? {} : { ownerKey: owner }),
       ...(typeof row.input_params.seed === "number" ? { seed: row.input_params.seed } : {}),
+      creditTier: row.credit_tier,
       parameters: row.input_params,
     };
     return { kind: "execute", plan: { request, bindings, context: { requestId: row.request_id ?? randomUUID(), attemptId: randomUUID() } } };
@@ -111,7 +114,7 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const jobResult = await client.query<{ user_id: number; workflow_version_id: string; prompt: string; negative_prompt: string; visibility: "public" | "private"; prompt_visibility: "public" | "hidden"; credits_reserved: string; credit_tier: "free" | "member"; workflow_name: string }>(`SELECT j.user_id, j.workflow_version_id, j.prompt, j.negative_prompt, j.visibility, j.prompt_visibility, j.credits_reserved, j.credit_tier, w.name AS workflow_name
+      const jobResult = await client.query<{ user_id: number; workflow_version_id: string; prompt: string; negative_prompt: string; visibility: "public" | "private"; prompt_visibility: "public" | "hidden"; credits_reserved: string; credit_tier: "free" | "member"; workflow_name: string; media_type: "image" | "video" }>(`SELECT j.user_id, j.workflow_version_id, j.prompt, j.negative_prompt, j.visibility, j.prompt_visibility, j.credits_reserved, j.credit_tier, w.name AS workflow_name, w.media_type
         FROM ai.generation_jobs j JOIN ai.workflow_versions v ON v.id = j.workflow_version_id JOIN ai.workflows w ON w.id = v.workflow_id WHERE j.id = $1 FOR UPDATE OF j`, [jobId]);
       const job = jobResult.rows[0];
       if (!job) throw new Error("generation_job_not_found");
@@ -126,6 +129,17 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
       await client.query(`UPDATE ai.generation_attempts SET provider_id = $2, status = 'succeeded', external_request_id = $3,
         response_snapshot = $4::jsonb, actual_cost = $6, finished_at = now() WHERE id = $1 AND job_id = $5`, [attemptId, providerId, result.externalRequestId, JSON.stringify(safeProviderMetadata(result.providerMetadata)), jobId, result.actualCost ?? 0]);
       for (const [index, asset] of result.assets.entries()) {
+        if ((asset.mediaType ?? "image") !== job.media_type) throw new Error("generation_asset_media_type_mismatch");
+        if (job.media_type === "video") {
+          if (asset.durationSeconds === undefined) throw new Error("generation_video_duration_missing");
+          await client.query(`INSERT INTO ai.generation_assets (
+              job_id, successful_attempt_id, media_type, position, storage_provider, bucket, region,
+              object_key, asset_url, mime_type, byte_size, width, height, duration_seconds, sha256
+            ) VALUES ($1, $2, 'video', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (job_id, position) DO NOTHING`, [jobId, attemptId, index, asset.storageProvider, asset.bucket, asset.region,
+            asset.objectKey, asset.url, asset.mimeType, asset.byteSize, asset.width, asset.height, asset.durationSeconds, asset.sha256]);
+          continue;
+        }
         const image = await client.query<{ id: string }>(`INSERT INTO ai.images (
             job_id, successful_attempt_id, creator_user_id, provider_id, workflow_version_id, slug, title,
             prompt, negative_prompt, provider_code_snapshot, model_snapshot, workflow_name_snapshot,
@@ -153,8 +167,8 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
-      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>(`UPDATE ai.generation_jobs SET status = $2, error_code = $3, error_message = $4,
-        finished_at = CASE WHEN $2 = 'failed' THEN now() ELSE NULL END
+      const job = await client.query<{ credits_reserved: string; credit_tier: "free" | "member" }>(`UPDATE ai.generation_jobs SET status = $2::ai.job_status, error_code = $3, error_message = $4,
+        finished_at = CASE WHEN $2::text = 'failed' THEN now() ELSE NULL END
         WHERE id = $1 AND status = 'running' RETURNING credits_reserved, credit_tier`, [jobId, willRetry ? "pending" : "failed", failure.code, safeMessage(failure.message)]);
       if (job.rowCount) {
         await client.query(`UPDATE ai.generation_attempts SET status = 'failed', error_class = $2, error_code = $3, error_message = $4, retryable = $5, finished_at = now()

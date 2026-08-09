@@ -662,6 +662,16 @@ select:focus-visible {
   gap: 12px;
 }
 
+.preview-images video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: #03070d;
+  object-fit: contain;
+  box-shadow: 0 14px 34px rgb(4 12 24 / 34%);
+}
+
 .preview-image {
   min-width: 0;
   max-width: 100%;

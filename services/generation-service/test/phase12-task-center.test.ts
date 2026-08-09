@@ -13,7 +13,7 @@ const generation: GenerationView = {
   prompt: "晨光庭院", negativePrompt: "", width: 1024, height: 1024, count: 1, visibility: "private", promptVisibility: "hidden",
   creditsReserved: "2.0000", creditsCharged: "2.0000", creditTier: "free", cancelRequested: false,
   createdAt: "2026-08-09T00:00:00.000Z", updatedAt: "2026-08-09T00:01:00.000Z", finishedAt: "2026-08-09T00:01:00.000Z",
-  images: [{ id: "image-1", slug: "m3-task-output" }],
+  mediaType: "image", images: [{ id: "image-1", slug: "m3-task-output" }], outputs: [],
 };
 
 class TaskRepository implements GenerationRepository {
@@ -34,8 +34,9 @@ describe("M3 task center", () => {
     const page = await tasks.list({ limit: 12 }, viewer);
     assert.deepEqual(page.items, [{
       key: `generation:${generation.id}`, module: "generation", sourceId: generation.id, title: generation.workflowName,
+      mediaType: "image",
       status: "completed", createdAt: generation.createdAt, updatedAt: generation.updatedAt, finishedAt: generation.finishedAt,
-      cancelRequested: false, creditsReserved: "2.0000", creditsCharged: "2.0000", outputLinks: generation.images,
+      cancelRequested: false, creditsReserved: "2.0000", creditsCharged: "2.0000", outputLinks: generation.images.map((image) => ({ ...image, mediaType: "image" })),
     }]);
   });
 

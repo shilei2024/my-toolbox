@@ -52,6 +52,7 @@ export class MockImageProvider implements ImageProvider {
       availability: options.availability ?? "active",
       priority: options.priority ?? 100,
       capabilities: {
+        mediaTypes: ["image"],
         modes: ["text-to-image", "image-to-image"],
         workflowKinds: [],
         models: ["mock-v1"],

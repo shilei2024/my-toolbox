@@ -17,6 +17,7 @@ export class GenerationTaskSource {
         module: this.module,
         sourceId: item.id,
         title: item.workflowName,
+        mediaType: item.mediaType,
         status: item.status,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
@@ -25,7 +26,9 @@ export class GenerationTaskSource {
         creditsReserved: item.creditsReserved,
         creditsCharged: item.creditsCharged,
         ...(item.error ? { error: item.error } : {}),
-        outputLinks: item.images,
+        outputLinks: item.mediaType === "video"
+          ? item.outputs.filter((output) => output.mediaType === "video").map((output) => ({ id: output.id, mediaType: "video" as const, url: output.url, mimeType: output.mimeType }))
+          : item.images.map((image) => ({ ...image, mediaType: "image" as const })),
       })),
       ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
     };

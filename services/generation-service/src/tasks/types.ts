@@ -1,4 +1,5 @@
 import type { GenerationStatus } from "../generation/types.ts";
+import type { MediaType } from "../providers/types.ts";
 
 export type TaskModule = "generation";
 
@@ -8,6 +9,7 @@ export interface TaskSummary {
   readonly module: TaskModule;
   readonly sourceId: string;
   readonly title: string;
+  readonly mediaType: MediaType;
   readonly status: GenerationStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -16,7 +18,10 @@ export interface TaskSummary {
   readonly creditsReserved: string;
   readonly creditsCharged: string;
   readonly error?: { readonly code: string; readonly message: string };
-  readonly outputLinks: readonly { readonly id: string; readonly slug: string }[];
+  readonly outputLinks: readonly (
+    | { readonly id: string; readonly mediaType: "image"; readonly slug: string }
+    | { readonly id: string; readonly mediaType: "video"; readonly url: string; readonly mimeType: string }
+  )[];
 }
 
 export interface TaskListRequest {

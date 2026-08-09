@@ -42,7 +42,7 @@
 ## Generation API
 
 浏览器端 BFF 为 `GET /api/generation/workflows`（支持 `?mode=workflow|api`
-过滤，返回带 `mode` 的完整创作目录）、`POST /api/generations`、
+与 `?mediaType=image|video` 过滤，返回带 `mode`、`mediaType`、时长和尺寸约束的完整创作目录）、`POST /api/generations`、
 `GET/DELETE /api/generations/:id`。内部对应 `/v1/generation/workflows` 与
 `/v1/generations/*`，机器可读契约见 [openapi-generation-v1.yaml](openapi-generation-v1.yaml)。
 创建必须携带 `Idempotency-Key`，且只接受服务端签名的登录用户上下文。
@@ -51,7 +51,7 @@
 
 `GET /api/tasks` 通过 BFF 返回当前用户的任务摘要；内部对应
 `GET /v1/tasks`。响应仅包含模块、稳定任务键、状态、时间、积分结算、
-安全错误码与输出链接。当前仅接入图像生成来源，游标沿用该来源的签名
+安全错误码与图片/视频输出链接。当前接入统一 Generation 来源，游标沿用该来源的签名
 keyset cursor；后续模块接入时由 Task Center 统一扩展分页契约。
 
 ## Webhook

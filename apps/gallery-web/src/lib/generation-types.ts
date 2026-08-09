@@ -1,6 +1,7 @@
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
 export type GenerationMode = "workflow" | "api";
+export type GenerationMediaType = "image" | "video";
 
 export interface GenerationWorkflow {
   readonly slug: string;
@@ -8,9 +9,11 @@ export interface GenerationWorkflow {
   readonly description: string;
   readonly category: string;
   readonly mode: GenerationMode;
-  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility; readonly promptVisibility: "public" | "hidden" };
+  readonly mediaType: GenerationMediaType;
+  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility; readonly promptVisibility: "public" | "hidden"; readonly durationSeconds?: number };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];
+  readonly durations: readonly number[];
   readonly creditCost: string;
 }
 
@@ -19,6 +22,7 @@ export interface GenerationView {
   readonly status: GenerationStatus;
   readonly workflowSlug: string;
   readonly workflowName: string;
+  readonly mediaType: GenerationMediaType;
   readonly prompt: string;
   readonly negativePrompt: string;
   readonly width: number;
@@ -34,6 +38,7 @@ export interface GenerationView {
   readonly finishedAt?: string;
   readonly error?: { readonly code: string; readonly message: string };
   readonly images: readonly { readonly id: string; readonly slug: string }[];
+  readonly outputs: readonly { readonly id: string; readonly mediaType: GenerationMediaType; readonly url: string; readonly mimeType: string; readonly width: number; readonly height: number; readonly durationSeconds?: number }[];
 }
 
 export interface GenerationPage {

@@ -48,15 +48,15 @@ const binding: ProviderBinding = {
 };
 
 test("placeholder injection preserves exact value types and rejects missing or unknown tokens", () => {
-  const result = injectPlaceholders({ seed: "{{seed}}", text: "prefix {{prompt}}" }, { seed: 7, prompt: "hello" });
-  assert.deepEqual(result, { seed: 7, text: "prefix hello" });
+  const result = injectPlaceholders({ seed: "{{seed}}", frames: "{{frame_count}}", text: "prefix {{prompt}}" }, { seed: 7, frame_count: 121, prompt: "hello" });
+  assert.deepEqual(result, { seed: 7, frames: 121, text: "prefix hello" });
   assert.throws(() => injectPlaceholders("{{steps}}", {}), (error) => error instanceof WorkflowPlaceholderError && error.reason === "missing");
   assert.throws(() => injectPlaceholders("{{password}}", {}), (error) => error instanceof WorkflowPlaceholderError && error.reason === "unknown");
 });
 
 test("workflow loader validates versioned API workflows and blocks unsafe references", async () => {
   const loader = new WorkflowLoader(workflowDirectory);
-  const loadedWorkflows = await Promise.all(["portrait-v1", "anime-v1", "food-v1", "architecture-v1"].map((reference) => loader.load(reference)));
+  const loadedWorkflows = await Promise.all(["portrait-v1", "anime-v1", "food-v1", "architecture-v1", "comfyui-ltx-video-v1"].map((reference) => loader.load(reference)));
   const loaded = loadedWorkflows[0];
   assert.ok(loaded);
   assert.equal(loaded.workflowName, "portrait");
@@ -64,6 +64,51 @@ test("workflow loader validates versioned API workflows and blocks unsafe refere
   assert.equal(loaded.digest.length, 64);
   assert.notEqual((await loader.load("portrait-v1")).template, loaded.template);
   await assert.rejects(loader.load("../portrait-v1"), (error) => error instanceof WorkflowLoadError && error.code === "invalid_reference");
+});
+
+test("ComfyUI provider recognizes Video Helper Suite output as a durable video candidate", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phase4-comfy-video-"));
+  const fetcher = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/prompt")) return Response.json({ prompt_id: "prompt-video" });
+    if (url.includes("/history/prompt-video")) return Response.json({
+      "prompt-video": {
+        status: { completed: true, status_str: "success" },
+        outputs: { "19": { gifs: [{ filename: "ltx-video_00001.mp4", subfolder: "generation", type: "output", format: "video/h264-mp4", frame_rate: 24 }] } },
+      },
+    });
+    if (url.includes("/view?")) return new Response(Buffer.from("fake-mp4"), { status: 200, headers: { "content-type": "video/mp4" } });
+    throw new Error(`Unexpected request ${url}`);
+  }) as typeof fetch;
+  const provider = new ComfyUIProvider(new ComfyUIClient(comfyConfig(root), fetcher), new WorkflowLoader(workflowDirectory));
+  const videoRequest: GenerationRequest = {
+    ...request,
+    mediaType: "video",
+    mode: "text-to-video",
+    width: 960,
+    height: 544,
+    count: 1,
+    parameters: { durationSeconds: 5 },
+  };
+  const videoBinding: ProviderBinding = {
+    ...binding,
+    providerWorkflowRef: "comfyui-ltx-video-v1",
+    providerModel: "ltx-2.3-22b-distilled_transformer_only_fp8_input_scaled.safetensors",
+    providerConfig: { fps: 24, cfg: 1, durationSeconds: 5 },
+  };
+  try {
+    const submission = await provider.generate(videoRequest, videoBinding, context);
+    const status = await provider.getStatus(submission.externalRequestId, context);
+    assert.equal(status.state, "succeeded");
+    assert.deepEqual(status.outputs.map((output) => ({ mediaType: output.mediaType, mimeType: output.mimeType, width: output.width, height: output.height, durationSeconds: "durationSeconds" in output ? output.durationSeconds : undefined })), [
+      { mediaType: "video", mimeType: "video/mp4", width: 960, height: 544, durationSeconds: 5 },
+    ]);
+    const output = status.outputs[0];
+    assert.ok(output?.kind === "local-file");
+    await access(output.path);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("phase 4 configuration is environment-only and fails closed", () => {
@@ -159,10 +204,13 @@ test("ComfyUI uses catalog binding controls instead of client parameters", async
     return Response.json({ prompt_id: "prompt-secure" });
   }) as typeof fetch);
   const provider = new ComfyUIProvider(client, new WorkflowLoader(workflowDirectory));
-  await provider.generate({ ...request, parameters: { model: "unapproved.safetensors", lora: "unapproved.safetensors", steps: 999, cfg: 99, sampler: "unsafe" } }, { ...binding, providerConfig: { steps: 22, cfg: 6, sampler: "euler", scheduler: "normal", lora: "approved.safetensors" } }, context);
+  const { seed: _seed, ...requestWithoutSeed } = request;
+  await provider.generate({ ...requestWithoutSeed, parameters: { model: "unapproved.safetensors", lora: "unapproved.safetensors", steps: 999, cfg: 99, sampler: "unsafe" } }, { ...binding, providerConfig: { steps: 22, cfg: 6, sampler: "euler", scheduler: "normal", lora: "approved.safetensors" } }, context);
   const serialized = JSON.stringify(submitted);
   assert.match(serialized, /sdxl\.safetensors/);
   assert.doesNotMatch(serialized, /unapproved|999|unsafe/);
+  const prompt = submitted?.prompt as Record<string, { inputs?: Record<string, unknown> }> | undefined;
+  assert.equal(typeof prompt?.["3"]?.inputs?.seed, "number");
 });
 
 test("COS persistence organizes objects under the owner key when present", async () => {

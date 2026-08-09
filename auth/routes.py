@@ -40,16 +40,22 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
     if value.startswith("/") and not value.startswith("//"):
         return value
     external = urlparse(external_url)
-    if external.scheme != "https" or not external.hostname:
+    if not external.hostname or external.scheme not in {"http", "https"}:
         return None
     try:
         candidate = urlparse(value)
     except ValueError:
         return None
+    loopback_http = (
+        external.scheme == "http"
+        and external.hostname in {"127.0.0.1", "localhost", "::1"}
+        and candidate.scheme == "http"
+    )
     if (
-        candidate.scheme == "https"
+        (candidate.scheme == "https" or loopback_http)
         and candidate.hostname == external.hostname
-        and (candidate.port or 443) == (external.port or 443)
+        and (candidate.port or (443 if candidate.scheme == "https" else 80))
+        == (external.port or (443 if external.scheme == "https" else 80))
         and candidate.username is None
         and candidate.password is None
     ):

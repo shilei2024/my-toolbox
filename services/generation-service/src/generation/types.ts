@@ -1,5 +1,5 @@
 import type { JsonObject } from "../providers/types.ts";
-import type { CreditTier } from "../providers/types.ts";
+import type { CreditTier, MediaType } from "../providers/types.ts";
 
 export type GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type GenerationVisibility = "public" | "private";
@@ -20,15 +20,18 @@ export interface GenerationWorkflowView {
   readonly description: string;
   readonly category: string;
   readonly mode: GenerationMode;
+  readonly mediaType: MediaType;
   readonly defaults: {
     readonly width: number;
     readonly height: number;
     readonly count: number;
     readonly visibility: GenerationVisibility;
     readonly promptVisibility: PromptVisibility;
+    readonly durationSeconds?: number;
   };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];
+  readonly durations: readonly number[];
   readonly creditCost: string;
 }
 
@@ -53,6 +56,7 @@ export interface GenerationView {
   readonly status: GenerationStatus;
   readonly workflowSlug: string;
   readonly workflowName: string;
+  readonly mediaType: MediaType;
   readonly prompt: string;
   readonly negativePrompt: string;
   readonly width: number;
@@ -69,6 +73,17 @@ export interface GenerationView {
   readonly finishedAt?: string;
   readonly error?: { readonly code: string; readonly message: string };
   readonly images: readonly { readonly id: string; readonly slug: string }[];
+  readonly outputs: readonly GenerationOutputView[];
+}
+
+export interface GenerationOutputView {
+  readonly id: string;
+  readonly mediaType: MediaType;
+  readonly url: string;
+  readonly mimeType: string;
+  readonly width: number;
+  readonly height: number;
+  readonly durationSeconds?: number;
 }
 
 export interface GenerationListRequest {

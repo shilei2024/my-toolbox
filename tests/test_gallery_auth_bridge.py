@@ -101,6 +101,16 @@ class GalleryAuthBridgeTests(unittest.TestCase):
         self.assertIsNone(_safe_next_url("https://user:pass@gallery.example.com/steal", gallery))
         self.assertIsNone(_safe_next_url("https://gallery.example.com./steal", gallery))
 
+    def test_gallery_return_url_allows_same_origin_loopback_http_for_local_development(self):
+        gallery = "http://127.0.0.1:3000/create"
+        self.assertEqual(
+            _safe_next_url("http://127.0.0.1:3000/tasks", gallery),
+            "http://127.0.0.1:3000/tasks",
+        )
+        self.assertIsNone(_safe_next_url("http://127.0.0.1:3001/tasks", gallery))
+        self.assertIsNone(_safe_next_url("http://localhost:3000/tasks", gallery))
+        self.assertIsNone(_safe_next_url("http://evil.example:3000/tasks", gallery))
+
     def test_gallery_return_url_rejects_header_and_path_smuggling(self):
         gallery = "https://gallery.example.com/create"
         for value in ("/\nevil.example/steal", "/\revil.example/steal", "/\\evil.example/steal", "/ evil.example/steal"):

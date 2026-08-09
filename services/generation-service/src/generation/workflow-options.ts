@@ -30,6 +30,15 @@ export const WORKFLOW_SIZE_PRESETS: readonly WorkflowSizePreset[] = [
   { width: 1248, height: 832 },
 ];
 
+export const VIDEO_SIZE_PRESETS: readonly WorkflowSizePreset[] = [
+  { width: 1280, height: 720 },
+  { width: 720, height: 1280 },
+  { width: 960, height: 960 },
+  { width: 960, height: 720 },
+  { width: 720, height: 960 },
+  { width: 1680, height: 720 },
+];
+
 export function workflowBounds(inputSchema: unknown): WorkflowInputBounds {
   const properties = isRecord(inputSchema) && isRecord(inputSchema.properties) ? inputSchema.properties : undefined;
   return {
@@ -51,6 +60,23 @@ export function workflowSizePresets(bounds: WorkflowInputBounds, defaults: { rea
     merged.set(`${fallback.width}x${fallback.height}`, fallback);
   }
   return [...merged.values()].slice(0, 12);
+}
+
+export function workflowMediaSizePresets(bounds: WorkflowInputBounds, defaults: { readonly width: number; readonly height: number }, mediaType: "image" | "video"): readonly WorkflowSizePreset[] {
+  if (mediaType === "image") return workflowSizePresets(bounds, defaults);
+  const merged = new Map<string, WorkflowSizePreset>();
+  for (const preset of VIDEO_SIZE_PRESETS) {
+    if (inBounds(preset.width, bounds.width) && inBounds(preset.height, bounds.height)) merged.set(`${preset.width}x${preset.height}`, preset);
+  }
+  if (inBounds(defaults.width, bounds.width) && inBounds(defaults.height, bounds.height)) merged.set(`${defaults.width}x${defaults.height}`, defaults);
+  return [...merged.values()].slice(0, 12);
+}
+
+export function workflowDurationOptions(inputSchema: unknown, fallback: number): readonly number[] {
+  const properties = isRecord(inputSchema) && isRecord(inputSchema.properties) ? inputSchema.properties : undefined;
+  const duration = isRecord(properties?.durationSeconds) ? properties.durationSeconds : undefined;
+  const values = Array.isArray(duration?.enum) ? duration.enum.filter((value): value is number => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 300) : [];
+  return [...new Set(values.length ? values : [fallback])].sort((left, right) => left - right);
 }
 
 export function clampToBounds(value: number, bounds: IntegerBounds): number {

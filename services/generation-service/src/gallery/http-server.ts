@@ -50,7 +50,8 @@ export async function createGalleryHttpServer(options: {
   if (options.generation) {
     app.get("/v1/generation/workflows", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       viewer(request, options.auth);
-      return { items: await options.generation!.listWorkflows(parseWorkflowMode(request.query)) };
+      const filter = parseWorkflowFilter(request.query);
+      return { items: await options.generation!.listWorkflows(filter.mode, filter.mediaType) };
     });
     app.get("/v1/generations", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       return options.generation!.list(parseGenerationListRequest(request.query), viewer(request, options.auth));
@@ -165,12 +166,13 @@ function parseGenerationListRequest(value: unknown): GenerationListRequest {
   };
 }
 
-function parseWorkflowMode(value: unknown): "workflow" | "api" | undefined {
+function parseWorkflowFilter(value: unknown): { readonly mode?: "workflow" | "api"; readonly mediaType?: "image" | "video" } {
   const query = record(value);
   const mode = scalar(query.mode);
-  if (mode === undefined) return undefined;
-  if (mode !== "workflow" && mode !== "api") throw new GalleryError("invalid_request", "mode must be 'workflow' or 'api'", 400);
-  return mode;
+  const mediaType = scalar(query.mediaType);
+  if (mode !== undefined && mode !== "workflow" && mode !== "api") throw new GalleryError("invalid_request", "mode must be 'workflow' or 'api'", 400);
+  if (mediaType !== undefined && mediaType !== "image" && mediaType !== "video") throw new GalleryError("invalid_request", "mediaType must be 'image' or 'video'", 400);
+  return { ...(mode ? { mode } : {}), ...(mediaType ? { mediaType } : {}) };
 }
 
 function parseTaskListRequest(value: unknown): TaskListRequest {

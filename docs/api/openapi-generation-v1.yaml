@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MindfulPenPal Generation API
-  version: 1.0.0
+  version: 1.1.0
   description: Internal API consumed only by the signed Next.js BFF.
 security:
   - viewerContext: []
@@ -14,6 +14,10 @@ paths:
           name: mode
           required: false
           schema: { type: string, enum: [workflow, api] }
+        - in: query
+          name: mediaType
+          required: false
+          schema: { $ref: "#/components/schemas/MediaType" }
       responses:
         "200":
           description: Enabled creation methods with an eligible provider binding, split by workflow/api mode.
@@ -114,13 +118,14 @@ components:
   schemas:
     Workflow:
       type: object
-      required: [slug, name, description, category, mode, defaults, creditCost]
+      required: [slug, name, description, category, mode, mediaType, defaults, countRange, sizes, durations, creditCost]
       properties:
         slug: { type: string }
         name: { type: string }
         description: { type: string }
         category: { type: string }
         mode: { enum: [workflow, api] }
+        mediaType: { $ref: "#/components/schemas/MediaType" }
         defaults:
           type: object
           required: [width, height, count, visibility, promptVisibility]
@@ -130,6 +135,7 @@ components:
             count: { type: integer }
             visibility: { enum: [public, private] }
             promptVisibility: { enum: [public, hidden] }
+            durationSeconds: { type: integer, minimum: 1, maximum: 300 }
         countRange:
           type: object
           required: [min, max]
@@ -144,6 +150,9 @@ components:
             properties:
               width: { type: integer }
               height: { type: integer }
+        durations:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 300 }
         creditCost: { type: string, pattern: "^\\d+\\.\\d{4}$" }
     CreateGeneration:
       type: object
@@ -161,12 +170,13 @@ components:
         parameters: { type: object }
     Generation:
       type: object
-      required: [id, status, workflowSlug, workflowName, prompt, negativePrompt, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images]
+      required: [id, status, workflowSlug, workflowName, mediaType, prompt, negativePrompt, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images, outputs]
       properties:
         id: { type: string }
         status: { $ref: "#/components/schemas/GenerationStatus" }
         workflowSlug: { type: string }
         workflowName: { type: string }
+        mediaType: { $ref: "#/components/schemas/MediaType" }
         prompt: { type: string }
         negativePrompt: { type: string }
         width: { type: integer }
@@ -186,6 +196,23 @@ components:
             type: object
             required: [id, slug]
             properties: { id: { type: string }, slug: { type: string } }
+        outputs:
+          type: array
+          description: Owner-scoped durable non-Gallery outputs. Image Gallery links remain in images for backward compatibility.
+          items:
+            type: object
+            required: [id, mediaType, url, mimeType, width, height]
+            properties:
+              id: { type: string }
+              mediaType: { $ref: "#/components/schemas/MediaType" }
+              url: { type: string, format: uri }
+              mimeType: { type: string }
+              width: { type: integer, minimum: 1 }
+              height: { type: integer, minimum: 1 }
+              durationSeconds: { type: number, exclusiveMinimum: 0, maximum: 300 }
+    MediaType:
+      type: string
+      enum: [image, video]
     GenerationStatus:
       type: string
       enum: [pending, running, completed, failed, cancelled]

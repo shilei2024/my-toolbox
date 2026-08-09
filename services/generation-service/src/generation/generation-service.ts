@@ -1,6 +1,7 @@
 import { GalleryCursorCodec, type DecodedCursor } from "../gallery/cursor.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { JsonObject } from "../providers/types.ts";
+import type { MediaType } from "../providers/types.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
 import type { GenerationListRequest, GenerationMode, GenerationPage, GenerationStatus, GenerationView, GenerationVisibility, PromptVisibility } from "./types.ts";
@@ -24,7 +25,7 @@ export class GenerationService {
     this.#cursor = options.cursor;
   }
 
-  listWorkflows(mode?: GenerationMode) { return this.#repository.listWorkflows(this.#defaultCreditCost, mode); }
+  listWorkflows(mode?: GenerationMode, mediaType?: MediaType) { return this.#repository.listWorkflows(this.#defaultCreditCost, mode, mediaType); }
 
   async create(body: unknown, idempotencyKey: string | undefined, viewer: ViewerContext): Promise<GenerationView> {
     if (!this.#ready) {

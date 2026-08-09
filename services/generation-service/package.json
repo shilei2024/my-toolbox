@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Provider-agnostic image generation service core",
+  "description": "Provider-agnostic media generation service core",
   "scripts": {
-    "test": "node --experimental-strip-types --test test/provider-contract.test.ts test/phase4-comfyui.test.ts test/phase5-queue.test.ts test/phase6-gallery.test.ts test/phase7-seo.test.ts test/phase8-admin.test.ts test/phase9-multi-provider.test.ts test/phase10-billing.test.ts test/phase11-generation.test.ts test/phase12-task-center.test.ts test/idle-backoff.test.ts",
+    "test": "node --experimental-strip-types --test test/provider-contract.test.ts test/phase4-comfyui.test.ts test/phase5-queue.test.ts test/phase6-gallery.test.ts test/phase7-seo.test.ts test/phase8-admin.test.ts test/phase9-multi-provider.test.ts test/phase10-billing.test.ts test/phase11-generation.test.ts test/phase12-task-center.test.ts test/phase13-media-generation.test.ts test/idle-backoff.test.ts",
     "test:phase6:pg": "node --experimental-strip-types --test test/phase6-gallery.pg.integration.ts",
     "test:phase7:pg": "node --experimental-strip-types --test test/phase7-seo.pg.integration.ts",
     "test:phase8:pg": "node --experimental-strip-types --test test/phase8-admin.pg.integration.ts",
