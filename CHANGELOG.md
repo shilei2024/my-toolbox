@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.16 · 修复 Gallery 页面显示不完整（CSP 拦截流式渲染）/ 2026-08-09
+- **根因**：`next.config.ts` 静态设置的 CSP `default-src 'self'` 会拦截 Next.js
+  App Router 流式渲染用来揭示正文的内联脚本（`$RS` 等），页面打开后停留在头部 +
+  加载骨架；`img-src` 同时也会拦截腾讯云 COS/CDN 作品图。
+- **修复**：新增 `apps/gallery-web/src/proxy.ts`，用 Next.js 16 Proxy 为每次请求
+  生成随机 nonce，并写入请求/响应 CSP 头；Next.js 自动把 nonce 应用到框架脚本、
+  页面 JS 与内联脚本。`style-src` 保留 `'unsafe-inline'`（React 内联样式），
+  `img-src` 放开 `https:`（Generation Service 已按 `GALLERY_ASSET_HOSTS` 白名单
+  校验资源 URL）。
+- **验证**：生产构建、单测通过；本地生产模式 + mock Gallery API + 无头浏览器确认
+  流式占位节点被移除、作品卡片正常渲染、控制台无 CSP 违规。
+
 ## 0.7.15 — M5 unified queue observability / 2026-08-09
 - Connected the existing bounded BullMQ/Redis queue snapshot to the unified admin control plane at `GET /v1/admin/queue` and the BFF at `GET /api/admin/queue`.
 - Added an on-demand Queue Monitoring tab showing Redis latency, workers, backlog, active/delayed jobs, and retained terminal counts; it is read-only and admin-only.
