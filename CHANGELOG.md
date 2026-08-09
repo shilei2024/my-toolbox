@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3 · 强制 workflow/API 模式 Provider 边界 / 2026-08-10
+- 新增迁移 `0015_workflow_mode_provider_boundaries.sql`：`workflow` 模式只允许
+  绑定 ComfyUI，`api` 模式只允许绑定远程厂商模型；禁用 0007 遗留的跨厂商
+  fallback binding，避免 ComfyUI 不可用时生图工作流静默改走即梦/OpenAI/Gemini。
+- 修正根目录 `deploy/.env.production.example` 中 `COMFYUI_WORKFLOW_DIR` 为
+  `/app/workflows`（与 Dockerfile 一致）。
+
 ## 0.8.2 · 本机/Staging ComfyUI 视频冒烟脚本 / 2026-08-09
 - 新增 `npm run smoke:comfyui`：通过内部签名 API 提交一条 5 秒私有视频任务并
   轮询到终态，覆盖 API、队列、Worker、ComfyUI 与 COS 全链路；支持
