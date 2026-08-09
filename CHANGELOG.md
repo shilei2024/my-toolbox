@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.4 · Qwen 中文生图工作流与创作目录简介 / 2026-08-10
+- 新增 `qwen-image-v1` 工作流（迁移 0016）：Qwen-Image + 集成采样器，中文提示词
+  理解准确；本机实测中文提示词 768×768 正常出图。绑定参数 steps=20 / cfg=2.5 /
+  euler / simple，由服务端 binding 控制。
+- 工作流目录：补齐每个工作流的用途简介（SDXL 工作流标注英文提示词更佳，中文
+  创作推荐 Qwen）；前端工作流卡片增加“已选”标识与选中态。
+- 修正 ComfyUI 集成节点所需的 VAE/CLIP 模型名（`QWEN\qwen_image_vae` 等）。
+
 ## 0.8.3 · 强制 workflow/API 模式 Provider 边界 / 2026-08-10
 - 新增迁移 `0015_workflow_mode_provider_boundaries.sql`：`workflow` 模式只允许
   绑定 ComfyUI，`api` 模式只允许绑定远程厂商模型；禁用 0007 遗留的跨厂商
