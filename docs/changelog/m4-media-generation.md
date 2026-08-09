@@ -20,6 +20,9 @@
 - Generation Service typecheck + 93 项单元/契约测试通过（含 Ark Adapter、
   VideoPersistenceService、ComfyUI 视频输出与工作流加载）。
 - Gallery Web lint + 15 项测试 + Next.js 生产构建通过；Python 116 项测试通过。
+- PostgreSQL 集成：迁移 0001–0014 全量应用，phase13 验证 `ai.generation_assets`
+  约束、owner-scoped 视频资产读取与媒体工作流默认禁用；phase9 目录适配
+  `ark-video`。
 - 本地真实链路：ComfyUI 生图与 960×544、24 FPS、121 帧、约 5.04 秒 LTX 视频；
   结果均上传 COS、写入耐久资产并完成积分结算。
 

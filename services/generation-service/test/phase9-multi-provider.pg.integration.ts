@@ -26,13 +26,13 @@ describe("Phase 9 PostgreSQL provider model catalog", { skip: !databaseUrl }, ()
 
   after(async () => {
     await pool.query("DELETE FROM ai.workflows WHERE id = $1", [WORKFLOW_ID]);
-    await pool.query("UPDATE ai.providers SET status = 'disabled' WHERE code IN ('openai', 'gemini', 'jimeng')");
+    await pool.query("UPDATE ai.providers SET status = 'disabled' WHERE code IN ('openai', 'gemini', 'jimeng', 'ark-video')");
     await pool.end();
   });
 
   it("loads only active bindings with model identity and applies database routing state", async () => {
     const models = await pool.query<{ code: string; model_code: string }>(`SELECT p.code, m.model_code FROM ai.provider_models m JOIN ai.providers p ON p.id = m.provider_id ORDER BY p.code`);
-    assert.deepEqual(models.rows.map((row) => row.code), ["gemini", "jimeng", "openai"]);
+    assert.deepEqual(models.rows.map((row) => row.code), ["ark-video", "gemini", "jimeng", "openai"]);
     const bindings = await catalog.bindingsFor(VERSION_ID);
     assert.equal(bindings.length, 1);
     assert.equal(bindings[0]?.providerCode, "openai");

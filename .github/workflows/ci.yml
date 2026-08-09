@@ -119,6 +119,7 @@ jobs:
       PHASE8_TEST_DATABASE_URL: postgresql://ci:ci-password@127.0.0.1:5432/mindfulpenpal_ci
       PHASE9_TEST_DATABASE_URL: postgresql://ci:ci-password@127.0.0.1:5432/mindfulpenpal_ci
       PHASE10_TEST_DATABASE_URL: postgresql://ci:ci-password@127.0.0.1:5432/mindfulpenpal_ci
+      PHASE13_TEST_DATABASE_URL: postgresql://ci:ci-password@127.0.0.1:5432/mindfulpenpal_ci
     defaults:
       run:
         working-directory: services/generation-service
@@ -150,3 +151,4 @@ jobs:
           npm run test:phase8:pg
           npm run test:phase9:pg
           npm run test:phase10:pg
+          npm run test:phase13:pg

@@ -8,7 +8,10 @@
   ComfyUI workflow 加载失败；root `.env.example` 补齐 ComfyUI 变量。
 - **preflight 支持视频 Provider**：只配置火山方舟视频密钥时也能通过
   “至少一个真实 Provider”检查，并校验 `ARK_VIDEO_BASE_URL`。
-- **CI 补全**：Gallery 任务从仅跑 SEO 测试改为运行完整单测（含新的登录回跳测试）；
+- **CI 修复与补全**：`DATABASE_URL: sqlite:///:memory:` 裸标量导致 workflow YAML
+  解析失败（main 自 0.7.17 起 CI 全红），加引号修复；Gallery 任务从仅跑 SEO
+  测试改为运行完整单测；phase9 PG 集成测试适配新增 `ark-video` Provider；
+  新增 phase13 PG 集成测试覆盖 `ai.generation_assets` 与 fail-closed 媒体工作流。
   发布 runbook 同步最新验证命令与 0001–0014 迁移范围。
 
 ## 0.8.0 · Gallery 图片/视频统一工作流与 ComfyUI/Ark 视频闭环 / 2026-08-09
