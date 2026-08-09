@@ -277,7 +277,7 @@ export function GenerationWorkbench() {
           {visibleWorkflows.length === 0
             ? <div className="workflow-loading">该分类暂无可用方式，请切换分类或稍后再试。</div>
             : <div className="workflow-grid" role="radiogroup" aria-label={mode === "workflow" ? "工作流创作方式" : "API 模型创作方式"}>
-              {visibleWorkflows.map((item) => <label className="workflow-option" key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small></label>)}
+              {visibleWorkflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
             </div>}
         </>}
 

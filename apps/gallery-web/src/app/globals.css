@@ -393,7 +393,8 @@ select:focus-visible {
 }
 
 .workflow-option:hover,
-.workflow-option:has(input:checked) {
+.workflow-option:has(input:checked),
+.workflow-option.selected {
   border-color: #9fc3f7;
   background: var(--brand-blue-soft);
   transform: translateY(-1px);
@@ -426,6 +427,14 @@ select:focus-visible {
   padding: 2px 6px;
   border-radius: 999px;
   background: rgb(255 255 255 / 70%);
+}
+
+.workflow-check {
+  grid-column: 1 / -1;
+  justify-self: end;
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .composer-section {
