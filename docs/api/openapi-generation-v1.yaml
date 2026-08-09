@@ -9,9 +9,14 @@ paths:
   /v1/generation/workflows:
     get:
       operationId: listGenerationWorkflows
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema: { type: string, enum: [workflow, api] }
       responses:
         "200":
-          description: Enabled workflows with an eligible provider binding.
+          description: Enabled creation methods with an eligible provider binding, split by workflow/api mode.
           content:
             application/json:
               schema:
@@ -109,20 +114,22 @@ components:
   schemas:
     Workflow:
       type: object
-      required: [slug, name, description, category, defaults, creditCost]
+      required: [slug, name, description, category, mode, defaults, creditCost]
       properties:
         slug: { type: string }
         name: { type: string }
         description: { type: string }
         category: { type: string }
+        mode: { enum: [workflow, api] }
         defaults:
           type: object
-          required: [width, height, count, visibility]
+          required: [width, height, count, visibility, promptVisibility]
           properties:
             width: { type: integer }
             height: { type: integer }
             count: { type: integer }
             visibility: { enum: [public, private] }
+            promptVisibility: { enum: [public, hidden] }
         countRange:
           type: object
           required: [min, max]

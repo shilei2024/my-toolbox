@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.19 · 生图「工作流 / API」分开 + 默认公开到画廊 / 2026-08-09
+- **创作目录分离**：`ai.workflows` 新增 `mode`（workflow/api）；每个已启用的
+  Provider 模型自动生成一个 API 模式工作流（绑定唯一模型），`/create` 以
+  「工作流 / API 模型」两个 Tab 分开选择；`GET /v1/generation/workflows` 支持
+  `?mode=workflow|api` 过滤，统一后台工作流卡片显示模式标签。Provider 默认
+  disabled，未启用前 API 模式不会出现在创作目录。
+- **默认公开**：新任务的作品可见性与 Prompt 默认均为公开（前端初始值、
+  workflow defaults、服务端解析回退三层一致）；历史私有/隐藏作品不回填。
+- **文档与验证**：新增 ADR-0024；OpenAPI、M1 架构与 changelog 同步；Generation
+  Service typecheck + 测试、Gallery lint/测试/生产构建通过。
+
 ## 0.7.18 · Gallery 仅部署 Vercel，撤销腾讯云自托管 / 2026-08-09
 - **决策**：`gallery.mindfulpenpal.com` 保持 CNAME → Vercel；腾讯云服务器不再运行
   Gallery 容器（ADR-0023 覆盖 ADR-0022）。

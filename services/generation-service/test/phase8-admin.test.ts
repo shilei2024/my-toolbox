@@ -86,7 +86,7 @@ function dashboard(): AdminDashboard {
     overview: { pendingModeration: 1, publicImages: 4, jobsLast24Hours: 3, failedJobsLast24Hours: 0, activeProviders: 1, enabledWorkflows: 1 },
     moderationQueue: [{ id: IMAGE_ID, slug: "review-me", title: "Review me", workflowName: "Portrait", moderationStatus: "manual_review", visibility: "public", promptVisibility: "hidden", thumbnailUrl: "https://assets.example.test/review.webp", createdAt: UPDATED_AT, updatedAt: UPDATED_AT }],
     providers: [{ id: PROVIDER_ID, code: "comfyui", displayName: "ComfyUI", adapterType: "comfyui", status: "active", priority: 10, secretConfigured: true, consecutiveFailures: 0, updatedAt: UPDATED_AT, models: [{ id: "model-1", providerId: PROVIDER_ID, modelCode: "comfyui-v1", displayName: "ComfyUI v1", tier: "free", isDefault: true, isEnabled: true, updatedAt: UPDATED_AT }] }],
-    workflows: [{ id: WORKFLOW_ID, slug: "portrait", name: "Portrait", category: "people", isEnabled: true, sortOrder: 10, activeVersion: 1, bindingCount: 1, updatedAt: UPDATED_AT }],
+    workflows: [{ id: WORKFLOW_ID, slug: "portrait", name: "Portrait", category: "people", mode: "workflow", isEnabled: true, sortOrder: 10, activeVersion: 1, bindingCount: 1, updatedAt: UPDATED_AT }],
     recentJobs: [],
     recentAudit: [],
   };

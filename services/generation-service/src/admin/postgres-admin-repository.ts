@@ -60,6 +60,7 @@ interface WorkflowRow extends QueryResultRow {
   slug: string;
   name: string;
   category: string;
+  mode: "workflow" | "api";
   is_enabled: boolean;
   sort_order: number;
   active_version: number | null;
@@ -238,7 +239,7 @@ function imageSelect(): string {
 }
 
 function workflowSelect(suffix: string): string {
-  return `SELECT w.id, w.slug, w.name, w.category, w.is_enabled, w.sort_order, w.updated_at,
+  return `SELECT w.id, w.slug, w.name, w.category, w.mode, w.is_enabled, w.sort_order, w.updated_at,
       active.version AS active_version, COALESCE(binding.binding_count, 0)::text AS binding_count
     FROM ai.workflows w
     LEFT JOIN LATERAL (SELECT version FROM ai.workflow_versions WHERE workflow_id = w.id AND is_active LIMIT 1) active ON true
@@ -265,7 +266,7 @@ function model(row: ProviderModelRow): AdminProviderModelItem {
 }
 
 function workflow(row: WorkflowRow): AdminWorkflowItem {
-  return { id: row.id, slug: row.slug, name: row.name, category: row.category, isEnabled: row.is_enabled, sortOrder: row.sort_order, ...(row.active_version !== null ? { activeVersion: row.active_version } : {}), bindingCount: Number(row.binding_count), updatedAt: iso(row.updated_at) };
+  return { id: row.id, slug: row.slug, name: row.name, category: row.category, mode: row.mode === "api" ? "api" : "workflow", isEnabled: row.is_enabled, sortOrder: row.sort_order, ...(row.active_version !== null ? { activeVersion: row.active_version } : {}), bindingCount: Number(row.binding_count), updatedAt: iso(row.updated_at) };
 }
 
 function job(row: JobRow): AdminJobItem {

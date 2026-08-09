@@ -2,10 +2,10 @@ import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type { DecodedCursor } from "../gallery/cursor.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
-import type { CancelGenerationResult, CreateGenerationInput, GenerationPageResult, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
+import type { CancelGenerationResult, CreateGenerationInput, GenerationMode, GenerationPageResult, GenerationStatus, GenerationView, GenerationVisibility, GenerationWorkflowView, PromptVisibility } from "./types.ts";
 import { clampToBounds, workflowBounds, workflowSizePresets } from "./workflow-options.ts";
 
-interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; defaults: Record<string, unknown>; input_schema: unknown }
+interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; mode: GenerationMode; defaults: Record<string, unknown>; input_schema: unknown }
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
   prompt: string; negative_prompt: string;
@@ -17,13 +17,20 @@ export class PostgresGenerationRepository implements GenerationRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
-  async listWorkflows(defaultCreditCost: string): Promise<readonly GenerationWorkflowView[]> {
-    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, v.defaults, v.input_schema
-      FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
-      WHERE w.is_enabled AND EXISTS (
+  async listWorkflows(defaultCreditCost: string, mode?: GenerationMode): Promise<readonly GenerationWorkflowView[]> {
+    const values: unknown[] = [];
+    const conditions = ["w.is_enabled", `EXISTS (
         SELECT 1 FROM ai.workflow_provider_bindings b JOIN ai.providers p ON p.id = b.provider_id
         WHERE b.workflow_version_id = v.id AND b.is_enabled AND p.status <> 'disabled'
-      ) ORDER BY w.sort_order, w.slug`);
+      )`];
+    if (mode) {
+      values.push(mode);
+      conditions.push(`w.mode = $${values.length}`);
+    }
+    const result = await this.#pool.query<WorkflowRow>(`SELECT w.id, w.slug, w.name, w.description, w.category, w.mode, v.defaults, v.input_schema
+      FROM ai.workflows w JOIN ai.workflow_versions v ON v.workflow_id = w.id AND v.is_active
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY w.sort_order, w.slug`, values);
     return result.rows.map((row) => workflowView(row, defaultCreditCost));
   }
 
@@ -186,10 +193,12 @@ function workflowView(row: WorkflowRow, defaultCreditCost: string): GenerationWo
     width: boundedInteger(row.defaults.width, 1024, 64, 8192),
     height: boundedInteger(row.defaults.height, 1024, 64, 8192),
     count: boundedInteger(row.defaults.count, 1, 1, 8),
-    visibility: visibility(row.defaults.visibility),
+    visibility: visibility(row.defaults.visibility, "public"),
+    promptVisibility: promptVisibility(row.defaults.prompt_visibility, "public"),
   };
   return {
     slug: row.slug, name: row.name, description: row.description, category: row.category,
+    mode: row.mode === "api" ? "api" : "workflow",
     defaults: { ...defaults, count: clampToBounds(defaults.count, bounds.count) },
     countRange: { min: bounds.count.min, max: bounds.count.max },
     sizes: workflowSizePresets(bounds, defaults),
@@ -212,7 +221,8 @@ function workflowCreditCostFor(defaults: Record<string, unknown>, fallback: stri
   return workflowCreditCost(defaults, fallback);
 }
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number { return Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max ? Number(value) : fallback; }
-function visibility(value: unknown): GenerationVisibility { return value === "public" || value === "private" ? value : "private"; }
+function visibility(value: unknown, fallback: GenerationVisibility): GenerationVisibility { return value === "public" || value === "private" ? value : fallback; }
+function promptVisibility(value: unknown, fallback: PromptVisibility): PromptVisibility { return value === "public" || value === "hidden" ? value : fallback; }
 function jobView(row: JobRow): GenerationView {
   const safeMessage = row.error_message?.replace(/[\r\n]/g, " ").slice(0, 240);
   return {

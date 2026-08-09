@@ -41,7 +41,11 @@
 
 ## Generation API
 
-浏览器端 BFF 为 `GET /api/generation/workflows`、`POST /api/generations`、`GET/DELETE /api/generations/:id`。内部对应 `/v1/generation/workflows` 与 `/v1/generations/*`，机器可读契约见 [openapi-generation-v1.yaml](openapi-generation-v1.yaml)。创建必须携带 `Idempotency-Key`，且只接受服务端签名的登录用户上下文。
+浏览器端 BFF 为 `GET /api/generation/workflows`（支持 `?mode=workflow|api`
+过滤，返回带 `mode` 的完整创作目录）、`POST /api/generations`、
+`GET/DELETE /api/generations/:id`。内部对应 `/v1/generation/workflows` 与
+`/v1/generations/*`，机器可读契约见 [openapi-generation-v1.yaml](openapi-generation-v1.yaml)。
+创建必须携带 `Idempotency-Key`，且只接受服务端签名的登录用户上下文。
 
 ## Task Center API
 

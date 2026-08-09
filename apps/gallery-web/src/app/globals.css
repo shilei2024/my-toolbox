@@ -331,6 +331,54 @@ select:focus-visible {
   gap: 10px;
 }
 
+.creation-mode-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 3px);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.mode-tab:hover {
+  background: var(--brand-blue-soft);
+  color: var(--ink);
+}
+
+.mode-tab.active {
+  background: var(--brand-blue);
+  color: #fff;
+}
+
+.mode-tab .mode-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.mode-tab.active .mode-count {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .workflow-option {
   min-width: 0;
   padding: 15px;
