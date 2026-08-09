@@ -50,6 +50,46 @@ SELECT code, status FROM ai.providers WHERE code = 'ark-video';
 
 预期至少有一条 `video` workflow，且 `ark-video` 为 `disabled`。
 
+## 3.1 Staging 可执行命令（在 Staging 主机仓库根目录执行）
+
+先备份（失败可恢复）：
+
+```sh
+sh services/generation-service/deploy/backup-staging.sh
+```
+
+预期输出 `backup created: deploy/backups/generation-staging-<时间戳>.dump`。恢复演练：
+
+```sh
+container=$(docker compose --env-file deploy/.env.staging -f deploy/compose.staging.yaml ps -q postgres)
+docker cp deploy/backups/generation-staging-<时间戳>.dump "$container":/tmp/backup.dump
+docker compose --env-file deploy/.env.staging -f deploy/compose.staging.yaml exec -T postgres sh -ec \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists /tmp/backup.dump'
+```
+
+> 正式回滚前应先恢复到临时库验证 dump 可读，再对目标库执行；`--clean --if-exists`
+> 会覆盖现有对象，务必先确认容器与库名正确。
+
+启动基础服务并执行迁移：
+
+```sh
+cd services/generation-service/deploy
+docker compose --env-file .env.staging -f compose.staging.yaml up -d postgres redis
+docker compose --env-file .env.staging -f compose.staging.yaml run --rm migrate
+```
+
+预期输出包含 `applying migration: 0013_media_generation.sql` 和
+`0014_comfyui_media_workflows.sql`；再次执行显示 `migration already applied`。
+
+验证迁移结果：
+
+```sh
+docker compose --env-file .env.staging -f compose.staging.yaml exec -T postgres sh -ec \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT media_type, count(*) FROM ai.workflows GROUP BY media_type"'
+```
+
+预期至少一条 `video` 且 `ark-video` Provider 为 `disabled`。
+
 ## 4. 发布与启用顺序
 
 1. 发布兼容新字段的 Generation API/Worker。
@@ -61,6 +101,68 @@ SELECT code, status FROM ai.providers WHERE code = 'ark-video';
 7. 审核日志不得出现 API Key、Authorization、临时完整响应或完整 Prompt。
 
 生产启用前还必须用真实账单对比积分价格；不确定价格时保持 disabled。
+
+## 4.1 启用（统一后台优先，SQL 只作可审计的等价操作）
+
+Staging 专用；生产必须走变更审批，不得照抄：
+
+```sql
+UPDATE ai.providers SET status = 'active' WHERE code = 'ark-video';
+UPDATE ai.provider_models SET is_enabled = true WHERE model_code = 'doubao-seedance-2-0-260128';
+UPDATE ai.workflows SET is_enabled = true WHERE slug = 'api-ark-video-doubao-seedance-2-0-260128';
+```
+
+若 Staging Worker 直连本机 ComfyUI（按[本机联调指南](gallery-local-comfyui.md)配置），
+额外启用：
+
+```sql
+UPDATE ai.providers SET status = 'active' WHERE code = 'comfyui';
+UPDATE ai.workflows SET is_enabled = true WHERE slug = 'comfyui-ltx-video-v1';
+```
+
+模型与 binding 已在迁移 0014 中启用，不需要额外开启。启用后确认
+`/create` 的“生视频 / API 模型”目录出现对应工作流。
+
+## 4.2 端到端验收
+
+1. 用测试账号登录 Gallery → `/create` → 生视频 → API 模型 → Seedance 2.0，
+   提交 5 秒任务。
+2. 预期状态 `pending → running → completed`；运行中不再显示取消按钮。
+3. 核对任务、耐久资产与积分结算：
+
+```sql
+SELECT j.status, j.credits_reserved, j.credits_charged,
+       a.object_key, a.mime_type, a.byte_size, a.duration_seconds
+FROM ai.generation_jobs j
+LEFT JOIN ai.generation_assets a ON a.job_id = j.id
+WHERE j.user_id = <测试用户id>
+ORDER BY j.created_at DESC LIMIT 10;
+```
+
+4. 核对积分账本（成功只结算一次，失败/取消只释放一次）：
+
+```sql
+SELECT * FROM ai.credit_ledger_entries
+WHERE user_id = <测试用户id>
+ORDER BY created_at DESC LIMIT 20;
+```
+
+5. 核对审计日志不包含密钥、Authorization、完整 Prompt 或临时完整响应：
+
+```sql
+SELECT action, resource_type, resource_id, created_at
+FROM ai.audit_logs ORDER BY created_at DESC LIMIT 20;
+```
+
+6. 查看 Worker 日志，预期出现任务完成、资产持久化与积分结算，不出现敏感字段：
+
+```sh
+docker compose --env-file .env.staging -f compose.staging.yaml logs -f worker
+```
+
+7. 在 COS 控制台确认 `videos/<owner>/<job>/0.mp4`，抽查时长与 FPS。
+
+8. 测试排队取消：pending 任务可取消且积分释放；进入 running 后 UI 不再提供取消。
 
 ## 5. 常见失败
 
@@ -81,3 +183,15 @@ SELECT code, status FROM ai.providers WHERE code = 'ark-video';
 4. 保留 `media_type`、`generation_assets`、任务、账本和 COS 对象；它们是审计事实。
 
 仅在确认所有旧镜像兼容、完成数据库备份并通过变更审批后，才编写新的反向迁移。不要直接 `DROP TABLE`，也不要批量删除 COS。
+
+## 6.1 回滚 SQL（与统一后台禁用等价，先执行再回滚镜像）
+
+```sql
+UPDATE ai.workflows SET is_enabled = false WHERE media_type = 'video';
+UPDATE ai.provider_models SET is_enabled = false
+  WHERE provider_id IN (SELECT id FROM ai.providers WHERE code IN ('ark-video', 'comfyui'));
+UPDATE ai.providers SET status = 'disabled' WHERE code IN ('ark-video', 'comfyui');
+```
+
+等待运行任务终态并核对上游账单后再回滚 Web/Worker/API 镜像；保留
+`media_type`、`generation_assets`、账本与 COS 对象。
