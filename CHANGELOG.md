@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.5 · Ideogram 4 文生图工作流 / 2026-08-10
+- 新增 `ideogram4-t2i-v1` 工作流（迁移 0017）：Ideogram 4 双模型 CFG 引导 +
+  Ideogram4Scheduler（Default：20 步 / mu 0 / std 1.75）+ euler_ancestral；
+  基于【Work-Fisher】Ideogram4半自动文生图V2 简化，擅长版式、文字与写实构图。
+- 本机实测 1024×1024 正常出图；绑定参数由服务端 binding 控制。
+
 ## 0.8.4 · Qwen 中文生图工作流与创作目录简介 / 2026-08-10
 - 新增 `qwen-image-v1` 工作流（迁移 0016）：Qwen-Image + 集成采样器，中文提示词
   理解准确；本机实测中文提示词 768×768 正常出图。绑定参数 steps=20 / cfg=2.5 /
