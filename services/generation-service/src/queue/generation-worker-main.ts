@@ -3,6 +3,7 @@ import { ComfyUIClient } from "../comfyui/client.ts";
 import { ComfyUIProvider } from "../comfyui/provider.ts";
 import { loadPhase4Config } from "../config.ts";
 import { ImagePersistenceService } from "../pipeline/image-persistence.ts";
+import { MediaPersistenceService, VideoPersistenceService } from "../pipeline/media-persistence.ts";
 import { PollingService } from "../pipeline/polling-service.ts";
 import { ProductionGenerationPipeline } from "../pipeline/production-generation-pipeline.ts";
 import { ConsoleStructuredLogger } from "../pipeline/structured-logger.ts";
@@ -57,7 +58,11 @@ const storage = new TencentCosStorage({
 });
 const temporaryRoot = path.resolve(required("GENERATION_TEMP_DIR"));
 const polling = new PollingService({ intervalMs: integer("GENERATION_POLL_INTERVAL_MS", 1000, 100, 60_000), maxAttempts: integer("GENERATION_POLL_MAX_ATTEMPTS", 600, 1, 7200) });
-const persistence = new ImagePersistenceService(storage, temporaryRoot, integer("GENERATION_REMOTE_DOWNLOAD_TIMEOUT_MS", 60_000, 1000, 300_000));
+const downloadTimeoutMs = integer("GENERATION_REMOTE_DOWNLOAD_TIMEOUT_MS", 60_000, 1000, 300_000);
+const persistence = new MediaPersistenceService(
+  new ImagePersistenceService(storage, temporaryRoot, downloadTimeoutMs),
+  new VideoPersistenceService(storage, temporaryRoot, downloadTimeoutMs, integer("GENERATION_VIDEO_MAX_BYTES", 209_715_200, 1_048_576, 2_147_483_647)),
+);
 const pipeline = new ProductionGenerationPipeline(polling, persistence, logger);
 const processor = new GenerationQueueProcessor(new PostgresGenerationJobRepository(pool, { defaultModerationStatus: parseDefaultModeration(process.env.GALLERY_DEFAULT_MODERATION) }), new ProviderSelectionPolicy(registry), pipeline, logger, {
   retryBaseMs: integer("GENERATION_PROVIDER_RETRY_BASE_MS", 500, 0, 30_000), maxTotalCalls: integer("GENERATION_PROVIDER_MAX_TOTAL_CALLS", 6, 1, 10),

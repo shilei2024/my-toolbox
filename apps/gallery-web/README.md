@@ -35,6 +35,11 @@ Phase 7 SEO 规则和部署检查见 `../../docs/architecture/phase-7-seo-pages.
 
 Phase 8 管理边界和部署检查见 `../../docs/architecture/phase-8-admin-console.md` 与 `../../docs/deployment/phase-8-deployment.md`。
 
+图片/视频统一创作台、媒体工作流筛选和视频 owner-only 输出见
+`../../docs/architecture/m4-media-generation.md` 与 `../../docs/deployment/m4-media-generation.md`。
+Gallery 调用本机 ComfyUI 的完整启动、模型、依赖、验收和回滚步骤见
+`../../docs/deployment/gallery-local-comfyui.md`。
+
 ## 验证
 
 ```powershell

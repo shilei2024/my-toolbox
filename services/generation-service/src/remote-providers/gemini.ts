@@ -11,7 +11,7 @@ const RATIOS = [[1, 1, "1:1"], [1, 4, "1:4"], [1, 8, "1:8"], [2, 3, "2:3"], [3, 
 export class GeminiImageProvider implements ImageProvider {
   readonly descriptor: ProviderDescriptor = {
     code: "gemini", displayName: "Google Gemini Image", availability: "active", priority: 50,
-    capabilities: { modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 1, supportsSeed: false, supportsCancellation: false, supportsStatusPolling: false },
+    capabilities: { mediaTypes: ["image"], modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 1, supportsSeed: false, supportsCancellation: false, supportsStatusPolling: false },
   };
   readonly #config: RemoteProviderHttpConfig;
   readonly #fetcher: typeof fetch;

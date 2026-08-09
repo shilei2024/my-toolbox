@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.1 · M4 上线前修复与发布补全 / 2026-08-09
+- **修复 Gallery 生产构建阻断**：`auth-links.ts` 残留 `safeNext` 调用导致
+  `next build` 类型检查失败，改为统一使用抽出的 `safeAuthReturnUrl`。
+- **修复容器工作流路径**：部署 env 示例的 `COMFYUI_WORKFLOW_DIR` 从
+  `/app/src/workflows` 改为与 Dockerfile 一致的 `/app/workflows`，避免容器内
+  ComfyUI workflow 加载失败；root `.env.example` 补齐 ComfyUI 变量。
+- **preflight 支持视频 Provider**：只配置火山方舟视频密钥时也能通过
+  “至少一个真实 Provider”检查，并校验 `ARK_VIDEO_BASE_URL`。
+- **CI 修复与补全**：`DATABASE_URL: sqlite:///:memory:` 裸标量导致 workflow YAML
+  解析失败（main 自 0.7.17 起 CI 全红），加引号修复；Gallery 任务从仅跑 SEO
+  测试改为运行完整单测；phase9 PG 集成测试适配新增 `ark-video` Provider；
+  新增 phase13 PG 集成测试覆盖 `ai.generation_assets` 与 fail-closed 媒体工作流。
+  发布 runbook 同步最新验证命令与 0001–0014 迁移范围。
+
+## 0.8.0 · Gallery 图片/视频统一工作流与 ComfyUI/Ark 视频闭环 / 2026-08-09
+- **统一媒体契约**：工作流新增 `media_type`，目录 API 支持图片/视频与
+  workflow/API 双维度过滤；创建 API 仍只接受 `workflowSlug`，Provider 和模型留在服务端 binding。
+- **视频生产链路**：新增火山方舟异步视频 Adapter、5/10 秒白名单、流式受限下载、
+  COS `videos/` 耐久化与 `ai.generation_assets`；视频任务复用既有队列、积分、审计和任务中心。
+- **本机 ComfyUI**：ComfyUI Adapter 扩展为图片/视频共用 Provider，支持 Video Helper Suite
+  MP4 输出、LTX 2.3 API workflow、服务端随机 seed 和 server-owned 模型/采样参数；新增默认禁用的迁移与完整本地联调指南。
+- **Gallery Web**：`/create` 增加生图/生视频切换、视频时长与结果播放；视频暂为 owner-only，
+  不进入公共图片 Gallery。运行中视频不接受用户取消，避免上游继续计费而平台退款；任务进入终态后会刷新积分余额。
+- **本地登录与可靠性**：仅对相同 loopback origin 允许 HTTP 登录回跳并允许 Next.js dev origin；修复失败结算 SQL 中 PostgreSQL enum/text 参数类型推断冲突。
+- **安全发布**：Provider/模型/工作流迁移后默认 fail-closed，必须经过 Staging 真凭据、成本和内容安全验收再启用。
+- **真实链路验证**：Gallery 页面已完成本机 ComfyUI 生图和 960×544、24 FPS、121 帧、约 5.04 秒 LTX 视频；两类结果均上传 COS、写入耐久资产并完成积分结算。
+
 ## 0.7.20 · 修复 /create 整页打开时被 CSP 拦截 / 2026-08-09
 - **根因**：`/create` 被静态预渲染，而 CSP 中间件只在动态渲染时把 nonce 注入
   页面脚本；静态 HTML 的脚本没有 nonce，配合 `strict-dynamic` CSP 后所有脚本

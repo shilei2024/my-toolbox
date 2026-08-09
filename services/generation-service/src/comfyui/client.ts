@@ -7,8 +7,25 @@ import type { ComfyUIConfig } from "../config.ts";
 import { ProviderError } from "../providers/errors.ts";
 import type { JsonObject } from "../providers/types.ts";
 
-export interface ComfyImageRef { readonly filename: string; readonly subfolder: string; readonly type: string }
-export interface ComfyHistoryEntry { readonly status?: { readonly completed?: boolean; readonly status_str?: string; readonly messages?: unknown[] }; readonly outputs?: Record<string, { readonly images?: ComfyImageRef[] }> }
+export interface ComfyOutputRef {
+  readonly filename: string;
+  readonly subfolder: string;
+  readonly type: string;
+  readonly format?: string;
+  readonly frame_rate?: number;
+}
+/** @deprecated Use ComfyOutputRef. */
+export type ComfyImageRef = ComfyOutputRef;
+export interface ComfyHistoryEntry {
+  readonly status?: { readonly completed?: boolean; readonly status_str?: string; readonly messages?: unknown[] };
+  readonly outputs?: Record<string, {
+    readonly images?: ComfyOutputRef[];
+    /** Video Helper Suite publishes rendered videos under `gifs`. */
+    readonly gifs?: ComfyOutputRef[];
+    /** Kept for custom output nodes that use the more explicit key. */
+    readonly videos?: ComfyOutputRef[];
+  }>;
+}
 export interface ComfyRetryEvent { readonly path: string; readonly retryNumber: number; readonly retryLimit: number; readonly failureCode: string }
 export type ComfyRetryObserver = (event: ComfyRetryEvent) => void;
 
@@ -30,13 +47,17 @@ export class ComfyUIClient {
     return isObject(data) ? data[promptId] as ComfyHistoryEntry | undefined : undefined;
   }
 
-  async downloadImage(image: ComfyImageRef, destination: string, signal?: AbortSignal): Promise<void> {
-    const query = new URLSearchParams({ filename: image.filename, subfolder: image.subfolder, type: image.type });
+  async downloadOutput(output: ComfyOutputRef, destination: string, signal?: AbortSignal): Promise<void> {
+    const query = new URLSearchParams({ filename: output.filename, subfolder: output.subfolder, type: output.type });
     const response = await this.#request(`/view?${query}`, { method: "GET", ...(signal ? { signal } : {}) }, this.config.downloadTimeoutMs);
-    if (!response.body) throw this.#error("upstream", "empty_image_body", "ComfyUI returned an empty image");
+    if (!response.body) throw this.#error("upstream", "empty_output_body", "ComfyUI returned an empty output");
     await mkdir(path.dirname(destination), { recursive: true });
     try { await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination)); }
-    catch (error) { await rm(destination, { force: true }); throw this.#error("upstream", "image_download_failed", "ComfyUI image download failed", error); }
+    catch (error) { await rm(destination, { force: true }); throw this.#error("upstream", "output_download_failed", "ComfyUI output download failed", error); }
+  }
+
+  async downloadImage(image: ComfyImageRef, destination: string, signal?: AbortSignal): Promise<void> {
+    await this.downloadOutput(image, destination, signal);
   }
 
   async cancelPrompt(promptId: string, signal?: AbortSignal): Promise<boolean> {

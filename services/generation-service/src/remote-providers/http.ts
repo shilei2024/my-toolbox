@@ -61,11 +61,11 @@ export function mapRemoteHttpError(
 ): ProviderError {
   if (error instanceof ProviderError) return error;
   if (!(error instanceof RemoteHttpResponseError)) {
-    return new ProviderError({ providerCode, category: "unknown", code: "provider_unknown_error", message: "Image provider request failed", retryable: false, cause: error });
+    return new ProviderError({ providerCode, category: "unknown", code: "provider_unknown_error", message: "Generation provider request failed", retryable: false, cause: error });
   }
   const upstreamCode = safeErrorCode(error.data);
   if (isContentPolicyError(error.data)) {
-    return new ProviderError({ providerCode, category: "content_policy", code: "content_policy_blocked", message: "Image generation was blocked by provider safety policy", retryable: false, statusCode: error.statusCode, ...(error.requestId ? { externalRequestId: error.requestId } : {}), cause: error });
+    return new ProviderError({ providerCode, category: "content_policy", code: "content_policy_blocked", message: "Generation was blocked by provider safety policy", retryable: false, statusCode: error.statusCode, ...(error.requestId ? { externalRequestId: error.requestId } : {}), cause: error });
   }
   const category = error.statusCode === 401 || error.statusCode === 403
     ? "authentication"

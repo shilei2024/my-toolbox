@@ -18,6 +18,7 @@
 9. [Phase 9：多 Provider](phase-9-multi-provider.md)
 10. [Phase 10：支付、积分与会员](phase-10-payments-credits-memberships.md)
 11. [M1：Generation 生产闭环](m1-generation-production-loop.md)
+12. [M4：Gallery 图片与视频生成](m4-media-generation.md)
 
 ## 图表
 

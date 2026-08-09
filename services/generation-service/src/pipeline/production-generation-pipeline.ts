@@ -1,17 +1,17 @@
 import { ProviderError } from "../providers/errors.ts";
 import type { ImageProvider } from "../providers/image-provider.ts";
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../providers/types.ts";
-import type { ImagePersistenceService, PersistedImageAsset } from "./image-persistence.ts";
+import type { GenerationPersistence, PersistedGenerationAsset } from "./media-persistence.ts";
 import type { PollingService } from "./polling-service.ts";
 import type { StructuredLogger } from "./structured-logger.ts";
 
-export interface ProductionGenerationResult { readonly externalRequestId: string; readonly assets: readonly PersistedImageAsset[]; readonly providerCode: string; readonly providerMetadata: Readonly<Record<string, unknown>>; readonly actualCost?: number; readonly generationDurationMs: number; readonly storageDurationMs: number }
+export interface ProductionGenerationResult { readonly externalRequestId: string; readonly assets: readonly PersistedGenerationAsset[]; readonly providerCode: string; readonly providerMetadata: Readonly<Record<string, unknown>>; readonly actualCost?: number; readonly generationDurationMs: number; readonly storageDurationMs: number }
 
 export class ProductionGenerationPipeline {
   readonly #polling: PollingService;
-  readonly #persistence: ImagePersistenceService;
+  readonly #persistence: GenerationPersistence;
   readonly #logger: StructuredLogger;
-  constructor(polling: PollingService, persistence: ImagePersistenceService, logger: StructuredLogger) { this.#polling = polling; this.#persistence = persistence; this.#logger = logger; }
+  constructor(polling: PollingService, persistence: GenerationPersistence, logger: StructuredLogger) { this.#polling = polling; this.#persistence = persistence; this.#logger = logger; }
   async execute(provider: ImageProvider, request: GenerationRequest, binding: ProviderBinding, context: ProviderCallContext): Promise<ProductionGenerationResult> {
     const started = Date.now();
     let cancellation: Promise<unknown> | undefined;
@@ -33,6 +33,8 @@ export class ProductionGenerationPipeline {
       const status = await this.#polling.wait(provider, submission, context);
       if (status.state !== "succeeded") throw new ProviderError({ providerCode: provider.descriptor.code, category: status.state === "cancelled" ? "cancelled" : "upstream", code: status.error?.code ?? `provider_${status.state}`, message: status.error?.message ?? "Provider generation failed", retryable: status.error?.retryable ?? false, externalRequestId: status.externalRequestId });
       const generatedAt = Date.now();
+      const outputMediaType = request.mediaType ?? "image";
+      if (status.outputs.some((output) => (output.mediaType ?? "image") !== outputMediaType)) throw new Error("Provider output media type does not match the generation request");
       const assets = await this.#persistence.persist(request.jobId, status.outputs, request.ownerKey);
       const finished = Date.now();
       this.#logger.info("generation.completed", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, durationMs: finished - started, uploadDurationMs: finished - generatedAt, outputCount: assets.length });

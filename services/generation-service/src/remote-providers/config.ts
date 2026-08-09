@@ -5,10 +5,11 @@ export interface Phase9RemoteProviderConfig {
   readonly openai?: RemoteProviderHttpConfig;
   readonly gemini?: RemoteProviderHttpConfig;
   readonly jimeng?: RemoteProviderHttpConfig;
+  readonly arkVideo?: RemoteProviderHttpConfig;
 }
 
 export function loadPhase9RemoteProviderConfig(env: NodeJS.ProcessEnv = process.env): Phase9RemoteProviderConfig {
-  const enabled = ["OPENAI", "GEMINI", "JIMENG"].filter((name) => optional(env, `${name}_API_KEY`));
+  const enabled = ["OPENAI", "GEMINI", "JIMENG", "ARK_VIDEO"].filter((name) => optional(env, `${name}_API_KEY`));
   if (enabled.length === 0) return {};
   const requestTimeoutMs = positiveInt(env, "REMOTE_PROVIDER_REQUEST_TIMEOUT_MS");
   const maxResponseBytes = positiveInt(env, "REMOTE_PROVIDER_MAX_RESPONSE_BYTES");
@@ -16,10 +17,11 @@ export function loadPhase9RemoteProviderConfig(env: NodeJS.ProcessEnv = process.
     ...provider(env, "OPENAI", "openai", requestTimeoutMs, maxResponseBytes),
     ...provider(env, "GEMINI", "gemini", requestTimeoutMs, maxResponseBytes),
     ...provider(env, "JIMENG", "jimeng", requestTimeoutMs, maxResponseBytes),
+    ...provider(env, "ARK_VIDEO", "arkVideo", requestTimeoutMs, maxResponseBytes),
   };
 }
 
-function provider(env: NodeJS.ProcessEnv, prefix: "OPENAI" | "GEMINI" | "JIMENG", code: "openai" | "gemini" | "jimeng", requestTimeoutMs: number, maxResponseBytes: number): Partial<Phase9RemoteProviderConfig> {
+function provider(env: NodeJS.ProcessEnv, prefix: "OPENAI" | "GEMINI" | "JIMENG" | "ARK_VIDEO", code: "openai" | "gemini" | "jimeng" | "arkVideo", requestTimeoutMs: number, maxResponseBytes: number): Partial<Phase9RemoteProviderConfig> {
   const apiKey = optional(env, `${prefix}_API_KEY`);
   if (!apiKey) return {};
   const baseUrl = required(env, `${prefix}_BASE_URL`);

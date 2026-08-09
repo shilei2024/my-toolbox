@@ -73,6 +73,21 @@ M1.4 adds local development tooling and fixes a production-blocking COS issue:
 - `TencentCosStorage` normalizes custom metadata header names (`job_id` -> `job-id`); Tencent COS rejects underscore metadata headers with `SignatureDoesNotMatch`;
 - repository root `scripts/dev/*.ps1` provide one-command local stack setup/start/health/stop.
 
+M4 adds the first provider-agnostic media extension:
+
+- workflow catalog filtering by `mediaType=image|video` while preserving workflow/API mode;
+- a Fire-and-poll Ark/Seedance video adapter behind the existing provider registry;
+- bounded streaming video persistence to Tencent COS and durable `generation_assets` records;
+- owner-scoped video results in the creation workbench and task center;
+- fail-closed provider/model/workflow defaults and queued-only video cancellation.
+- ComfyUI image/video execution, including Video Helper Suite MP4 discovery,
+  server-generated seeds when omitted, and durable COS persistence.
+
+See [M4 architecture](../../docs/architecture/m4-media-generation.md) and the
+[beginner deployment guide](../../docs/deployment/m4-media-generation.md).
+For a complete Gallery-to-local-ComfyUI walkthrough, see the
+[local ComfyUI guide](../../docs/deployment/gallery-local-comfyui.md).
+
 ## Run tests
 
 ```powershell

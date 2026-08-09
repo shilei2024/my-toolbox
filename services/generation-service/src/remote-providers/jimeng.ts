@@ -18,7 +18,7 @@ const SEEDREAM_GRID = 8;
 export class JimengImageProvider implements ImageProvider {
   readonly descriptor: ProviderDescriptor = {
     code: "jimeng", displayName: "即梦 / Seedream", availability: "active", priority: 30,
-    capabilities: { modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 8, supportsSeed: true, supportsCancellation: false, supportsStatusPolling: false },
+    capabilities: { mediaTypes: ["image"], modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 4096, minHeight: 512, maxHeight: 4096, maxOutputs: 8, supportsSeed: true, supportsCancellation: false, supportsStatusPolling: false },
   };
   readonly #config: RemoteProviderHttpConfig;
   readonly #fetcher: typeof fetch;

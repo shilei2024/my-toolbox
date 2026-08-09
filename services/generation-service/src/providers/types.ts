@@ -2,7 +2,10 @@ export const PROVIDER_AVAILABILITIES = ["active", "degraded", "disabled"] as con
 export type ProviderAvailability = (typeof PROVIDER_AVAILABILITIES)[number];
 export type CreditTier = "free" | "member";
 
-export const GENERATION_MODES = ["text-to-image", "image-to-image"] as const;
+export const MEDIA_TYPES = ["image", "video"] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+export const GENERATION_MODES = ["text-to-image", "image-to-image", "text-to-video", "image-to-video"] as const;
 export type GenerationMode = (typeof GENERATION_MODES)[number];
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -10,6 +13,8 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 export type JsonObject = { [key: string]: JsonValue };
 
 export interface ProviderCapabilities {
+  /** Omitted only by legacy test doubles; production adapters declare this explicitly. */
+  readonly mediaTypes?: readonly MediaType[];
   readonly modes: readonly GenerationMode[];
   readonly workflowKinds: readonly string[];
   readonly models: readonly string[];
@@ -46,6 +51,8 @@ export interface ImageInput {
 export interface GenerationRequest {
   readonly jobId: string;
   readonly workflow: WorkflowReference;
+  /** Legacy callers default to image; durable jobs always set this explicitly. */
+  readonly mediaType?: MediaType;
   readonly mode: GenerationMode;
   readonly prompt: string;
   readonly negativePrompt: string;
@@ -91,16 +98,28 @@ interface OutputBase {
 }
 
 export type ProviderImageOutput =
-  | (OutputBase & { readonly kind: "base64"; readonly data: string })
-  | (OutputBase & { readonly kind: "remote-url"; readonly url: string })
-  | (OutputBase & { readonly kind: "local-file"; readonly path: string });
+  | (OutputBase & { readonly mediaType?: "image"; readonly kind: "base64"; readonly data: string })
+  | (OutputBase & { readonly mediaType?: "image"; readonly kind: "remote-url"; readonly url: string })
+  | (OutputBase & { readonly mediaType?: "image"; readonly kind: "local-file"; readonly path: string });
+
+interface VideoOutputBase extends OutputBase {
+  readonly mediaType: "video";
+  readonly durationSeconds: number;
+}
+
+export type ProviderVideoOutput =
+  | (VideoOutputBase & { readonly kind: "base64"; readonly data: string })
+  | (VideoOutputBase & { readonly kind: "remote-url"; readonly url: string })
+  | (VideoOutputBase & { readonly kind: "local-file"; readonly path: string });
+
+export type ProviderOutput = ProviderImageOutput | ProviderVideoOutput;
 
 export type ProviderTaskState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface ProviderSubmission {
   readonly externalRequestId: string;
   readonly state: "queued" | "running" | "succeeded";
-  readonly outputs: readonly ProviderImageOutput[];
+  readonly outputs: readonly ProviderOutput[];
   readonly providerMetadata: Readonly<JsonObject>;
   readonly actualCost?: number;
 }
@@ -118,7 +137,7 @@ export interface ProviderStatusResult {
   readonly externalRequestId: string;
   readonly state: ProviderTaskState;
   readonly progress?: number;
-  readonly outputs: readonly ProviderImageOutput[];
+  readonly outputs: readonly ProviderOutput[];
   readonly error?: ProviderFailure;
   readonly providerMetadata: Readonly<JsonObject>;
   readonly actualCost?: number;

@@ -9,7 +9,7 @@ import { bindingCost, callSignal, configString, modelFrom, synchronousCancellati
 export class OpenAIImageProvider implements ImageProvider {
   readonly descriptor: ProviderDescriptor = {
     code: "openai", displayName: "OpenAI Images", availability: "active", priority: 40,
-    capabilities: { modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 3840, minHeight: 512, maxHeight: 3840, maxOutputs: 1, supportsSeed: false, supportsCancellation: false, supportsStatusPolling: false },
+    capabilities: { mediaTypes: ["image"], modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 512, maxWidth: 3840, minHeight: 512, maxHeight: 3840, maxOutputs: 1, supportsSeed: false, supportsCancellation: false, supportsStatusPolling: false },
   };
   readonly #config: RemoteProviderHttpConfig;
   readonly #fetcher: typeof fetch;

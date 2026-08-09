@@ -7,13 +7,14 @@ import { clampToBounds, workflowBounds, workflowSizePresets } from "../src/gener
 import { createGalleryHttpServer } from "../src/gallery/http-server.ts";
 import { InternalViewerContextCodec, USER_CONTEXT_HEADER, USER_CONTEXT_SIGNATURE_HEADER } from "../src/gallery/internal-auth.ts";
 import type { GenerationRepository } from "../src/generation/repository.ts";
+import type { MediaType } from "../src/providers/types.ts";
 import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerationInput, type GenerationMode, type GenerationPageResult, type GenerationView, type GenerationWorkflowView } from "../src/generation/types.ts";
 
 const generation: GenerationView = {
   id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像",
   prompt: "清晨的庭院", negativePrompt: "", width: 1024, height: 1024, count: 1, visibility: "private", promptVisibility: "hidden",
   creditsReserved: "1.0000", creditsCharged: "0.0000", creditTier: "free", cancelRequested: false,
-  createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z", images: [],
+  createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z", mediaType: "image", images: [], outputs: [],
 };
 
 class FakeRepository implements GenerationRepository {
@@ -22,17 +23,20 @@ class FakeRepository implements GenerationRepository {
   finalized?: string;
   page: GenerationPageResult = { items: [] };
   workflowMode: GenerationMode | undefined;
-  listWorkflows(defaultCreditCost: string, mode?: GenerationMode): Promise<readonly GenerationWorkflowView[]> {
+  workflowMediaType: MediaType | undefined;
+  listWorkflows(defaultCreditCost: string, mode?: GenerationMode, mediaType?: MediaType): Promise<readonly GenerationWorkflowView[]> {
     this.workflowMode = mode;
+    this.workflowMediaType = mediaType;
     return Promise.resolve([{
       slug: "portrait-v1", name: "质感人像", description: "", category: "portrait",
-      mode: "workflow",
+      mode: "workflow", mediaType: "image",
       defaults: { width: 1024, height: 1024, count: 1, visibility: "public", promptVisibility: "public" },
       countRange: { min: 1, max: 4 },
       sizes: [
         { width: 1024, height: 1024 }, { width: 768, height: 1024 }, { width: 1024, height: 768 },
         { width: 768, height: 1344 }, { width: 1344, height: 768 }, { width: 832, height: 1248 }, { width: 1248, height: 832 },
       ],
+      durations: [],
       creditCost: defaultCreditCost,
     }]);
   }
@@ -64,8 +68,9 @@ describe("M1 generation API domain", () => {
   it("filters the creation catalog by workflow or api mode", async () => {
     const repository = new FakeRepository();
     const service = new GenerationService({ repository });
-    await service.listWorkflows("api");
+    await service.listWorkflows("api", "video");
     assert.equal(repository.workflowMode, "api");
+    assert.equal(repository.workflowMediaType, "video");
     await service.listWorkflows("workflow");
     assert.equal(repository.workflowMode, "workflow");
     await service.listWorkflows();
@@ -184,15 +189,21 @@ describe("M1 generation API domain", () => {
 
   it("exposes the signed internal HTTP contract and returns 202 for durable creation", async () => {
     const auth = new InternalViewerContextCodec("generation-http-test-secret-1234567890");
-    const service = new GenerationService({ repository: new FakeRepository() });
+    const repository = new FakeRepository();
+    const service = new GenerationService({ repository });
     const app = await createGalleryHttpServer({ service: {} as never, auth, generation: service, logger: { info() {}, error() {} } });
     const guest = auth.issue({ role: "guest" });
     const workflows = await app.inject({ method: "GET", url: "/v1/generation/workflows", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
     assert.equal(workflows.statusCode, 200);
     const apiWorkflows = await app.inject({ method: "GET", url: "/v1/generation/workflows?mode=api", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
     assert.equal(apiWorkflows.statusCode, 200);
+    const videoWorkflows = await app.inject({ method: "GET", url: "/v1/generation/workflows?mode=api&mediaType=video", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
+    assert.equal(videoWorkflows.statusCode, 200);
+    assert.equal(repository.workflowMediaType, "video");
     const invalidMode = await app.inject({ method: "GET", url: "/v1/generation/workflows?mode=model", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
     assert.equal(invalidMode.statusCode, 400);
+    const invalidMedia = await app.inject({ method: "GET", url: "/v1/generation/workflows?mediaType=audio", headers: { [USER_CONTEXT_HEADER]: guest.context, [USER_CONTEXT_SIGNATURE_HEADER]: guest.signature } });
+    assert.equal(invalidMedia.statusCode, 400);
     const user = auth.issue({ role: "user", userId: 7 });
     const created = await app.inject({ method: "POST", url: "/v1/generations", headers: { [USER_CONTEXT_HEADER]: user.context, [USER_CONTEXT_SIGNATURE_HEADER]: user.signature, "idempotency-key": "create-attempt-http-1" }, payload: validBody });
     assert.equal(created.statusCode, 202);
