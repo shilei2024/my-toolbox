@@ -115,6 +115,20 @@ GENERATION_VIDEO_MAX_BYTES=209715200
 
 失败任务必须释放 reservation；不得直接修改任务为 completed。
 
+### 快速冒烟（可选）
+
+验证 API、队列、Worker、ComfyUI 与 COS 全链路时，可用脚本代替手工提交：
+
+```powershell
+cd services/generation-service
+$env:SMOKE_USER_ID = "<测试用户id>"   # 该用户必须有足够积分
+npm run smoke:comfyui
+```
+
+脚本会创建一条 5 秒私有视频任务并轮询到终态，成功后打印 COS URL 与积分结算。
+可用 `SMOKE_API_BASE_URL` 指向 Staging API，`SMOKE_WIDTH/HEIGHT/DURATION_SECONDS`
+调整参数；运行 `npm run smoke:comfyui -- --health` 只检查 API 健康状态。
+
 ## 7. 常见故障
 
 | 现象 | 原因 | 恢复 |

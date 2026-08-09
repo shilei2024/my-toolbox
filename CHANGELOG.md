@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2 · 本机/Staging ComfyUI 视频冒烟脚本 / 2026-08-09
+- 新增 `npm run smoke:comfyui`：通过内部签名 API 提交一条 5 秒私有视频任务并
+  轮询到终态，覆盖 API、队列、Worker、ComfyUI 与 COS 全链路；支持
+  `SMOKE_API_BASE_URL` 指向 Staging、`SMOKE_USER_ID` 指定测试账号，不打印密钥与完整 Prompt。
+- 本机真实复验：任务 `906ed7fe` 完成，960×544 / 5.000s / 1.80MB MP4 已转存 COS，
+  积分 reserve→settle 只结算一次，失败任务全部 release；ComfyUI 以文件重定向
+  启动避免 tqdm stderr `[Errno 22]`，Worker 直接以 node 启动避免沙箱网络拦截 COS。
+
 ## 0.8.1 · M4 上线前修复与发布补全 / 2026-08-09
 - **修复 Gallery 生产构建阻断**：`auth-links.ts` 残留 `safeNext` 调用导致
   `next build` 类型检查失败，改为统一使用抽出的 `safeAuthReturnUrl`。
