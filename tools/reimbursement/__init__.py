@@ -177,7 +177,7 @@ CUSTOMER_LEVELS = [
     {"name": "level 3", "label": "level 3"},
 ]
 
-ENTERTAINMENT_CATEGORIES = ["餐费", "送礼", "其他"]
+ENTERTAINMENT_CATEGORIES = ["餐费", "礼品", "其他"]
 
 
 # ---------------------------------------------------------------------------

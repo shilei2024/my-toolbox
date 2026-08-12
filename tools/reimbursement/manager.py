@@ -457,18 +457,36 @@ def _set_active(period: ReimbursementPeriod) -> None:
 def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
     categories = _seed_categories(period.owner_type, period.owner_id)
     invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+    dispatch_totals = _dispatch_vehicle_totals(period)
+    dispatch_total = round(sum(dispatch_totals.values()), 2)
+    vehicle_adjustment = 0.0
     by_category = []
     for category in categories:
         rows = [item for item in invoices if item.category_id == category.id]
-        by_category.append(
-            {
-                **_category_dict(category),
-                "invoice_count": len(rows),
-                "amount": round(sum(float(item.amount or 0) for item in rows), 2),
-                "tax_amount": round(sum(float(item.tax_amount or 0) for item in rows), 2),
-                "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
-            }
-        )
+        row = {
+            **_category_dict(category),
+            "invoice_count": len(rows),
+            "amount": round(sum(float(item.amount or 0) for item in rows), 2),
+            "tax_amount": round(sum(float(item.tax_amount or 0) for item in rows), 2),
+            "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
+        }
+        if category.export_key == "vehicle" and dispatch_total:
+            # 派车单明细（公里 + 过桥费 + 停车费）是车辆费用的权威来源：
+            # 同一产品线已有车辆类发票时以派车单为准，避免重复计入。
+            covered = [
+                item
+                for item in rows
+                if (item.product_line or "未分类") in dispatch_totals
+            ]
+            covered_total = sum(float(item.total_amount or 0) for item in covered)
+            covered_tax = sum(float(item.tax_amount or 0) for item in covered)
+            vehicle_total = round(dispatch_total + row["total_amount"] - covered_total, 2)
+            vehicle_tax = round(row["tax_amount"] - covered_tax, 2)
+            vehicle_adjustment = round(vehicle_total - row["total_amount"], 2)
+            row["total_amount"] = vehicle_total
+            row["tax_amount"] = vehicle_tax
+            row["amount"] = round(vehicle_total - vehicle_tax, 2)
+        by_category.append(row)
     by_status = []
     for status, label in STATUS_LABELS.items():
         rows = [item for item in invoices if item.status == status]
@@ -480,14 +498,17 @@ def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
                 "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
             }
         )
+    invoice_amount = round(sum(float(item.amount or 0) for item in invoices), 2)
+    invoice_tax = round(sum(float(item.tax_amount or 0) for item in invoices), 2)
+    invoice_total = round(sum(float(item.total_amount or 0) for item in invoices), 2)
     return {
         "period": _period_dict(period),
         "by_category": by_category,
         "by_status": by_status,
         "invoice_count": len(invoices),
-        "amount": round(sum(float(item.amount or 0) for item in invoices), 2),
-        "tax_amount": round(sum(float(item.tax_amount or 0) for item in invoices), 2),
-        "total_amount": round(sum(float(item.total_amount or 0) for item in invoices), 2),
+        "amount": round(invoice_amount + vehicle_adjustment, 2),
+        "tax_amount": invoice_tax,
+        "total_amount": round(invoice_total + vehicle_adjustment, 2),
     }
 
 
@@ -511,6 +532,19 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
         vehicle_rows, legacy_km_from_end=True
     )
     return result
+
+
+def _dispatch_vehicle_totals(period: ReimbursementPeriod) -> dict[str, float]:
+    """派车单费用按产品线汇总：公里 + 过桥费 + 停车费。"""
+    totals: dict[str, float] = {}
+    for row in _aux_rows(period.id)["vehicle"]:
+        product_line = str(row.get("product_line") or "").strip() or "未分类"
+        amount = sum(
+            float(_money(row.get(key)))
+            for key in ("km_total", "toll_fee", "parking_fee")
+        )
+        totals[product_line] = round(totals.get(product_line, 0.0) + amount, 2)
+    return totals
 
 
 def _invoice_aux_data(invoice: ReimbursementInvoice) -> dict[str, Any] | None:
@@ -791,14 +825,7 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
 
     # 派车单是封面“车辆费用”的明细来源。每条记录以
     # 公里数 + 过桥费 + 停车费计费，再按产品线汇总。
-    vehicle_totals: dict[str, float] = {}
-    for row in _aux_rows(period.id)["vehicle"]:
-        product_line = str(row.get("product_line") or "").strip() or "未分类"
-        amount = sum(
-            float(_money(row.get(key)))
-            for key in ("km_total", "toll_fee", "parking_fee")
-        )
-        vehicle_totals[product_line] = vehicle_totals.get(product_line, 0.0) + amount
+    vehicle_totals = _dispatch_vehicle_totals(period)
 
     if vehicle_totals:
         product_lines = {
