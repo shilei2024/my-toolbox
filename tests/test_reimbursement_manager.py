@@ -21,7 +21,7 @@ from models import (
     ReimbursementPeriod,
     ReimbursementProductLine,
 )
-from tools.reimbursement import PRODUCT_LINES, tool_bp
+from tools.reimbursement import ENTERTAINMENT_CATEGORIES, PRODUCT_LINES, tool_bp
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
@@ -34,6 +34,7 @@ from tools.reimbursement.manager import (
     _normalize_vehicle_rows,
     _period_parts,
     _seed_product_lines,
+    _summary,
     _sync_invoice_aux,
     register_routes,
 )
@@ -593,6 +594,117 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(cover.cell_value(6, 5), 100.5)
         self.assertEqual(cover.cell_value(20, 7), 100.5)
 
+    def test_entertainment_categories_include_gift(self):
+        self.assertIn("餐费", ENTERTAINMENT_CATEGORIES)
+        self.assertIn("礼品", ENTERTAINMENT_CATEGORIES)
+
+    def test_summary_vehicle_row_includes_dispatch_fees_and_replaces_covered_invoices(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            period = ReimbursementPeriod(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="2026年7-8月",
+                start_year=2026,
+                start_month=7,
+                end_year=2026,
+                end_month=8,
+                office="深圳办",
+            )
+            vehicle = ReimbursementCategory(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="车辆费用",
+                export_key="vehicle",
+            )
+            other = ReimbursementCategory(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="其他",
+                export_key="other",
+            )
+            db.session.add_all([period, vehicle, other])
+            db.session.flush()
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    category_id=vehicle.id,
+                    total_amount=999,
+                    product_line="DIODES",
+                    product_line_code="01",
+                )
+            )
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    category_id=vehicle.id,
+                    total_amount=40,
+                    product_line="MSTAR",
+                    product_line_code="02",
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=0,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 100,
+                            "km_end": 135.5,
+                            "toll_fee": 10,
+                            "parking_fee": 5,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=1,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 200,
+                            "km_end": 220,
+                            "toll_fee": 2,
+                            "parking_fee": 3,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.commit()
+
+            summary = _summary(period)
+            vehicle_row = next(
+                item
+                for item in summary["by_category"]
+                if item["export_key"] == "vehicle"
+            )
+            # DIODES 派车单：35.5 + 10 + 5 + 20 + 2 + 3 = 75.5，替代同产品线发票 999；
+            # MSTAR 无派车单，保留车辆类发票 40。
+            self.assertEqual(vehicle_row["invoice_count"], 2)
+            self.assertEqual(vehicle_row["total_amount"], 115.5)
+            self.assertEqual(vehicle_row["amount"], 115.5)
+            self.assertEqual(vehicle_row["tax_amount"], 0)
+            self.assertEqual(summary["total_amount"], 115.5)
+
     def test_vehicle_details_replace_invoice_vehicle_fee_and_group_by_product_line(self):
         app = Flask(__name__)
         app.config.update(
@@ -814,6 +926,13 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("rbViewExport').addEventListener('input'", template)
         self.assertIn("['product_line','产品线','product-line']", template)
         self.assertIn("['purpose','产品线','product-line']", template)
+        self.assertIn("invoiceCategories=this.state.categories.filter", template)
+        self.assertIn("['communication','welfare']", template)
+        self.assertIn("if(i&&!i.category_id", template)
+        self.assertIn("entertainmentCategories()", template)
+        self.assertIn("categoryOptions(value)", template)
+        self.assertIn("（历史数据）", template)
+        self.assertIn("礼品", template)
         self.assertEqual(
             template.count("['purpose','产品线','product-line']"),
             2,

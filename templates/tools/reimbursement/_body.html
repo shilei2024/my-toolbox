@@ -392,7 +392,8 @@ const RB = {
     document.getElementById('rbFilterPeriod').innerHTML=periodOptions;document.getElementById('rbFilterPeriod').value=activeId;document.getElementById('rbFilterCategory').innerHTML=categoryOptions;
     document.getElementById('rbInvPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');
     document.getElementById('rbInvPeriod').value=activeId;
-    document.getElementById('rbInvCategory').innerHTML='<option value="">未分类</option>'+this.state.categories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
+    const invoiceCategories=this.state.categories.filter(c=>!['communication','welfare'].includes(c.export_key));
+    document.getElementById('rbInvCategory').innerHTML=invoiceCategories.map(c=>`<option value="${c.id}">${this.esc(c.name)}</option>`).join('');
     const currentProduct=document.getElementById('rbInvProduct').value;
     document.getElementById('rbInvProduct').innerHTML='<option value="">请选择产品线</option>'+this.state.product_lines.map(p=>`<option value="${p.id}" ${String(p.id)===currentProduct?'selected':''}>${this.esc(p.code)} · ${this.esc(p.name)}</option>`).join('');
     const currentOffice=document.getElementById('rbInvOffice').value;
@@ -411,11 +412,24 @@ const RB = {
   openInvoice(id=null){
     const i=id?this.state.invoices.find(x=>x.id===id):null;document.getElementById('rbInvoiceTitle').textContent=i?'编辑发票':'新增发票';
     const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line_id||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office_id||this.state.offices[0]?.id||'',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
+    const categorySelect=document.getElementById('rbInvCategory');
+    if(i?.category_id){
+      const cat=this.state.categories.find(c=>c.id===i.category_id);
+      if(cat&&['communication','welfare'].includes(cat.export_key)&&![...categorySelect.options].some(o=>o.value===String(i.category_id)))categorySelect.add(new Option(this.esc(cat.name),String(i.category_id)));
+    }
+    if(i&&!i.category_id&&![...categorySelect.options].some(o=>o.value===''))categorySelect.add(new Option('未分类',''));
     Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);document.getElementById('rbUploadedFile').textContent=i?.file_name?`原件已保留：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderFilePreview(i?.file_url||'',i?.file_name||'','rbInvoiceFilePreview');this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
   },
   calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2);this.syncLinkedDefaults(true)},
   syncProductCode(){const id=+document.getElementById('rbInvProduct').value;const p=this.state.product_lines.find(x=>x.id===id);document.getElementById('rbInvProductCode').value=p?.code||'';this.syncLinkedDefaults(true)},
   linkedCategory(){const id=+document.getElementById('rbInvCategory').value;return this.state.categories.find(c=>c.id===id)||null},
+  entertainmentCategories(){return (this.state.reference?.entertainment_categories?.length)?this.state.reference.entertainment_categories:['餐费','礼品','其他']},
+  categoryOptions(value=''){
+    const list=this.entertainmentCategories(),known=list.includes(value);
+    return '<option value="">请选择费用类别</option>'
+      +(!known&&value?`<option value="${this.esc(value)}" selected>${this.esc(value)}（历史数据）</option>`:'')
+      +list.map(c=>`<option value="${this.esc(c)}" ${c===value?'selected':''}>${this.esc(c)}</option>`).join('');
+  },
   renderLinkedDetail(detail=null){
     const category=this.linkedCategory(),kind=category?.export_key==='entertainment'?'entertainment':['travel_transport','travel_hotel'].includes(category?.export_key)?'travel':null;
     const box=document.getElementById('rbLinkedDetail'),fields=document.getElementById('rbLinkedFields');
@@ -425,7 +439,10 @@ const RB = {
     const specs=kind==='entertainment'
       ?[['date','日期','date',3],['category','费用类别','text',3],['place','用餐地点/名称','text',6],['customer','客户名称','text',4],['participants','主要参与人','text',4],['amount','金额','number',4],['purpose','事由/产品线','text',8],['approval','主管审批','text',4]]
       :[['date','日期','date',3],['location','出差地','text',3],['customer','客户名称','text',3],['expense_type','费用类型','text',3],['amount','金额','number',4],['purpose','事由/产品线','text',8]];
-    fields.innerHTML=specs.map(([key,label,type,width])=>`<div class="col-md-${width}"><label class="form-label">${label}</label><input id="rbLink_${key}" class="form-control" type="${type}" ${type==='number'?'step="0.01"':''} value="${this.esc(detail?.[key]??'')}"></div>`).join('');
+    fields.innerHTML=specs.map(([key,label,type,width])=>{
+      if(kind==='entertainment'&&key==='category')return `<div class="col-md-${width}"><label class="form-label">${label}</label><select id="rbLink_${key}" class="form-select">${this.categoryOptions(detail?.[key]||'')}</select></div>`;
+      return `<div class="col-md-${width}"><label class="form-label">${label}</label><input id="rbLink_${key}" class="form-control" type="${type}" ${type==='number'?'step="0.01"':''} value="${this.esc(detail?.[key]??'')}"></div>`;
+    }).join('');
     this.syncLinkedDefaults(false);
   },
   syncLinkedDefaults(force=false){
@@ -551,6 +568,7 @@ const RB = {
           +this.state.product_lines.map(p=>`<option value="${this.esc(p.name)}" ${p.name===value?'selected':''}>${this.esc(p.name)}</option>`).join('');
         return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
       }
+      if(key==='category'&&kind==='entertainment')return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${this.categoryOptions(value)}</select></td>`;
       const readonlyTitle=key==='km_start'?'起始公里数承接上一行的止':'止由起加公里自动计算';
       return `<td><input id="rbAux_${kind}_${ri}_${key}" class="form-control" type="${f[2]}" step="${f[2]==='number'?'0.01':''}" value="${this.esc(value)}" ${readonly?`readonly title="${readonlyTitle}"`:''}></td>`;
     }).join('')}<td><button class="rb-btn rb-btn-danger py-1" onclick="RB.removeAux('${kind}',${ri})">删除</button></td></tr>`).join('');
