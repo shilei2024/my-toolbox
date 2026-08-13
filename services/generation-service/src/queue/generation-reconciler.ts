@@ -34,9 +34,19 @@ export class GenerationReconciler {
     try {
       await client.query("BEGIN");
       const rows = await client.query<StaleJobRow>(`SELECT id, credits_reserved, credit_tier, cancel_requested_at
-        FROM ai.generation_jobs
-        WHERE status = 'running' AND updated_at < now() - ($1::bigint * interval '1 millisecond')
-        ORDER BY updated_at ASC
+        FROM ai.generation_jobs j
+        WHERE j.status = 'running'
+          AND j.updated_at < now() - (
+            GREATEST(
+              $1::bigint,
+              COALESCE((
+                SELECT max(wb.timeout_seconds) * 1000
+                FROM ai.workflow_provider_bindings wb
+                WHERE wb.workflow_version_id = j.workflow_version_id AND wb.is_enabled
+              ), 0)
+            ) * interval '1 millisecond'
+          )
+        ORDER BY j.updated_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $2`, [this.#timeoutMs, this.#batchSize]);
       for (const job of rows.rows) await this.reconcileLocked(client, job);

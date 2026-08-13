@@ -7,9 +7,11 @@ export class PollingService {
   readonly #options: PollingOptions;
   readonly #sleep: (ms: number) => Promise<void>;
   constructor(options: PollingOptions, sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) { this.#options = options; this.#sleep = sleep; }
-  async wait(provider: ImageProvider, submission: ProviderSubmission, context: ProviderCallContext): Promise<ProviderStatusResult> {
+  async wait(provider: ImageProvider, submission: ProviderSubmission, context: ProviderCallContext, timeoutMs?: number): Promise<ProviderStatusResult> {
     if (submission.state === "succeeded") return { externalRequestId: submission.externalRequestId, state: "succeeded", outputs: submission.outputs, providerMetadata: submission.providerMetadata, ...(submission.actualCost === undefined ? {} : { actualCost: submission.actualCost }) };
+    const deadline = timeoutMs !== undefined && timeoutMs > 0 ? Date.now() + timeoutMs : undefined;
     for (let attempt = 0; attempt < this.#options.maxAttempts; attempt += 1) {
+      if (deadline !== undefined && Date.now() >= deadline) throw new ProviderError({ providerCode: provider.descriptor.code, category: "timeout", code: "polling_exhausted", message: "Provider polling timed out", retryable: true, externalRequestId: submission.externalRequestId });
       if (context.signal?.aborted) throw new ProviderError({ providerCode: provider.descriptor.code, category: "cancelled", code: "polling_cancelled", message: "Provider polling was cancelled" });
       if (attempt > 0) await this.#sleep(this.#options.intervalMs);
       const status = await provider.getStatus(submission.externalRequestId, context);

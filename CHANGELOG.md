@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2 · H3 卡死修复：binding 超时生效、分辨率限档 / 2026-08-13
+- 修复 30 分钟无结果：轮询现在强制执行 binding `timeout_seconds`（H3=1800s），
+  超时按可重试错误终止并释放积分，不再无限等待到 1 小时。
+- 修复卡死兜底：reconciler 按每个工作流 binding 超时判定陈旧任务（默认下限 15
+  分钟），Worker 崩溃/失联后也能收敛。
+- H3 分辨率限制为 480p/720p（defaults.videoResolutions，迁移 0021），避免 1080p/2K
+  在消费级显卡上超长运行或显存抖动。
+- 运维建议：单 ComfyUI + 并发 1 场景设置 `COMFYUI_ALLOW_GLOBAL_INTERRUPT=true`，
+  取消运行中任务时才能真正中断 GPU，避免残留任务阻塞后续生成。
+
 ## 0.9.1 · MiniMax H3 尺寸 32 对齐与视频参数重设计 / 2026-08-13
 - 服务端：ComfyUI Provider 支持 binding `align`（32），H3 三个工作流启用，
   请求宽高自动对齐到 32 的倍数（迁移 0020），消除
