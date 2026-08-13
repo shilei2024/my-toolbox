@@ -38,6 +38,7 @@ export function GenerationWorkbench() {
   const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef<{ readonly timer?: ReturnType<typeof setTimeout> } | undefined>(undefined);
   const creationAttemptRef = useRef<{ readonly payload: string; readonly key: string } | undefined>(undefined);
+  const submittingRef = useRef(false);
   const mountedRef = useRef(false);
 
   const refreshRecent = useCallback(async () => {
@@ -201,6 +202,8 @@ export function GenerationWorkbench() {
 
   async function submit() {
     if (!workflow || submitting || prompt.trim().length === 0) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true); setMessage("");
     const [width, height] = size.split("x").map(Number) as [number, number];
     try {
@@ -228,7 +231,7 @@ export function GenerationWorkbench() {
       void refreshBilling();
       schedulePoll(created.id);
     } catch (error) { setMessage(error instanceof Error ? error.message : "任务创建失败，请稍后重试。"); }
-    finally { setSubmitting(false); }
+    finally { setSubmitting(false); submittingRef.current = false; }
   }
 
   function schedulePoll(id: string, nextDelayMs = 2000) {
@@ -388,7 +391,7 @@ export function GenerationWorkbench() {
           ) : (<><div className="preview-orbit" aria-hidden="true"><span /><span /><span /></div><div className="preview-copy">{generation ? <span className="preview-kicker">{statusLabel(generation.status).toUpperCase()}</span> : null}<h2 id="preview-title">{generation ? statusLabel(generation.status) : "生成结果将显示在这里"}</h2><p>{generation ? taskDescription(generation) : ""}</p></div></>)}
           {generation?.images.length ? <div className="generated-links">{generation.images.map((image, index) => <Link key={image.id} href={`/gallery/${image.slug}`}>查看作品 {index + 1}</Link>)}</div> : null}
         </div>
-        <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) && !(generation.mediaType === "video" && generation.status === "running") ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
+        <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) && !(generation.mediaType === "video" && generation.status === "running" && generation.mode !== "workflow") ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
       </aside>
     </div>
 
@@ -407,7 +410,7 @@ export function GenerationWorkbench() {
               <span className="recent-meta"><em>{statusLabel(item.status)}</em><time>{formatTime(item.createdAt)}</time></span>
             </button>
             <div className="recent-actions">
-              {!terminal.has(item.status) && !(item.mediaType === "video" && item.status === "running") ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
+              {!terminal.has(item.status) && !(item.mediaType === "video" && item.status === "running" && item.mode !== "workflow") ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
               {item.status === "failed" ? <button className="button primary recent-action" type="button" onClick={() => retryTask(item)}>重新创作</button> : null}
             </div>
           </div>;

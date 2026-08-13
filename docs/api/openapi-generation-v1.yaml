@@ -187,6 +187,7 @@ components:
         status: { $ref: "#/components/schemas/GenerationStatus" }
         workflowSlug: { type: string }
         workflowName: { type: string }
+        mode: { enum: [workflow, api] }
         mediaType: { $ref: "#/components/schemas/MediaType" }
         prompt: { type: string }
         negativePrompt: { type: string }

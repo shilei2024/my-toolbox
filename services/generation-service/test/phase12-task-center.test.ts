@@ -9,7 +9,7 @@ import type { GenerationPageResult, GenerationView } from "../src/generation/typ
 import { generationTaskCenter } from "../src/tasks/task-center-service.ts";
 
 const generation: GenerationView = {
-  id: "00000000-0000-4000-8000-000000000012", status: "completed", workflowSlug: "portrait-v1", workflowName: "质感人像",
+  id: "00000000-0000-4000-8000-000000000012", status: "completed", workflowSlug: "portrait-v1", workflowName: "质感人像", mode: "workflow",
   prompt: "晨光庭院", negativePrompt: "", width: 1024, height: 1024, count: 1, visibility: "private", promptVisibility: "hidden",
   creditsReserved: "2.0000", creditsCharged: "2.0000", creditTier: "free", cancelRequested: false,
   createdAt: "2026-08-09T00:00:00.000Z", updatedAt: "2026-08-09T00:01:00.000Z", finishedAt: "2026-08-09T00:01:00.000Z",

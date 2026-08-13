@@ -22,6 +22,7 @@ export interface GenerationView {
   readonly status: GenerationStatus;
   readonly workflowSlug: string;
   readonly workflowName: string;
+  readonly mode: GenerationMode;
   readonly mediaType: GenerationMediaType;
   readonly prompt: string;
   readonly negativePrompt: string;
