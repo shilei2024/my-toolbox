@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { Pool } from "pg";
+import { GenerationError } from "../src/generation/errors.ts";
+import { PostgresGenerationRepository } from "../src/generation/postgres-generation-repository.ts";
 
 const databaseUrl = process.env.PHASE13_TEST_DATABASE_URL;
 const USER_ID = 9013;
@@ -19,6 +21,11 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
     await pool.query("DELETE FROM ai.workflows WHERE id = $1", [WORKFLOW_ID]);
     await pool.query("DELETE FROM public.users WHERE id = $1", [USER_ID]);
     await pool.query("INSERT INTO public.users (id, email) VALUES ($1, 'phase13-media@example.test')", [USER_ID]);
+    await pool.query(
+      "INSERT INTO ai.credit_accounts (user_id, available_amount, lifetime_granted) VALUES ($1, 100, 100) ON CONFLICT (user_id) DO UPDATE SET available_amount = EXCLUDED.available_amount",
+      [USER_ID],
+    );
+    await pool.query("UPDATE ai.providers SET status = 'active' WHERE code = 'comfyui'");
     await pool.query(
       `INSERT INTO ai.workflows (id, slug, name, category, mode, media_type, is_enabled)
        VALUES ($1, 'phase13-media-test', 'Phase 13 Media', 'test', 'workflow', 'video', true)`,
@@ -47,6 +54,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   });
 
   after(async () => {
+    await pool.query("UPDATE ai.providers SET status = 'disabled' WHERE code = 'comfyui'");
     await pool.end();
   });
 
@@ -116,6 +124,31 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
         [JOB_ID],
       ),
       /unique/,
+    );
+  });
+
+  it("rejects a second video job for the same user while one is active", async () => {
+    const repository = new PostgresGenerationRepository(pool);
+    const base = {
+      userId: USER_ID,
+      requestId: "guard-request",
+      workflowSlug: "comfyui-ltx-video-v1",
+      prompt: "guard test",
+      negativePrompt: "",
+      width: 960,
+      height: 544,
+      count: 1,
+      visibility: "private" as const,
+      promptVisibility: "hidden" as const,
+      parameters: { durationSeconds: 5 },
+      creditTier: "free" as const,
+    };
+    const first = await repository.create({ ...base, idempotencyKey: "video-guard-1" }, "5.0000");
+    assert.equal(first.status, "pending");
+    assert.equal(first.mode, "workflow");
+    await assert.rejects(
+      repository.create({ ...base, idempotencyKey: "video-guard-2" }, "5.0000"),
+      (error) => error instanceof GenerationError && error.code === "video_busy",
     );
   });
 });

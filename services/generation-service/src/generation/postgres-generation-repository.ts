@@ -9,7 +9,7 @@ import { clampToBounds, workflowBounds, workflowDurationOptions, workflowMediaSi
 interface WorkflowRow extends QueryResultRow { id: string; slug: string; name: string; description: string; category: string; mode: GenerationMode; media_type: MediaType; defaults: Record<string, unknown>; input_schema: unknown }
 interface JobRow extends QueryResultRow {
   id: string; status: GenerationStatus; workflow_slug: string; workflow_name: string; requested_width: number; requested_height: number; requested_count: number;
-  media_type: MediaType;
+  workflow_mode: GenerationMode; media_type: MediaType;
   prompt: string; negative_prompt: string;
   visibility: GenerationVisibility; prompt_visibility: PromptVisibility; credits_reserved: string; credits_charged: string; cancel_requested_at: Date | null; credit_tier: "free" | "member";
   created_at: Date; updated_at: Date; finished_at: Date | null; error_code: string | null; error_message: string | null; images: unknown; outputs: unknown;
@@ -71,6 +71,9 @@ export class PostgresGenerationRepository implements GenerationRepository {
         if (!Number.isSafeInteger(durationSeconds) || !allowedDurations.includes(Number(durationSeconds))) {
           throw new GenerationError("invalid_request", "所选视频工作流不支持该时长，请按选项调整。", 400);
         }
+        await client.query("SELECT id FROM public.users WHERE id = $1 FOR UPDATE", [input.userId]);
+        const activeVideo = await client.query("SELECT 1 FROM ai.generation_jobs WHERE user_id = $1 AND media_type = 'video' AND status IN ('pending','running') LIMIT 1", [input.userId]);
+        if (activeVideo.rowCount) throw new GenerationError("video_busy", "已有视频任务正在生成，请等待完成后再创建。", 409);
       }
       const cost = (Number(workflowCreditCostFor(workflow.defaults, defaultCreditCost, input.width, input.height)) * input.count).toFixed(4);
       const inserted = await client.query<{ id: string }>(`INSERT INTO ai.generation_jobs (
@@ -117,7 +120,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
       values.push(cursor.at, cursor.id);
       conditions.push(`(j.created_at, j.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
     }
-    const result = await this.#pool.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name, w.media_type,
+    const result = await this.#pool.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name, w.mode AS workflow_mode, w.media_type,
         j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count,
         j.visibility, j.prompt_visibility, j.credits_reserved, j.credits_charged, j.credit_tier, j.cancel_requested_at,
         j.created_at, j.updated_at, j.finished_at, j.error_code, j.error_message,
@@ -202,7 +205,7 @@ export class PostgresGenerationRepository implements GenerationRepository {
   }
 
   private async findById(client: Pick<Pool, "query"> | PoolClient, id: string, userId: number, isAdmin: boolean): Promise<GenerationView | undefined> {
-    const result = await client.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name, w.media_type,
+    const result = await client.query<JobRow>(`SELECT j.id, j.status, w.slug AS workflow_slug, w.name AS workflow_name, w.mode AS workflow_mode, w.media_type,
         j.prompt, j.negative_prompt, j.requested_width, j.requested_height, j.requested_count, j.visibility, j.prompt_visibility,
         j.credits_reserved, j.credits_charged, j.credit_tier, j.cancel_requested_at, j.created_at, j.updated_at, j.finished_at,
         j.error_code, j.error_message,
@@ -259,6 +262,7 @@ function jobView(row: JobRow): GenerationView {
   const safeMessage = row.error_message?.replace(/[\r\n]/g, " ").slice(0, 240);
   return {
     id: row.id, status: row.status, workflowSlug: row.workflow_slug, workflowName: row.workflow_name, mediaType: row.media_type,
+    mode: row.workflow_mode === "api" ? "api" : "workflow",
     prompt: row.prompt, negativePrompt: row.negative_prompt,
     width: row.requested_width, height: row.requested_height, count: row.requested_count,
     visibility: row.visibility, promptVisibility: row.prompt_visibility,

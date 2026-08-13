@@ -11,7 +11,7 @@ import type { MediaType } from "../src/providers/types.ts";
 import { parseDefaultModeration, type CancelGenerationResult, type CreateGenerationInput, type GenerationMode, type GenerationPageResult, type GenerationView, type GenerationWorkflowView } from "../src/generation/types.ts";
 
 const generation: GenerationView = {
-  id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像",
+  id: "job-1", status: "pending", workflowSlug: "portrait-v1", workflowName: "质感人像", mode: "workflow",
   prompt: "清晨的庭院", negativePrompt: "", width: 1024, height: 1024, count: 1, visibility: "private", promptVisibility: "hidden",
   creditsReserved: "1.0000", creditsCharged: "0.0000", creditTier: "free", cancelRequested: false,
   createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z", mediaType: "image", images: [], outputs: [],
