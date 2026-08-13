@@ -3,11 +3,12 @@ import type { JsonValue } from "../providers/types.ts";
 export const WORKFLOW_PLACEHOLDERS = [
   "prompt", "negative_prompt", "seed", "steps", "cfg", "mu", "std", "sampler", "scheduler",
   "width", "height", "model", "lora", "duration_seconds", "frame_count", "fps",
+  "ref_image_0", "ref_image_1", "ref_image_2",
 ] as const;
 export type WorkflowPlaceholder = (typeof WORKFLOW_PLACEHOLDERS)[number];
 export type PlaceholderValues = Partial<Record<WorkflowPlaceholder, JsonValue>>;
 
-const TOKEN = /\{\{([a-z_]+)\}\}/g;
+const TOKEN = /\{\{([a-z_][a-z0-9_]*)\}\}/g;
 const ALLOWED = new Set<string>(WORKFLOW_PLACEHOLDERS);
 
 export class WorkflowPlaceholderError extends Error {
@@ -29,7 +30,7 @@ export function injectPlaceholders(template: JsonValue, values: PlaceholderValue
   }
   if (typeof template !== "string") return template;
 
-  const exact = template.match(/^\{\{([a-z_]+)\}\}$/);
+  const exact = template.match(/^\{\{([a-z_][a-z0-9_]*)\}\}$/);
   if (exact?.[1]) return resolve(exact[1], values);
   return template.replace(TOKEN, (_token, name: string) => String(resolve(name, values)));
 }

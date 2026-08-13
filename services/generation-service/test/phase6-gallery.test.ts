@@ -131,6 +131,7 @@ describe("Phase 6 deferred COS deletion", () => {
     const storage: StorageProvider = {
       code: "test",
       async upload() { throw new Error("unused"); },
+      async download() { return Buffer.alloc(0); },
       async delete(key) { if (key.includes("fail")) throw new Error("secret upstream detail"); },
     };
     const result = await new GalleryAssetDeletionWorker({ repository, storageProviders: [storage], logger: silentLogger }).runOnce();

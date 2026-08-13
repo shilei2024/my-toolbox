@@ -437,6 +437,56 @@ select:focus-visible {
   font-weight: 700;
 }
 
+.reference-upload {
+  margin-top: 12px;
+}
+
+.reference-upload-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.reference-upload-field input[type="file"] {
+  max-width: 220px;
+  font-size: 12px;
+}
+
+.reference-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.reference-thumb {
+  position: relative;
+  width: 84px;
+}
+
+.reference-thumb img {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+}
+
+.reference-thumb button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--error);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
 .composer-section {
   margin-top: 26px;
   padding-top: 25px;

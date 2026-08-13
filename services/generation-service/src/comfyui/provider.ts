@@ -5,6 +5,7 @@ import { assertRequestSupported } from "../providers/capabilities.ts";
 import { ProviderError, normalizeProviderError } from "../providers/errors.ts";
 import type { GenerationProvider } from "../providers/image-provider.ts";
 import type { CostEstimate, GenerationRequest, JsonObject, JsonValue, MediaType, ProviderBinding, ProviderCallContext, ProviderCancelResult, ProviderDescriptor, ProviderHealthResult, ProviderImageOutput, ProviderOutput, ProviderStatusResult, ProviderSubmission, ProviderVideoOutput } from "../providers/types.ts";
+import type { StorageProvider } from "../storage/storage-provider.ts";
 import { injectPlaceholders, type PlaceholderValues } from "../workflows/placeholder-injector.ts";
 import { WorkflowLoadError, type WorkflowLoader } from "../workflows/workflow-loader.ts";
 import type { ComfyHistoryEntry, ComfyOutputRef, ComfyUIClient } from "./client.ts";
@@ -25,15 +26,17 @@ export class ComfyUIProvider implements GenerationProvider {
   readonly #client: ComfyUIClient;
   readonly #workflows: WorkflowLoader;
   readonly #defaults: Readonly<JsonObject>;
+  readonly #storage: StorageProvider | undefined;
   readonly #tasks = new Map<string, ComfyTaskContext>();
-  constructor(client: ComfyUIClient, workflows: WorkflowLoader, defaults: Readonly<JsonObject> = {}) { this.#client = client; this.#workflows = workflows; this.#defaults = defaults; }
+  constructor(client: ComfyUIClient, workflows: WorkflowLoader, defaults: Readonly<JsonObject> = {}, storage: StorageProvider | undefined = undefined) { this.#client = client; this.#workflows = workflows; this.#defaults = defaults; this.#storage = storage; }
 
   async generate(request: GenerationRequest, binding: ProviderBinding, context: ProviderCallContext): Promise<ProviderSubmission> {
     assertRequestSupported(this.descriptor, request);
     if (!binding.providerWorkflowRef) throw this.error("configuration", "workflow_ref_missing", "ComfyUI workflow reference is missing");
+    const refImages = await this.uploadReferenceImages(request, context);
     try {
       const loaded = await this.#workflows.load(binding.providerWorkflowRef);
-      const workflow = injectPlaceholders(loaded.template, this.values(request, binding)) as JsonObject;
+      const workflow = injectPlaceholders(loaded.template, this.values(request, binding, refImages)) as JsonObject;
       const externalRequestId = await this.#client.queuePrompt(workflow, context.attemptId, context.signal);
       const mediaType = request.mediaType ?? "image";
       this.#tasks.set(externalRequestId, {
@@ -44,6 +47,7 @@ export class ComfyUIProvider implements GenerationProvider {
       });
       return { externalRequestId, state: "queued", outputs: [], providerMetadata: { workflowName: loaded.workflowName, workflowVersion: loaded.workflowVersion, workflowDigest: loaded.digest, model: binding.providerModel ?? configuredValue(binding, this.#defaults, "model") ?? null } };
     } catch (error) { throw this.map(error); }
+    finally { await this.cleanupReferenceImages(request); }
   }
 
   async getStatus(externalRequestId: string, context: ProviderCallContext): Promise<ProviderStatusResult> {
@@ -89,7 +93,7 @@ export class ComfyUIProvider implements GenerationProvider {
 
   async estimateCost(_request: GenerationRequest, binding: ProviderBinding): Promise<CostEstimate> { return { amount: binding.estimatedCost ?? 0, currency: "USD", estimated: true }; }
 
-  private values(request: GenerationRequest, binding: ProviderBinding): PlaceholderValues {
+  private values(request: GenerationRequest, binding: ProviderBinding, refImages: readonly string[] = []): PlaceholderValues {
     // Routing and execution controls are server-owned. In particular, never
     // allow a browser request to replace a catalog-selected model or LoRA.
     // The request seed remains user-selectable because it is a deliberate,
@@ -114,13 +118,51 @@ export class ComfyUIProvider implements GenerationProvider {
       negative_prompt: request.negativePrompt,
       width: request.width,
       height: request.height,
+      ...(refImages[0] === undefined ? {} : { ref_image_0: refImages[0] }),
+      ...(refImages[1] === undefined ? {} : { ref_image_1: refImages[1] }),
+      ...(refImages[2] === undefined ? {} : { ref_image_2: refImages[2] }),
       ...Object.fromEntries(Object.entries(optionalValues).filter((entry): entry is [string, JsonValue] => entry[1] !== undefined)),
     };
+  }
+
+  private async uploadReferenceImages(request: GenerationRequest, context: ProviderCallContext): Promise<string[]> {
+    const images = referenceImages(request);
+    if (images.length === 0) return [];
+    if (!this.#storage) throw this.error("configuration", "reference_storage_missing", "Reference image storage is not configured");
+    const names: string[] = [];
+    for (const [index, image] of images.entries()) {
+      const data = await this.#storage.download(image.objectKey);
+      const uploaded = await this.#client.uploadImage(data, `${context.attemptId}-${index}${extensionForMime(image.mimeType)}`, context.signal);
+      names.push(uploaded.name);
+    }
+    return names;
+  }
+
+  private async cleanupReferenceImages(request: GenerationRequest): Promise<void> {
+    if (!this.#storage) return;
+    await Promise.allSettled(referenceImages(request).map((image) => this.#storage!.delete(image.objectKey)));
   }
 
   private status(externalRequestId: string, state: "running" | "succeeded" | "failed", outputs: readonly ProviderOutput[], providerMetadata: JsonObject, progress?: number): ProviderStatusResult { return { externalRequestId, state, outputs, providerMetadata, ...(progress === undefined ? {} : { progress }) }; }
   private map(error: unknown): ProviderError { if (error instanceof WorkflowLoadError) return this.error(error.code === "not_found" ? "configuration" : "validation", `workflow_${error.code}`, error.message); return normalizeProviderError(error, "comfyui"); }
   private error(category: "configuration" | "validation", code: string, message: string): ProviderError { return new ProviderError({ providerCode: "comfyui", category, code, message, retryable: false }); }
+}
+
+function referenceImages(request: GenerationRequest): readonly { readonly objectKey: string; readonly mimeType: string }[] {
+  const raw = request.parameters.inputImages;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "invalid_reference_images", message: "Reference images are invalid", retryable: false });
+  return raw.map((item) => {
+    const value = item as { objectKey?: unknown; mimeType?: unknown };
+    if (typeof value.objectKey !== "string" || typeof value.mimeType !== "string") throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "invalid_reference_image", message: "Reference image metadata is invalid", retryable: false });
+    return { objectKey: value.objectKey, mimeType: value.mimeType };
+  });
+}
+function extensionForMime(mimeType: string): string {
+  if (mimeType === "image/jpeg") return ".jpg";
+  if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "image/png") return ".png";
+  throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "unsupported_reference_image", message: "Reference image format is unsupported", retryable: false });
 }
 
 function failed(entry: ComfyHistoryEntry): boolean { return entry.status?.status_str === "error" || Boolean(entry.status?.messages?.some((value) => Array.isArray(value) && value[0] === "execution_error")); }

@@ -31,6 +31,13 @@ const logger = new ConsoleStructuredLogger();
 const pool = createDatabasePool(databaseUrl, { max: 10 });
 const registry = new ProviderRegistry();
 
+const storage = new TencentCosStorage({
+  secretId: required("COS_SECRET_ID"), secretKey: required("COS_SECRET_KEY"),
+  ...(process.env.COS_SECURITY_TOKEN?.trim() ? { securityToken: process.env.COS_SECURITY_TOKEN.trim() } : {}),
+  bucket: required("COS_BUCKET"), region: required("COS_REGION"),
+  ...(process.env.COS_CDN_BASE_URL?.trim() ? { cdnBaseUrl: process.env.COS_CDN_BASE_URL.trim().replace(/\/+$/, "") } : {}),
+});
+
 if (process.env.COMFYUI_BASE_URL?.trim()) {
   const phase4 = loadPhase4Config();
   registry.register(new ComfyUIProvider(new ComfyUIClient(phase4.comfyui), new WorkflowLoader(phase4.comfyui.workflowDirectory), {
@@ -39,7 +46,7 @@ if (process.env.COMFYUI_BASE_URL?.trim()) {
     cfg: decimal("COMFYUI_DEFAULT_CFG", 7, 0, 100),
     sampler: process.env.COMFYUI_DEFAULT_SAMPLER?.trim() || "euler",
     scheduler: process.env.COMFYUI_DEFAULT_SCHEDULER?.trim() || "normal",
-  }));
+  }, storage));
 }
 registerPhase9RemoteProviders(registry, loadPhase9RemoteProviderConfig());
 if (boolean("GENERATION_ALLOW_MOCK_PROVIDER", false)) {
@@ -50,12 +57,6 @@ if (registry.list().length === 0) throw new Error("No generation provider is con
 const catalog = new PostgresProviderCatalog(pool);
 await catalog.refreshRegistry(registry);
 
-const storage = new TencentCosStorage({
-  secretId: required("COS_SECRET_ID"), secretKey: required("COS_SECRET_KEY"),
-  ...(process.env.COS_SECURITY_TOKEN?.trim() ? { securityToken: process.env.COS_SECURITY_TOKEN.trim() } : {}),
-  bucket: required("COS_BUCKET"), region: required("COS_REGION"),
-  ...(process.env.COS_CDN_BASE_URL?.trim() ? { cdnBaseUrl: process.env.COS_CDN_BASE_URL.trim().replace(/\/+$/, "") } : {}),
-});
 const temporaryRoot = path.resolve(required("GENERATION_TEMP_DIR"));
 const polling = new PollingService({ intervalMs: integer("GENERATION_POLL_INTERVAL_MS", 1000, 100, 60_000), maxAttempts: integer("GENERATION_POLL_MAX_ATTEMPTS", 600, 1, 7200) });
 const downloadTimeoutMs = integer("GENERATION_REMOTE_DOWNLOAD_TIMEOUT_MS", 60_000, 1000, 300_000);

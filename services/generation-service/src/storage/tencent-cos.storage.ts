@@ -2,7 +2,11 @@ import COS from "cos-nodejs-sdk-v5";
 import type { TencentCosConfig } from "../config.ts";
 import type { StorageProvider, StorageUpload, StoredAsset } from "./storage-provider.ts";
 
-interface CosClient { putObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { ETag?: string }) => void): void; deleteObject(options: Record<string, unknown>, callback: (error: Error | null) => void): void }
+interface CosClient {
+  putObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { ETag?: string }) => void): void;
+  getObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { Body?: Buffer | string }) => void): void;
+  deleteObject(options: Record<string, unknown>, callback: (error: Error | null) => void): void;
+}
 
 export class TencentCosStorage implements StorageProvider {
   readonly code = "tencent_cos";
@@ -12,6 +16,12 @@ export class TencentCosStorage implements StorageProvider {
   async upload(input: StorageUpload): Promise<StoredAsset> {
     const data = await new Promise<{ ETag?: string }>((resolve, reject) => this.#client.putObject({ Bucket: this.config.bucket, Region: this.config.region, Key: input.objectKey, Body: input.body, ContentType: input.contentType, ...(input.contentLength === undefined ? {} : { ContentLength: input.contentLength }), ...(input.metadata ? { Headers: Object.fromEntries(Object.entries(input.metadata).map(([key, value]) => [`x-cos-meta-${sanitizeMetadataKey(key)}`, value])) } : {}) }, (error, result) => error ? reject(new Error("Tencent COS upload failed", { cause: error })) : resolve(result ?? {})));
     return { storageProvider: this.code, bucket: this.config.bucket, region: this.config.region, objectKey: input.objectKey, url: `${this.config.cdnBaseUrl ?? `https://${this.config.bucket}.cos.${this.config.region}.myqcloud.com`}/${encodeKey(input.objectKey)}`, ...(data.ETag ? { etag: data.ETag } : {}) };
+  }
+  async download(objectKey: string): Promise<Buffer> {
+    const data = await new Promise<{ Body?: Buffer | string }>((resolve, reject) => this.#client.getObject({ Bucket: this.config.bucket, Region: this.config.region, Key: objectKey }, (error, result) => error ? reject(new Error("Tencent COS download failed", { cause: error })) : resolve(result ?? {})));
+    if (typeof data.Body === "string") return Buffer.from(data.Body);
+    if (Buffer.isBuffer(data.Body)) return data.Body;
+    throw new Error("Tencent COS download returned an empty body");
   }
   async delete(objectKey: string): Promise<void> { await new Promise<void>((resolve, reject) => this.#client.deleteObject({ Bucket: this.config.bucket, Region: this.config.region, Key: objectKey }, (error) => error ? reject(new Error("Tencent COS delete failed", { cause: error })) : resolve())); }
 }
