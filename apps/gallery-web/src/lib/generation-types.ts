@@ -10,7 +10,7 @@ export interface GenerationWorkflow {
   readonly category: string;
   readonly mode: GenerationMode;
   readonly mediaType: GenerationMediaType;
-  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility; readonly promptVisibility: "public" | "hidden"; readonly durationSeconds?: number; readonly modeMeta?: { readonly key: string; readonly label: string; readonly maxImages: number } };
+  readonly defaults: { readonly width: number; readonly height: number; readonly count: number; readonly visibility: GenerationVisibility; readonly promptVisibility: "public" | "hidden"; readonly durationSeconds?: number; readonly modeMeta?: { readonly key: string; readonly label: string; readonly maxImages: number }; readonly videoResolutions?: readonly { readonly key: string; readonly label: string; readonly height: number }[] };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];
   readonly durations: readonly number[];

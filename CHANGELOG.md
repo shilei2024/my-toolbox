@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 · MiniMax H3 尺寸 32 对齐与视频参数重设计 / 2026-08-13
+- 服务端：ComfyUI Provider 支持 binding `align`（32），H3 三个工作流启用，
+  请求宽高自动对齐到 32 的倍数（迁移 0020），消除
+  “width and height must be divisible by 32” 报错。
+- 前端：视频参数改为「画面比例 + 分辨率（480p/720p/1080p/2K）+ 视频时长」，
+  宽高按比例与 32 对齐计算；工作流可通过 defaults.videoResolutions 定制档位。
+- 单测新增尺寸对齐用例；Generation 94 项、Gallery lint/构建全部通过。
+
 ## 0.9.0 · MiniMax H3 全能参考视频（文生/单图/多图） / 2026-08-13
 - 新增三个 MiniMax H3 视频工作流（迁移 0019）：`minimax-h3-t2v-v1` 文生视频、
   `minimax-h3-i2v-v1` 单图生视频、`minimax-h3-ref-v1` 多图参考视频（最多 3 张，
