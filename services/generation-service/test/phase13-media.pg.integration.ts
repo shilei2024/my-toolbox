@@ -26,6 +26,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
       [USER_ID],
     );
     await pool.query("UPDATE ai.providers SET status = 'active' WHERE code = 'comfyui'");
+    await pool.query("UPDATE ai.workflows SET is_enabled = true WHERE slug = 'comfyui-ltx-video-v1'");
     await pool.query(
       `INSERT INTO ai.workflows (id, slug, name, category, mode, media_type, is_enabled)
        VALUES ($1, 'phase13-media-test', 'Phase 13 Media', 'test', 'workflow', 'video', true)`,
@@ -55,6 +56,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
 
   after(async () => {
     await pool.query("UPDATE ai.providers SET status = 'disabled' WHERE code = 'comfyui'");
+    await pool.query("UPDATE ai.workflows SET is_enabled = false WHERE slug = 'comfyui-ltx-video-v1'");
     await pool.end();
   });
 
