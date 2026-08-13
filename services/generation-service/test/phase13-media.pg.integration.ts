@@ -133,7 +133,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
     try {
       const base = {
         userId: USER_ID,
-        requestId: "guard-request",
+        requestId: "00000000-0000-4000-8000-000000000099",
         workflowSlug: "comfyui-ltx-video-v1",
         prompt: "guard test",
         negativePrompt: "",
