@@ -108,7 +108,7 @@ export class ComfyUIClient {
         if (!retryable || attempt === this.config.retryCount) throw this.#error(response.status === 401 || response.status === 403 ? "authentication" : retryable ? "unavailable" : "validation", `http_${response.status}`, "ComfyUI request failed", undefined, response.status, retryable);
       } catch (error) {
         if (error instanceof ProviderError) { lastError = error; if (!error.retryable || attempt === this.config.retryCount) throw error; }
-        else { lastError = error; if (attempt === this.config.retryCount) throw this.#error(error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "unavailable", "network_error", "ComfyUI is unavailable", error); }
+        else { lastError = error; if (attempt === this.config.retryCount) throw this.#error(error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "unavailable", "network_error", "ComfyUI is unavailable", error, undefined, true); }
       }
       this.#onRetry({ path: pathname, retryNumber: attempt + 1, retryLimit: this.config.retryCount, failureCode: lastError instanceof ProviderError ? lastError.code : "network_error" });
       await new Promise((resolve) => setTimeout(resolve, this.config.retryDelayMs));
