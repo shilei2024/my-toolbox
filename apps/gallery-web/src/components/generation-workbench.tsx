@@ -163,22 +163,22 @@ export function GenerationWorkbench() {
   const h3Selected = workflow?.category === "MiniMax H3";
   const h3Meta = workflow?.defaults.modeMeta;
 
-  const addInputImages = useCallback((files: FileList | null) => {
+  const addInputImages = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const activeMax = h3Meta?.maxImages ?? 3;
     const entries: { name: string; data: string }[] = [];
-    for (const file of Array.from(files)) {
-      if (inputImages.length + entries.length >= activeMax) break;
+    for (const file of Array.from(files).slice(0, Math.max(0, activeMax - inputImages.length))) {
       if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setMessage("参考图仅支持 PNG/JPEG/WebP。"); continue; }
       if (file.size > 3 * 1024 * 1024) { setMessage("单张参考图不能超过 3MB。"); continue; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const data = typeof reader.result === "string" ? reader.result : "";
-        if (data) entries.push({ name: file.name, data });
-        if (entries.length > 0) setInputImages((current) => [...current, ...entries].slice(0, activeMax));
-      };
-      reader.readAsDataURL(file);
+      try {
+        const raw = await readAsDataUrl(file);
+        const data = await compressImage(raw);
+        entries.push({ name: file.name, data });
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "参考图处理失败。");
+      }
     }
+    if (entries.length > 0) setInputImages((current) => [...current, ...entries].slice(0, activeMax));
   }, [h3Meta?.maxImages, inputImages.length]);
 
   const removeInputImage = useCallback((index: number) => {
@@ -439,4 +439,32 @@ function sizeLabel(value: string): string {
 function countOptions(workflow: GenerationWorkflow): readonly number[] {
   const { min, max } = workflow.countRange ?? { min: 1, max: 4 };
   return [1, 2, 3, 4].filter((value) => value >= min && value <= max);
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("读取参考图失败。"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressImage(dataUrl: string): Promise<string> {
+  const image = new window.Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("参考图解析失败。"));
+    image.src = dataUrl;
+  });
+  const maxSide = 1024;
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) return dataUrl;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const webp = canvas.toDataURL("image/webp", 0.85);
+  return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/jpeg", 0.85);
 }
