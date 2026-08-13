@@ -272,6 +272,15 @@ test("polling exhaustion maps to a retryable timeout", async () => {
   await assert.rejects(polling.wait(provider, submission, context), (error) => error instanceof ProviderError && error.code === "polling_exhausted" && error.retryable);
 });
 
+test("polling deadline enforces the binding timeout", async () => {
+  const provider = new MockImageProvider({ asynchronous: true, latencyMs: 60_000 });
+  const submission = await provider.generate(request, { ...binding, providerCode: "mock" }, context);
+  const polling = new PollingService({ intervalMs: 1, maxAttempts: 10_000 }, async () => undefined);
+  const started = Date.now();
+  await assert.rejects(polling.wait(provider, submission, context, 50), (error) => error instanceof ProviderError && error.code === "polling_exhausted" && error.retryable);
+  assert.ok(Date.now() - started < 2_000, "deadline must stop polling before the attempt budget");
+});
+
 test("persistence compensates earlier COS uploads and removes temporary files after failure", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "phase4-cleanup-"));
   const first = path.join(root, "first.png");

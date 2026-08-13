@@ -30,7 +30,7 @@ export class ProductionGenerationPipeline {
         cancelUpstream();
         throw new ProviderError({ providerCode: provider.descriptor.code, category: "cancelled", code: "generation_cancelled", message: "Generation was cancelled", retryable: false, externalRequestId });
       }
-      const status = await this.#polling.wait(provider, submission, context);
+      const status = await this.#polling.wait(provider, submission, context, binding.timeoutSeconds > 0 ? binding.timeoutSeconds * 1000 : undefined);
       if (status.state !== "succeeded") throw new ProviderError({ providerCode: provider.descriptor.code, category: status.state === "cancelled" ? "cancelled" : "upstream", code: status.error?.code ?? `provider_${status.state}`, message: status.error?.message ?? "Provider generation failed", retryable: status.error?.retryable ?? false, externalRequestId: status.externalRequestId });
       const generatedAt = Date.now();
       const outputMediaType = request.mediaType ?? "image";
