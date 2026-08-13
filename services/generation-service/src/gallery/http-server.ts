@@ -56,7 +56,7 @@ export async function createGalleryHttpServer(options: {
     app.get("/v1/generations", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       return options.generation!.list(parseGenerationListRequest(request.query), viewer(request, options.auth));
     });
-    app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } }, bodyLimit: 6 * 1024 * 1024 }, async (request, reply) => {
       const result = await options.generation!.create(request.body, scalarHeader(request.headers["idempotency-key"]), viewer(request, options.auth));
       return reply.code(202).send(result);
     });

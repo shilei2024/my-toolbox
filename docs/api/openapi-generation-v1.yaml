@@ -168,6 +168,17 @@ components:
         visibility: { enum: [public, private] }
         promptVisibility: { enum: [public, hidden] }
         parameters: { type: object }
+        inputImages:
+          type: array
+          maxItems: 3
+          description: 参考图 data URL（PNG/JPEG/WebP，单张不超过 3MB），用于单图/多图参考视频工作流。
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, data]
+            properties:
+              name: { type: string, maxLength: 128 }
+              data: { type: string, description: "data:image/png;base64,..." }
     Generation:
       type: object
       required: [id, status, workflowSlug, workflowName, mediaType, prompt, negativePrompt, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images, outputs]

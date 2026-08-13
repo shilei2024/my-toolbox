@@ -82,6 +82,7 @@ test("video persistence streams bounded output into the durable storage namespac
       if (input.body instanceof Readable) for await (const _chunk of input.body) { /* drain */ }
       return { storageProvider: "test-storage", bucket: "bucket", region: "region", objectKey: input.objectKey, url: `https://cdn.test/${input.objectKey}` };
     },
+    async download() { return Buffer.alloc(0); },
     async delete() {},
   };
   try {
@@ -99,7 +100,7 @@ test("video persistence streams bounded output into the durable storage namespac
 test("video persistence rejects declared oversized downloads before uploading", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "mavis-video-limit-test-"));
   let uploaded = false;
-  const storage: StorageProvider = { code: "test-storage", async upload() { uploaded = true; throw new Error("must not upload"); }, async delete() {} };
+  const storage: StorageProvider = { code: "test-storage", async upload() { uploaded = true; throw new Error("must not upload"); }, async download() { return Buffer.alloc(0); }, async delete() {} };
   try {
     const persistence = new VideoPersistenceService(storage, root, 5_000, 32, async () => new Response(Buffer.alloc(1), { headers: { "content-length": "33" } }));
     await assert.rejects(persistence.persist("job-video-2", [{ mediaType: "video", kind: "remote-url", url: "https://provider.test/result.mp4", mimeType: "video/mp4", width: 720, height: 1280, durationSeconds: 5 }]), /size limit/);

@@ -60,6 +60,20 @@ export class ComfyUIClient {
     await this.downloadOutput(image, destination, signal);
   }
 
+  async uploadImage(data: Buffer, filename: string, signal?: AbortSignal): Promise<{ readonly name: string; readonly subfolder: string; readonly type: string }> {
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(data)], { type: "image/png" }), filename);
+    const response = await this.#request("/upload/image", { method: "POST", body: form, ...(signal ? { signal } : {}) }, this.config.requestTimeoutMs);
+    try {
+      const result = await response.json() as { name?: unknown; subfolder?: unknown; type?: unknown };
+      if (typeof result.name !== "string" || !result.name) throw this.#error("upstream", "invalid_upload_response", "ComfyUI returned an invalid upload response");
+      return { name: result.name, subfolder: typeof result.subfolder === "string" ? result.subfolder : "", type: typeof result.type === "string" ? result.type : "input" };
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
+      throw this.#error("upstream", "invalid_upload_json", "ComfyUI returned invalid upload JSON", error);
+    }
+  }
+
   async cancelPrompt(promptId: string, signal?: AbortSignal): Promise<boolean> {
     await this.#json("/queue", { method: "POST", body: JSON.stringify({ delete: [promptId] }), ...(signal ? { signal } : {}) });
     if (this.config.allowGlobalInterrupt) await this.#json("/interrupt", { method: "POST", body: "{}", ...(signal ? { signal } : {}) });
@@ -87,7 +101,7 @@ export class ComfyUIClient {
         const response = await this.#fetcher(`${this.config.baseUrl}${pathname}`, {
           ...init,
           signal,
-          headers: { "content-type": "application/json", ...this.config.headers, ...(this.config.authToken ? { authorization: `Bearer ${this.config.authToken}` } : {}) },
+          headers: { ...(init.body instanceof FormData ? {} : { "content-type": "application/json" }), ...this.config.headers, ...(this.config.authToken ? { authorization: `Bearer ${this.config.authToken}` } : {}) },
         });
         if (response.ok) return response;
         const retryable = response.status === 429 || response.status >= 500;

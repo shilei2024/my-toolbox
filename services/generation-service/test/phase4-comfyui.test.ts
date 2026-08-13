@@ -166,6 +166,7 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
   const deletes: string[] = [];
   const cosClient = {
     putObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { ETag?: string }) => void): void { uploads.push(options); callback(null, { ETag: "etag-1" }); },
+    getObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { Body?: Buffer | string }) => void): void { callback(null, { Body: Buffer.from("x") }); },
     deleteObject(options: Record<string, unknown>, callback: (error: Error | null) => void): void { deletes.push(String(options.Key)); callback(null); },
   };
   const cos = new TencentCosStorage(cosConfig(), cosClient);
@@ -222,6 +223,7 @@ test("COS persistence organizes objects under the owner key when present", async
       uploads.push(input.objectKey);
       return { storageProvider: "test", bucket: "b", region: "r", objectKey: input.objectKey, url: `https://example.test/${input.objectKey}` };
     },
+    async download() { return Buffer.alloc(0); },
     async delete() { return undefined; },
   };
   const persistence = new ImagePersistenceService(storage as never, root, 1000);
@@ -268,6 +270,7 @@ test("persistence compensates earlier COS uploads and removes temporary files af
   const storage = {
     code: "test",
     async upload(input: { objectKey: string }) { count += 1; if (count === 2) throw new Error("upload failed"); return { storageProvider: "test", bucket: "b", region: "r", objectKey: input.objectKey, url: "https://example.test/object" }; },
+    async download() { return Buffer.alloc(0); },
     async delete(objectKey: string) { deleted.push(objectKey); },
   };
   try {

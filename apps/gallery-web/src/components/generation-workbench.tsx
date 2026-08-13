@@ -18,8 +18,9 @@ export function GenerationWorkbench() {
   const [recentState, setRecentState] = useState<LoadState>("loading");
   const [previewUrls, setPreviewUrls] = useState<Readonly<Record<string, string>>>({});
   const [selected, setSelected] = useState("");
-  const [mode, setMode] = useState<GenerationMode>("workflow");
+  const [mode, setMode] = useState<GenerationMode>("api");
   const [mediaType, setMediaType] = useState<GenerationMediaType>("image");
+  const [inputImages, setInputImages] = useState<readonly { readonly name: string; readonly data: string }[]>([]);
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
@@ -100,9 +101,10 @@ export function GenerationWorkbench() {
 
   const applyComposerData = useCallback((data: Awaited<ReturnType<typeof fetchComposerData>>) => {
     setWorkflows(data.workflows);
-    setMediaType(data.workflows[0]!.mediaType ?? "image");
-    setMode(data.workflows[0]!.mode ?? "workflow");
-    selectWorkflow(data.workflows[0]!);
+    const initial = data.workflows.find((item) => (item.mediaType ?? "image") === "image" && item.mode === "api") ?? data.workflows[0]!;
+    setMediaType(initial.mediaType ?? "image");
+    setMode(initial.mode ?? "api");
+    selectWorkflow(initial);
     setSession(data.session);
     setBilling(data.billing);
   }, [selectWorkflow]);
@@ -116,7 +118,8 @@ export function GenerationWorkbench() {
   const switchMediaType = useCallback((next: GenerationMediaType) => {
     setMediaType(next);
     const firstInMode = workflows.find((item) => (item.mediaType ?? "image") === next && (item.mode ?? "workflow") === mode);
-    const first = firstInMode ?? workflows.find((item) => (item.mediaType ?? "image") === next);
+    const firstApi = workflows.find((item) => (item.mediaType ?? "image") === next && item.mode === "api");
+    const first = firstInMode ?? firstApi ?? workflows.find((item) => (item.mediaType ?? "image") === next);
     if (first) {
       setMode(first.mode ?? "workflow");
       selectWorkflow(first);
@@ -155,6 +158,32 @@ export function GenerationWorkbench() {
 
   const workflow = useMemo(() => workflows.find((item) => item.slug === selected && (item.mediaType ?? "image") === mediaType && (item.mode ?? "workflow") === mode), [mediaType, mode, workflows, selected]);
   const visibleWorkflows = useMemo(() => workflows.filter((item) => (item.mediaType ?? "image") === mediaType && (item.mode ?? "workflow") === mode), [mediaType, mode, workflows]);
+  const h3Workflows = useMemo(() => visibleWorkflows.filter((item) => item.category === "MiniMax H3").sort((left, right) => (left.defaults.modeMeta?.key ?? "").localeCompare(right.defaults.modeMeta?.key ?? "")), [visibleWorkflows]);
+  const otherWorkflows = useMemo(() => visibleWorkflows.filter((item) => item.category !== "MiniMax H3"), [visibleWorkflows]);
+  const h3Selected = workflow?.category === "MiniMax H3";
+  const h3Meta = workflow?.defaults.modeMeta;
+
+  const addInputImages = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const activeMax = h3Meta?.maxImages ?? 3;
+    const entries: { name: string; data: string }[] = [];
+    for (const file of Array.from(files)) {
+      if (inputImages.length + entries.length >= activeMax) break;
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setMessage("参考图仅支持 PNG/JPEG/WebP。"); continue; }
+      if (file.size > 3 * 1024 * 1024) { setMessage("单张参考图不能超过 3MB。"); continue; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const data = typeof reader.result === "string" ? reader.result : "";
+        if (data) entries.push({ name: file.name, data });
+        if (entries.length > 0) setInputImages((current) => [...current, ...entries].slice(0, activeMax));
+      };
+      reader.readAsDataURL(file);
+    }
+  }, [h3Meta?.maxImages, inputImages.length]);
+
+  const removeInputImage = useCallback((index: number) => {
+    setInputImages((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }, []);
   const estimate = workflow ? (Number(workflow.creditCost) * count).toFixed(4).replace(/\.0+$/, "") : "—";
   const loggedIn = (session !== undefined && session.role !== "guest") || billing?.account !== undefined;
 
@@ -164,7 +193,16 @@ export function GenerationWorkbench() {
     const [width, height] = size.split("x").map(Number) as [number, number];
     try {
       const parameters = workflow.mediaType === "video" ? { durationSeconds } : {};
-      const payload = JSON.stringify({ workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility: workflow.mediaType === "video" ? "private" : visibility, promptVisibility: workflow.mediaType === "video" ? "hidden" : promptVisibility, creditTier, parameters });
+      const body: Record<string, unknown> = { workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility: workflow.mediaType === "video" ? "private" : visibility, promptVisibility: workflow.mediaType === "video" ? "hidden" : promptVisibility, creditTier, parameters };
+      if (workflow.mediaType === "video" && h3Meta && h3Meta.maxImages > 0) {
+        if (inputImages.length === 0) {
+          setMessage("请先上传参考图。");
+          setSubmitting(false);
+          return;
+        }
+        body.inputImages = inputImages.map((image) => ({ name: image.name, data: image.data }));
+      }
+      const payload = JSON.stringify(body);
       if (creationAttemptRef.current?.payload !== payload) creationAttemptRef.current = { payload, key: crypto.randomUUID() };
       const response = await fetch("/api/generations", {
         method: "POST",
@@ -277,8 +315,20 @@ export function GenerationWorkbench() {
           {visibleWorkflows.length === 0
             ? <div className="workflow-loading">该分类暂无可用方式，请切换分类或稍后再试。</div>
             : <div className="workflow-grid" role="radiogroup" aria-label={mode === "workflow" ? "工作流创作方式" : "API 模型创作方式"}>
-              {visibleWorkflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
+              {otherWorkflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
+              {h3Workflows.length === 3 ? <label className={`workflow-option${h3Selected ? " selected" : ""}`}><input type="radio" name="workflow" value="minimax-h3-family" checked={h3Selected} onChange={() => selectWorkflow(h3Workflows[0]!)} /><span className="workflow-tone">MiniMax H3</span><strong>MiniMax H3 全能参考视频</strong><small>文生 / 单图 / 多图参考三合一：原生音视频，支持 4/5/8/10 秒。</small><span className="workflow-check">{h3Selected ? "✓ 已选" : ""}</span></label> : h3Workflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
             </div>}
+          {h3Selected && h3Workflows.length === 3 ? <>
+            <div className="creation-mode-tabs" role="tablist" aria-label="MiniMax H3 生成模式">
+              {h3Workflows.map((item) => <button key={item.slug} type="button" role="tab" aria-selected={selected === item.slug} className={`mode-tab${selected === item.slug ? " active" : ""}`} onClick={() => selectWorkflow(item)}>{item.defaults.modeMeta?.label ?? item.name}</button>)}
+            </div>
+            {h3Meta && h3Meta.maxImages > 0 ? <div className="reference-upload">
+              <label className="reference-upload-field"><span>参考图（{inputImages.length}/{h3Meta.maxImages}）</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => { addInputImages(event.target.files); event.target.value = ""; }} /></label>
+              {inputImages.length > 0
+                ? <div className="reference-previews">{inputImages.map((image, index) => <div className="reference-thumb" key={`${image.name}-${index}`}><Image src={image.data} alt={`参考图 ${index + 1}`} width={84} height={84} unoptimized /><button type="button" onClick={() => removeInputImage(index)}>移除</button></div>)}</div>
+                : <p className="panel-hint">单图模式上传 1 张；多图模式最多 3 张，提示词中用 @图片1 / @图片2 / @图片3 分别引用。</p>}
+            </div> : null}
+          </> : null}
         </>}
 
         <div className="composer-section"><div className="panel-heading compact"><div><span className="step-index">02</span><h2>描述你的画面</h2></div><span className="panel-hint">建议写清主体、环境、光线和质感</span></div>
@@ -295,7 +345,7 @@ export function GenerationWorkbench() {
 
         {message && loadState !== "error" ? <div className="inline-error" role="alert">{message}</div> : null}
         <div className="composer-submit"><div><span>本次预计</span><strong>{estimate} 积分</strong></div>{loggedIn
-          ? <button className="button primary create-submit" type="submit" disabled={loadState !== "ready" || submitting || prompt.trim().length === 0}>{submitting ? "正在创建…" : "开始生成"}</button>
+          ? <button className="button primary create-submit" type="submit" disabled={loadState !== "ready" || submitting || prompt.trim().length === 0 || (h3Meta !== undefined && h3Meta.maxImages > 0 && inputImages.length === 0)}>{submitting ? "正在创建…" : "开始生成"}</button>
           : <Link className="button primary create-submit" href="/login?next=/create">登录后生成</Link>}</div>
       </form>
 

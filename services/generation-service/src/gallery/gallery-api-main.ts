@@ -22,6 +22,7 @@ import { InternalViewerContextCodec } from "./internal-auth.ts";
 import { PostgresGalleryRepository } from "./postgres-gallery-repository.ts";
 import { RedisGalleryCache } from "./redis-gallery-cache.ts";
 import { generationTaskCenter } from "../tasks/task-center-service.ts";
+import { TencentCosStorage } from "../storage/tencent-cos.storage.ts";
 
 const config = loadGalleryConfig();
 const billingConfig = loadBillingConfig();
@@ -32,6 +33,7 @@ if (redis) await redis.connect();
 const assets = new TencentCosGalleryAssetUrlResolver({ ...config.cos, allowedPublicHosts: config.assetHosts, privateUrlTtlSeconds: config.privateUrlTtlSeconds });
 const repository = new PostgresGalleryRepository(pool, assets);
 const cursorCodec = new GalleryCursorCodec(config.cursorSecret);
+const generationStorage = new TencentCosStorage({ secretId: config.cos.secretId, secretKey: config.cos.secretKey, ...(config.cos.securityToken ? { securityToken: config.cos.securityToken } : {}), bucket: config.cos.bucket, region: config.cos.region, ...(config.cos.cdnBaseUrl ? { cdnBaseUrl: config.cos.cdnBaseUrl } : {}) });
 const service = new GalleryService({
   repository,
   cursor: cursorCodec,
@@ -51,7 +53,7 @@ const generationQueue = config.redisUrl ? (() => {
   return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
 })() : undefined;
 const admin = new AdminService({ repository: new PostgresAdminRepository(pool, assets), logger, onContentChanged: () => service.invalidatePublicData(), ...(generationQueue ? { queueObservability: generationQueue } : {}) });
-const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
+const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, storage: generationStorage, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
 const tasks = generationTaskCenter(generation);
 const app = await createGalleryHttpServer({ service, admin, billing, generation, tasks, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
 

@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { GalleryCursorCodec, type DecodedCursor } from "../gallery/cursor.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { JsonObject } from "../providers/types.ts";
+import type { StorageProvider } from "../storage/storage-provider.ts";
 import type { MediaType } from "../providers/types.ts";
 import { GenerationError } from "./errors.ts";
 import type { GenerationRepository } from "./repository.ts";
@@ -16,13 +18,15 @@ export class GenerationService {
   readonly #cancellation: GenerationCancellationPort | undefined;
   readonly #ready: boolean;
   readonly #cursor: GalleryCursorCodec | undefined;
+  readonly #storage: StorageProvider | undefined;
 
-  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort; readonly ready?: boolean; readonly cursor?: GalleryCursorCodec }) {
+  constructor(options: { readonly repository: GenerationRepository; readonly defaultCreditCost?: string; readonly cancellation?: GenerationCancellationPort; readonly ready?: boolean; readonly cursor?: GalleryCursorCodec; readonly storage?: StorageProvider }) {
     this.#repository = options.repository;
     this.#defaultCreditCost = creditAmount(options.defaultCreditCost ?? "1.0000");
     this.#cancellation = options.cancellation;
     this.#ready = options.ready ?? true;
     this.#cursor = options.cursor;
+    this.#storage = options.storage;
   }
 
   listWorkflows(mode?: GenerationMode, mediaType?: MediaType) { return this.#repository.listWorkflows(this.#defaultCreditCost, mode, mediaType); }
@@ -44,7 +48,38 @@ export class GenerationService {
     const parameters = jsonObject(input.parameters ?? {}, "parameters");
     const creditTier = input.creditTier === undefined ? "free" : enumValue(input.creditTier, "creditTier", ["free", "member"] as const);
     const key = token(idempotencyKey, "Idempotency-Key", 128);
-    return this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters, creditTier }, this.#defaultCreditCost);
+    const inputImages = await this.persistInputImages(input.inputImages, userId, viewer.requestId);
+    try {
+      return await this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters: inputImages.length ? { ...parameters, inputImages } : parameters, creditTier }, this.#defaultCreditCost);
+    } catch (error) {
+      await Promise.allSettled(inputImages.map((image) => this.#storage?.delete(image.objectKey)));
+      throw error;
+    }
+  }
+
+  private async persistInputImages(value: unknown, userId: number, requestId: string): Promise<{ objectKey: string; name: string; sha256: string; byteSize: number; mimeType: string }[]> {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 3) throw new GenerationError("invalid_request", "inputImages 最多 3 张。", 400);
+    if (!this.#storage) throw new GenerationError("invalid_request", "参考图存储未配置。", 503);
+    const images: { objectKey: string; name: string; sha256: string; byteSize: number; mimeType: string }[] = [];
+    try {
+      for (const [index, item] of value.entries()) {
+        const raw = item as { name?: unknown; data?: unknown };
+        const name = typeof raw.name === "string" ? raw.name.trim() : "";
+        const data = typeof raw.data === "string" ? raw.data : "";
+        if (!name || name.length > 128 || !data) throw new GenerationError("invalid_request", "参考图格式不正确。", 400);
+        const decoded = decodeDataUrl(data);
+        if (!decoded) throw new GenerationError("invalid_request", "参考图必须是 PNG/JPEG/WebP 的 data URL。", 400);
+        if (decoded.data.length > MAX_REFERENCE_IMAGE_BYTES) throw new GenerationError("invalid_request", "单张参考图不能超过 3MB。", 400);
+        const objectKey = `temp/inputs/${userId}/${requestId}/${index}${extensionForMime(decoded.mimeType)}`;
+        await this.#storage.upload({ objectKey, body: decoded.data, contentType: decoded.mimeType, contentLength: decoded.data.length });
+        images.push({ objectKey, name, sha256: createHash("sha256").update(decoded.data).digest("hex"), byteSize: decoded.data.length, mimeType: decoded.mimeType });
+      }
+      return images;
+    } catch (error) {
+      await Promise.allSettled(images.map((image) => this.#storage?.delete(image.objectKey)));
+      throw error;
+    }
   }
 
   async get(id: string, viewer: ViewerContext): Promise<GenerationView> {
@@ -90,7 +125,7 @@ function requireUser(viewer: ViewerContext): number {
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GenerationError("invalid_request", "请求内容格式不正确。", 400);
   const result = value as Record<string, unknown>;
-  const allowed = new Set(["workflowSlug", "prompt", "negativePrompt", "width", "height", "count", "visibility", "promptVisibility", "parameters", "creditTier"]);
+  const allowed = new Set(["workflowSlug", "prompt", "negativePrompt", "width", "height", "count", "visibility", "promptVisibility", "parameters", "creditTier", "inputImages"]);
   if (Object.keys(result).some((key) => !allowed.has(key))) throw new GenerationError("invalid_request", "请求包含不支持的字段。", 400);
   return result;
 }
@@ -138,6 +173,19 @@ function jsonObject(value: unknown, field: string): Readonly<JsonObject> {
 function creditAmount(value: string): string {
   if (!/^(?:0|[1-9]\d{0,8})(?:\.\d{1,4})?$/.test(value) || Number(value) < 0) throw new Error("GENERATION_DEFAULT_CREDIT_COST is invalid");
   return Number(value).toFixed(4);
+}
+
+const MAX_REFERENCE_IMAGE_BYTES = 3 * 1024 * 1024;
+function decodeDataUrl(value: string): { readonly mimeType: "image/png" | "image/jpeg" | "image/webp"; readonly data: Buffer } | undefined {
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(value.trim());
+  if (!match) return undefined;
+  const mimeType = match[1] as "image/png" | "image/jpeg" | "image/webp";
+  return { mimeType, data: Buffer.from(match[2]!, "base64") };
+}
+function extensionForMime(mimeType: "image/png" | "image/jpeg" | "image/webp"): string {
+  if (mimeType === "image/jpeg") return ".jpg";
+  if (mimeType === "image/webp") return ".webp";
+  return ".png";
 }
 
 export type { GenerationVisibility, PromptVisibility };
