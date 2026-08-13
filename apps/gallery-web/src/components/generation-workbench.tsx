@@ -24,6 +24,8 @@ export function GenerationWorkbench() {
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [size, setSize] = useState("1024x1024");
+  const [aspect, setAspect] = useState("16:9");
+  const [resolution, setResolution] = useState("720p");
   const [count, setCount] = useState(1);
   const [durationSeconds, setDurationSeconds] = useState(5);
   const [visibility, setVisibility] = useState<GenerationVisibility>("public");
@@ -91,7 +93,17 @@ export function GenerationWorkbench() {
 
   const selectWorkflow = useCallback((item: GenerationWorkflow) => {
     setSelected(item.slug);
-    setSize(initialSize(item));
+    if (item.mediaType === "video") {
+      const aspectKey = nearestAspect(item.defaults.width, item.defaults.height);
+      const alignedHeight = alignTo32(item.defaults.height);
+      const resolutions = item.defaults.videoResolutions ?? VIDEO_RESOLUTIONS;
+      const resolutionKey = resolutions.some((entry) => entry.height === alignedHeight) ? String(resolutions.find((entry) => entry.height === alignedHeight)?.key) : resolutions[0]?.key ?? "720p";
+      setAspect(aspectKey);
+      setResolution(resolutionKey);
+      setSize(videoSizeFor(aspectKey, resolutionHeight(resolutionKey, resolutions)));
+    } else {
+      setSize(initialSize(item));
+    }
     setCount(initialCount(item));
     setMediaType(item.mediaType ?? "image");
     setDurationSeconds(item.defaults.durationSeconds ?? item.durations?.[0] ?? 5);
@@ -288,6 +300,12 @@ export function GenerationWorkbench() {
     setMediaType(target.mediaType ?? "image");
     setSelected(target.slug);
     setSize(`${item.width}x${item.height}`);
+    if (target.mediaType === "video") {
+      const aspectKey = nearestAspect(item.width, item.height);
+      const resolutions = target.defaults.videoResolutions ?? VIDEO_RESOLUTIONS;
+      setAspect(aspectKey);
+      setResolution(resolutions.find((entry) => entry.height === alignTo32(item.height))?.key ?? resolutions[0]?.key ?? "720p");
+    }
     setCount(item.count);
     setVisibility(item.visibility);
     setPromptVisibility(item.promptVisibility);
@@ -338,9 +356,16 @@ export function GenerationWorkbench() {
 
         <div className="composer-section parameter-section"><div className="panel-heading compact"><div><span className="step-index">03</span><h2>画面设置</h2></div></div><div className="parameter-grid">
           <label><span>积分档位</span><select value={creditTier} onChange={(event) => setCreditTier(event.target.value as "free" | "member")}><option value="free">免费积分</option><option value="member">会员积分</option></select></label>
-          <label><span>画面比例</span><select value={size} onChange={(event) => setSize(event.target.value)}>{workflow?.sizes?.length ? workflow.sizes.map((item) => { const key = sizeKey(item); return <option key={key} value={key}>{sizeLabel(key)}</option>; }) : <option value={size}>加载中…</option>}</select></label>
-          {workflow?.mediaType === "video" ? <label><span>视频时长</span><select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>{(workflow.durations?.length ? workflow.durations : [5]).map((value) => <option key={value} value={value}>{value} 秒</option>)}</select></label> : <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>}
-          {workflow?.mediaType === "video" ? <label><span>作品可见性</span><select value="private" disabled><option value="private">仅自己可见</option></select></label> : <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>}
+          {workflow?.mediaType === "video" ? <>
+            <label><span>画面比例</span><select value={aspect} onChange={(event) => { const next = event.target.value; setAspect(next); const resolutions = workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS; setSize(videoSizeFor(next, resolutionHeight(resolution, resolutions))); }}>{VIDEO_ASPECTS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+            <label><span>分辨率</span><select value={resolution} onChange={(event) => { const next = event.target.value; setResolution(next); const resolutions = workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS; setSize(videoSizeFor(aspect, resolutionHeight(next, resolutions))); }}>{(workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+            <label><span>视频时长</span><select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>{(workflow.durations?.length ? workflow.durations : [5]).map((value) => <option key={value} value={value}>{value} 秒</option>)}</select></label>
+            <label><span>作品可见性</span><select value="private" disabled><option value="private">仅自己可见</option></select></label>
+          </> : <>
+            <label><span>画面比例</span><select value={size} onChange={(event) => setSize(event.target.value)}>{workflow?.sizes?.length ? workflow.sizes.map((item) => { const key = sizeKey(item); return <option key={key} value={key}>{sizeLabel(key)}</option>; }) : <option value={size}>加载中…</option>}</select></label>
+            <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>
+            <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>
+          </>}
         </div>{workflow?.mediaType === "video" ? <p className="panel-hint">视频暂只在本人创作记录和任务中心可见。</p> : <label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label>}</div>
 
         {message && loadState !== "error" ? <div className="inline-error" role="alert">{message}</div> : null}
@@ -439,6 +464,51 @@ function sizeLabel(value: string): string {
 function countOptions(workflow: GenerationWorkflow): readonly number[] {
   const { min, max } = workflow.countRange ?? { min: 1, max: 4 };
   return [1, 2, 3, 4].filter((value) => value >= min && value <= max);
+}
+
+const VIDEO_ASPECTS: readonly { readonly key: string; readonly label: string; readonly width: number; readonly height: number }[] = [
+  { key: "1:1", label: "1:1 方形", width: 1, height: 1 },
+  { key: "4:3", label: "4:3 横图", width: 4, height: 3 },
+  { key: "3:4", label: "3:4 竖图", width: 3, height: 4 },
+  { key: "16:9", label: "16:9 横图", width: 16, height: 9 },
+  { key: "9:16", label: "9:16 竖图", width: 9, height: 16 },
+  { key: "21:9", label: "21:9 超宽", width: 21, height: 9 },
+] as const;
+
+const VIDEO_RESOLUTIONS: readonly { readonly key: string; readonly label: string; readonly height: number }[] = [
+  { key: "480p", label: "480p", height: 480 },
+  { key: "720p", label: "720p 高清", height: 704 },
+  { key: "1080p", label: "1080p 全高清", height: 1088 },
+  { key: "2K", label: "2K", height: 1152 },
+] as const;
+
+function alignTo32(value: number): number {
+  return Math.max(256, Math.round(value / 32) * 32);
+}
+
+function nearestAspect(width: number, height: number): string {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "16:9";
+  const ratio = width / height;
+  let best = VIDEO_ASPECTS[3]!;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (const entry of VIDEO_ASPECTS) {
+    const delta = Math.abs(ratio - entry.width / entry.height);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = entry;
+    }
+  }
+  return best.key;
+}
+
+function resolutionHeight(key: string, resolutions: readonly { readonly key: string; readonly height: number }[]): number {
+  return resolutions.find((entry) => entry.key === key)?.height ?? 704;
+}
+
+function videoSizeFor(aspectKey: string, height: number): string {
+  const aspect = VIDEO_ASPECTS.find((entry) => entry.key === aspectKey) ?? VIDEO_ASPECTS[3]!;
+  const width = alignTo32(height * aspect.width / aspect.height);
+  return `${width}x${height}`;
 }
 
 function readAsDataUrl(file: File): Promise<string> {

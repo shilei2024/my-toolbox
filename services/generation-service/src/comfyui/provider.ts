@@ -34,15 +34,18 @@ export class ComfyUIProvider implements GenerationProvider {
     assertRequestSupported(this.descriptor, request);
     if (!binding.providerWorkflowRef) throw this.error("configuration", "workflow_ref_missing", "ComfyUI workflow reference is missing");
     const refImages = await this.uploadReferenceImages(request, context);
+    const align = numeric(binding.providerConfig.align);
+    const width = align ? alignToMultiple(request.width, align, 256) : request.width;
+    const height = align ? alignToMultiple(request.height, align, 256) : request.height;
     try {
       const loaded = await this.#workflows.load(binding.providerWorkflowRef);
-      const workflow = injectPlaceholders(loaded.template, this.values(request, binding, refImages)) as JsonObject;
+      const workflow = injectPlaceholders(loaded.template, this.values(request, binding, refImages, width, height)) as JsonObject;
       const externalRequestId = await this.#client.queuePrompt(workflow, context.attemptId, context.signal);
       const mediaType = request.mediaType ?? "image";
       this.#tasks.set(externalRequestId, {
         mediaType,
-        width: request.width,
-        height: request.height,
+        width,
+        height,
         ...(mediaType === "video" ? { durationSeconds: videoDuration(request, binding) } : {}),
       });
       return { externalRequestId, state: "queued", outputs: [], providerMetadata: { workflowName: loaded.workflowName, workflowVersion: loaded.workflowVersion, workflowDigest: loaded.digest, model: binding.providerModel ?? configuredValue(binding, this.#defaults, "model") ?? null } };
@@ -93,7 +96,7 @@ export class ComfyUIProvider implements GenerationProvider {
 
   async estimateCost(_request: GenerationRequest, binding: ProviderBinding): Promise<CostEstimate> { return { amount: binding.estimatedCost ?? 0, currency: "USD", estimated: true }; }
 
-  private values(request: GenerationRequest, binding: ProviderBinding, refImages: readonly string[] = []): PlaceholderValues {
+  private values(request: GenerationRequest, binding: ProviderBinding, refImages: readonly string[] = [], width = request.width, height = request.height): PlaceholderValues {
     // Routing and execution controls are server-owned. In particular, never
     // allow a browser request to replace a catalog-selected model or LoRA.
     // The request seed remains user-selectable because it is a deliberate,
@@ -116,8 +119,8 @@ export class ComfyUIProvider implements GenerationProvider {
     return {
       prompt: request.prompt,
       negative_prompt: request.negativePrompt,
-      width: request.width,
-      height: request.height,
+      width,
+      height,
       ...(refImages[0] === undefined ? {} : { ref_image_0: refImages[0] }),
       ...(refImages[1] === undefined ? {} : { ref_image_1: refImages[1] }),
       ...(refImages[2] === undefined ? {} : { ref_image_2: refImages[2] }),
@@ -163,6 +166,10 @@ function extensionForMime(mimeType: string): string {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/png") return ".png";
   throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "unsupported_reference_image", message: "Reference image format is unsupported", retryable: false });
+}
+function alignToMultiple(value: number, multiple: number, minimum: number): number {
+  const aligned = Math.round(value / multiple) * multiple;
+  return Math.max(minimum, Math.min(16_384, aligned));
 }
 
 function failed(entry: ComfyHistoryEntry): boolean { return entry.status?.status_str === "error" || Boolean(entry.status?.messages?.some((value) => Array.isArray(value) && value[0] === "execution_error")); }

@@ -214,6 +214,19 @@ test("ComfyUI uses catalog binding controls instead of client parameters", async
   assert.equal(typeof prompt?.["3"]?.inputs?.seed, "number");
 });
 
+test("ComfyUI aligns dimensions to the binding multiple", async () => {
+  let submitted: Record<string, unknown> | undefined;
+  const client = new ComfyUIClient(comfyConfig(workflowDirectory), (async (_input, init) => {
+    submitted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return Response.json({ prompt_id: "prompt-aligned" });
+  }) as typeof fetch);
+  const provider = new ComfyUIProvider(client, new WorkflowLoader(workflowDirectory));
+  await provider.generate({ ...request, width: 1000, height: 600 }, { ...binding, providerConfig: { align: 32, steps: 22, cfg: 6, sampler: "euler", scheduler: "normal" } }, context);
+  const serialized = JSON.stringify(submitted);
+  assert.match(serialized, /"width":992/);
+  assert.match(serialized, /"height":608/);
+});
+
 test("COS persistence organizes objects under the owner key when present", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "phase4-owner-"));
   const uploads: string[] = [];
