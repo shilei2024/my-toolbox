@@ -12,8 +12,9 @@ import { ImagePersistenceService } from "../src/pipeline/image-persistence.ts";
 import { PollingService } from "../src/pipeline/polling-service.ts";
 import { ProductionGenerationPipeline } from "../src/pipeline/production-generation-pipeline.ts";
 import { ProviderError } from "../src/providers/errors.ts";
+import type { ImageProvider } from "../src/providers/image-provider.ts";
 import { MockImageProvider } from "../src/providers/mock.provider.ts";
-import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../src/providers/types.ts";
+import type { GenerationRequest, ProviderBinding, ProviderCallContext, ProviderSubmission } from "../src/providers/types.ts";
 import { sanitizeMetadataKey, TencentCosStorage } from "../src/storage/tencent-cos.storage.ts";
 import { injectPlaceholders, WorkflowPlaceholderError } from "../src/workflows/placeholder-injector.ts";
 import { WorkflowLoadError, WorkflowLoader } from "../src/workflows/workflow-loader.ts";
@@ -273,12 +274,20 @@ test("polling exhaustion maps to a retryable timeout", async () => {
 });
 
 test("polling deadline enforces the binding timeout", async () => {
-  const provider = new MockImageProvider({ asynchronous: true, latencyMs: 60_000 });
-  const submission = await provider.generate(request, { ...binding, providerCode: "mock" }, context);
-  const polling = new PollingService({ intervalMs: 1, maxAttempts: 10_000 }, async () => undefined);
+  const stuckProvider: ImageProvider = {
+    descriptor: { code: "stuck", displayName: "Stuck", availability: "active", priority: 1, capabilities: { mediaTypes: ["image"], modes: ["text-to-image"], workflowKinds: [], models: [], minWidth: 64, maxWidth: 1024, minHeight: 64, maxHeight: 1024, maxOutputs: 1, supportsSeed: true, supportsCancellation: true, supportsStatusPolling: true } },
+    async generate() { return { externalRequestId: "stuck-1", state: "queued", outputs: [], providerMetadata: {} }; },
+    async getStatus() { return { externalRequestId: "stuck-1", state: "running", outputs: [], providerMetadata: {} }; },
+    async cancel() { return { externalRequestId: "stuck-1", accepted: true, state: "cancelled" }; },
+    async healthCheck() { return { healthy: true, latencyMs: 0, checkedAt: new Date() }; },
+    async estimateCost() { return { amount: 0, currency: "USD", estimated: true }; },
+  };
+  const submission: ProviderSubmission = { externalRequestId: "stuck-1", state: "queued", outputs: [], providerMetadata: {} };
+  const polling = new PollingService({ intervalMs: 1, maxAttempts: 100_000 });
   const started = Date.now();
-  await assert.rejects(polling.wait(provider, submission, context, 50), (error) => error instanceof ProviderError && error.code === "polling_exhausted" && error.retryable);
+  await assert.rejects(polling.wait(stuckProvider, submission, context, 50), (error) => error instanceof ProviderError && error.code === "polling_exhausted" && error.retryable);
   assert.ok(Date.now() - started < 2_000, "deadline must stop polling before the attempt budget");
+  await assert.rejects(polling.wait(stuckProvider, submission, context, 50, false), (error) => error instanceof ProviderError && error.code === "polling_exhausted" && !error.retryable);
 });
 
 test("persistence compensates earlier COS uploads and removes temporary files after failure", async () => {
