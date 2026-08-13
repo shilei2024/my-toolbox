@@ -72,7 +72,12 @@ export class PostgresGenerationRepository implements GenerationRepository {
           throw new GenerationError("invalid_request", "所选视频工作流不支持该时长，请按选项调整。", 400);
         }
         await client.query("SELECT id FROM public.users WHERE id = $1 FOR UPDATE", [input.userId]);
-        const activeVideo = await client.query("SELECT 1 FROM ai.generation_jobs WHERE user_id = $1 AND media_type = 'video' AND status IN ('pending','running') LIMIT 1", [input.userId]);
+        const activeVideo = await client.query(`SELECT 1
+          FROM ai.generation_jobs j
+          JOIN ai.workflow_versions v ON v.id = j.workflow_version_id
+          JOIN ai.workflows w ON w.id = v.workflow_id
+          WHERE j.user_id = $1 AND w.media_type = 'video' AND j.status IN ('pending','running')
+          LIMIT 1`, [input.userId]);
         if (activeVideo.rowCount) throw new GenerationError("video_busy", "已有视频任务正在生成，请等待完成后再创建。", 409);
       }
       const cost = (Number(workflowCreditCostFor(workflow.defaults, defaultCreditCost, input.width, input.height)) * input.count).toFixed(4);
