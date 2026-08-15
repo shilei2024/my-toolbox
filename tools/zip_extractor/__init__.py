@@ -16,7 +16,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
-from auth.decorators import remaining_for
+from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
 
 log = logging.getLogger(__name__)
@@ -143,6 +143,7 @@ def _extract_deep(
 # ---------------------------------------------------------------------------
 @tool_bp.post("/analyze")
 @limiter.limit(lambda: "20/minute")
+@require_usage("zip_extractor")
 def analyze():
     """接收本批 zip 文件，递归解压找出 PDF，按大小上限截断返回。
 
@@ -239,6 +240,7 @@ def analyze():
                 f"{MAX_RESPONSE_B64_BYTES//(1024*1024)}MB 上限）。"
                 f"建议：① 改用更小的压缩包分批；② 减少单包内文件数。"
             )
+        commit_usage("zip_extractor", success=True)
         return jsonify(body)
 
     except Exception as e:

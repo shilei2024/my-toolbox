@@ -33,7 +33,8 @@ export class ComfyUIProvider implements GenerationProvider {
   async generate(request: GenerationRequest, binding: ProviderBinding, context: ProviderCallContext): Promise<ProviderSubmission> {
     assertRequestSupported(this.descriptor, request);
     if (!binding.providerWorkflowRef) throw this.error("configuration", "workflow_ref_missing", "ComfyUI workflow reference is missing");
-    const refImages = await this.uploadReferenceImages(request, context);
+    const uploaded = await this.uploadReferenceImages(request, context);
+    const refImages = uploaded.map((item) => item.name);
     const align = numeric(binding.providerConfig.align);
     const width = align ? alignToMultiple(request.width, align, 256) : request.width;
     const height = align ? alignToMultiple(request.height, align, 256) : request.height;
@@ -50,13 +51,61 @@ export class ComfyUIProvider implements GenerationProvider {
       });
       return { externalRequestId, state: "queued", outputs: [], providerMetadata: { workflowName: loaded.workflowName, workflowVersion: loaded.workflowVersion, workflowDigest: loaded.digest, model: binding.providerModel ?? configuredValue(binding, this.#defaults, "model") ?? null } };
     } catch (error) { throw this.map(error); }
-    finally { await this.cleanupReferenceImages(request); }
+    finally { await this.cleanupReferenceImages(uploaded); }
   }
 
   async getStatus(externalRequestId: string, context: ProviderCallContext): Promise<ProviderStatusResult> {
     try {
       const task = this.#tasks.get(externalRequestId);
-      if (!task) throw this.error("validation", "unknown_external_request", "ComfyUI task context is unavailable");
+      if (!task) {
+        // Worker-restart resilience: the in-memory task map is gone, but the
+        // job may still be running upstream (ComfyUI history is authoritative).
+        // Reconstruct a minimal task from the durable request metadata so we
+        // keep polling instead of failing the job and refunding credits while
+        // the upstream generation continues to run (and to cost money).
+        if (context.taskMetadata?.mediaType === "video" || context.taskMetadata?.durationSeconds !== undefined) {
+          const entry = await this.#client.getHistory(externalRequestId, context.signal).catch(() => undefined);
+          if (!entry) return this.status(externalRequestId, "running", [], { phase: "recovering" }, 0.1);
+          const refs = videoRefs(entry);
+          if (refs.length === 0) return this.status(externalRequestId, "running", [], { phase: "waiting" }, 0.5);
+          const meta = context.taskMetadata;
+          const taskRecovered: ComfyTaskContext = {
+            mediaType: "video" as const,
+            width: meta?.width ?? 960,
+            height: meta?.height ?? 544,
+            ...(meta?.durationSeconds ? { durationSeconds: meta.durationSeconds } : {}),
+          };
+          const outputs: ProviderOutput[] = [];
+          for (const [index, ref] of refs.entries()) {
+            const extension = safeVideoExtension(ref);
+            const filename = `${context.attemptId}-${index}${extension}`;
+            const destination = safeChild(this.#client.config.downloadDirectory, filename);
+            await this.#client.downloadOutput(ref, destination, context.signal);
+            outputs.push({ mediaType: "video", kind: "local-file", path: destination, mimeType: videoMime(extension), width: taskRecovered.width, height: taskRecovered.height, durationSeconds: taskRecovered.durationSeconds ?? 1 } satisfies ProviderVideoOutput);
+          }
+          this.#tasks.set(externalRequestId, taskRecovered);
+          return this.status(externalRequestId, "succeeded", outputs, { outputCount: outputs.length, recovered: true }, 1);
+        }
+        const entry = await this.#client.getHistory(externalRequestId, context.signal).catch(() => undefined);
+        if (!entry) return this.status(externalRequestId, "running", [], { phase: "recovering" }, 0.1);
+        const refs = imageRefs(entry);
+        if (refs.length === 0) return this.status(externalRequestId, "running", [], { phase: "waiting" }, 0.5);
+        const outputs: ProviderOutput[] = [];
+        for (const [index, ref] of refs.entries()) {
+          const extension = safeImageExtension(ref.filename);
+          const filename = `${context.attemptId}-${index}${extension}`;
+          const destination = safeChild(this.#client.config.downloadDirectory, filename);
+          await this.#client.downloadOutput(ref, destination, context.signal);
+          const metadata = await sharp(destination).metadata();
+          const width = metadata.width;
+          const height = metadata.height;
+          if (!width || !height) throw this.error("validation", "invalid_image_dimensions", "ComfyUI output dimensions are invalid");
+          outputs.push({ kind: "local-file", path: destination, mimeType: imageMime(extension), width, height } satisfies ProviderImageOutput);
+        }
+        const meta = context.taskMetadata;
+        this.#tasks.set(externalRequestId, { mediaType: "image", width: meta?.width ?? outputs[0]?.width ?? 1024, height: meta?.height ?? outputs[0]?.height ?? 1024 });
+        return this.status(externalRequestId, "succeeded", outputs, { outputCount: outputs.length, recovered: true }, 1);
+      }
       const entry = await this.#client.getHistory(externalRequestId, context.signal);
       if (!entry) return this.status(externalRequestId, "running", [], { phase: "waiting" }, 0.1);
       if (failed(entry)) return { ...this.status(externalRequestId, "failed", [], { phase: "failed" }), error: { category: "upstream", code: "execution_failed", message: "ComfyUI execution failed", retryable: false, externalRequestId } };
@@ -128,22 +177,26 @@ export class ComfyUIProvider implements GenerationProvider {
     };
   }
 
-  private async uploadReferenceImages(request: GenerationRequest, context: ProviderCallContext): Promise<string[]> {
+  private async uploadReferenceImages(request: GenerationRequest, context: ProviderCallContext): Promise<readonly { readonly name: string; readonly objectKey: string }[]> {
     const images = referenceImages(request);
     if (images.length === 0) return [];
     if (!this.#storage) throw this.error("configuration", "reference_storage_missing", "Reference image storage is not configured");
-    const names: string[] = [];
+    const names: { name: string; objectKey: string }[] = [];
     for (const [index, image] of images.entries()) {
       const data = await this.#storage.download(image.objectKey);
       const uploaded = await this.#client.uploadImage(data, `${context.attemptId}-${index}${extensionForMime(image.mimeType)}`, context.signal);
-      names.push(uploaded.name);
+      names.push({ name: uploaded.name, objectKey: image.objectKey });
     }
     return names;
   }
 
-  private async cleanupReferenceImages(request: GenerationRequest): Promise<void> {
+  private async cleanupReferenceImages(uploaded: readonly { readonly objectKey: string }[]): Promise<void> {
     if (!this.#storage) return;
-    await Promise.allSettled(referenceImages(request).map((image) => this.#storage!.delete(image.objectKey)));
+    // Only delete the objects this request actually downloaded and uploaded to
+    // ComfyUI. Never touch arbitrary keys derived from a caller-supplied
+    // parameters.inputImages value — that would be a delete primitive for any
+    // storage object whose key the caller can guess.
+    await Promise.allSettled(uploaded.map((image) => this.#storage!.delete(image.objectKey)));
   }
 
   private status(externalRequestId: string, state: "running" | "succeeded" | "failed", outputs: readonly ProviderOutput[], providerMetadata: JsonObject, progress?: number): ProviderStatusResult { return { externalRequestId, state, outputs, providerMetadata, ...(progress === undefined ? {} : { progress }) }; }
@@ -158,6 +211,12 @@ function referenceImages(request: GenerationRequest): readonly { readonly object
   return raw.map((item) => {
     const value = item as { objectKey?: unknown; mimeType?: unknown };
     if (typeof value.objectKey !== "string" || typeof value.mimeType !== "string") throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "invalid_reference_image", message: "Reference image metadata is invalid", retryable: false });
+    // Ownership check: reference objects are only ever created by the
+    // generation service under temp/inputs/{userId}/{requestId}/ (see
+    // GenerationService.persistInputImages). Refusing any other key prevents
+    // a caller-controlled parameters.inputImages from reading or deleting
+    // arbitrary storage objects even if an older job row was already written.
+    if (!value.objectKey.startsWith("temp/inputs/")) throw new ProviderError({ providerCode: "comfyui", category: "validation", code: "unsafe_reference_image", message: "Reference image object key is not server-owned", retryable: false });
     return { objectKey: value.objectKey, mimeType: value.mimeType };
   });
 }

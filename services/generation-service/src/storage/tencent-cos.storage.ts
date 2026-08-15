@@ -6,6 +6,7 @@ interface CosClient {
   putObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { ETag?: string }) => void): void;
   getObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { Body?: Buffer | string }) => void): void;
   deleteObject(options: Record<string, unknown>, callback: (error: Error | null) => void): void;
+  getBucket(options: Record<string, unknown>, callback: (error: Error | null, data?: { Contents?: Array<{ Key?: string; LastModified?: string }>; IsTruncated?: boolean; NextMarker?: string }) => void): void;
 }
 
 export class TencentCosStorage implements StorageProvider {
@@ -24,6 +25,37 @@ export class TencentCosStorage implements StorageProvider {
     throw new Error("Tencent COS download returned an empty body");
   }
   async delete(objectKey: string): Promise<void> { await new Promise<void>((resolve, reject) => this.#client.deleteObject({ Bucket: this.config.bucket, Region: this.config.region, Key: objectKey }, (error) => error ? reject(new Error("Tencent COS delete failed", { cause: error })) : resolve())); }
+
+  async list(prefix: string): Promise<readonly string[]> {
+    const keys: string[] = [];
+    let marker: string | undefined;
+    for (let page = 0; page < 1000; page += 1) {
+      const data = await new Promise<{ Contents?: Array<{ Key?: string }>; IsTruncated?: boolean; NextMarker?: string }>((resolve, reject) => this.#client.getBucket({ Bucket: this.config.bucket, Region: this.config.region, Prefix: prefix, ...(marker ? { Marker: marker } : {}) }, (error, result) => error ? reject(new Error("Tencent COS list failed", { cause: error })) : resolve(result ?? {})));
+      for (const item of data.Contents ?? []) if (typeof item.Key === "string") keys.push(item.Key);
+      if (!data.IsTruncated) break;
+      marker = data.NextMarker ?? keys.at(-1);
+      if (!marker) break;
+    }
+    return keys;
+  }
+
+  /** List object keys with their last-modified timestamps (for TTL sweeps). */
+  async listWithTimestamps(prefix: string): Promise<readonly { objectKey: string; lastModifiedMs: number }[]> {
+    const items: { objectKey: string; lastModifiedMs: number }[] = [];
+    let marker: string | undefined;
+    for (let page = 0; page < 1000; page += 1) {
+      const data = await new Promise<{ Contents?: Array<{ Key?: string; LastModified?: string }>; IsTruncated?: boolean; NextMarker?: string }>((resolve, reject) => this.#client.getBucket({ Bucket: this.config.bucket, Region: this.config.region, Prefix: prefix, ...(marker ? { Marker: marker } : {}) }, (error, result) => error ? reject(new Error("Tencent COS list failed", { cause: error })) : resolve(result ?? {})));
+      for (const item of data.Contents ?? []) {
+        if (typeof item.Key !== "string") continue;
+        const lastModified = item.LastModified ? Date.parse(item.LastModified) : NaN;
+        if (Number.isFinite(lastModified)) items.push({ objectKey: item.Key, lastModifiedMs: lastModified });
+      }
+      if (!data.IsTruncated) break;
+      marker = data.NextMarker ?? items.at(-1)?.objectKey;
+      if (!marker) break;
+    }
+    return items;
+  }
 }
 
 /**

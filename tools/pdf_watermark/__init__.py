@@ -48,13 +48,17 @@ tool_bp = Blueprint("pdf_watermark", __name__)
 _FONT_REGISTERED: set[str] = set()
 
 # Candidate CJK + Latin fonts, tried in order. The first that loads wins.
+# The bundled Noto Sans SC (static/fonts/) ships with the repo so Linux
+# servers without CJK fonts still render Chinese watermarks correctly.
 _FONT_CANDIDATES = [
+    ("bundled-noto", str(Path(__file__).resolve().parent.parent.parent / "static" / "fonts" / "NotoSansSC-Regular.ttf")),
     ("msyh",   "C:/Windows/Fonts/msyh.ttc"),     # Microsoft YaHei (Windows, CJK)
     ("simhei", "C:/Windows/Fonts/simhei.ttf"),    # SimHei (Windows, CJK)
     ("simsun", "C:/Windows/Fonts/simsun.ttc"),    # SimSun (Windows, CJK)
     ("arial",  "C:/Windows/Fonts/arial.ttf"),      # Arial (Windows, Latin)
     ("noto",   "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     ("wqy",    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
 ]
 # Built-in fallback name (Helvetica — Latin only, always available in reportlab).
 _FALLBACK_FONT = "Helvetica"

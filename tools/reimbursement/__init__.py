@@ -1100,6 +1100,7 @@ def _rb_owner() -> tuple[str, str]:
 
 
 @tool_bp.post("/save")
+@limiter.limit(lambda: "30/minute")
 def save_state():
     """保存当前期间的完整报销状态。JSON: {period, data: {...}}"""
     payload = request.get_json(silent=True) or {}
@@ -1172,6 +1173,7 @@ def list_periods():
 
 
 @tool_bp.post("/delete-period")
+@limiter.limit(lambda: "20/minute")
 def delete_period():
     """删除指定期间的全部数据。JSON: {period}"""
     payload = request.get_json(silent=True) or {}
@@ -1200,6 +1202,7 @@ def delete_period():
 
 
 @tool_bp.post("/rename-period")
+@limiter.limit(lambda: "20/minute")
 def rename_period():
     """重命名期间。JSON: {old_period, new_period}"""
     payload = request.get_json(silent=True) or {}
@@ -1244,6 +1247,7 @@ def debug_info():
 
 
 @tool_bp.post("/cover-data")
+@limiter.limit(lambda: "30/minute")
 def cover_data():
     """
     接收前端传来的完整报销数据，返回封面所需的汇总计算结果。
@@ -1456,6 +1460,10 @@ def cover_data():
 # ---------------------------------------------------------------------------
 # 模板下载
 # ---------------------------------------------------------------------------
+# 空白模板随代码入库（tools/reimbursement/templates/），随 git 部署到生产；
+# 不要把模板放在 uploads/（该目录被 .gitignore 忽略，生产克隆后会 404）。
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
 TEMPLATES = {
     "entertainment": "应酬费_出差明细_派车单_模板.xls",
     "cover": "报销封面及费用分类表_模板.xls",
@@ -1489,9 +1497,14 @@ def download_template(template_id):
     if not filename:
         return jsonify(error="模板不存在"), 404
 
-    filepath = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement_templates" / filename
+    filepath = TEMPLATES_DIR / filename
     if not filepath.exists():
-        return jsonify(error="模板文件不存在"), 404
+        # 兼容旧部署：回退到 uploads/reimbursement_templates/ 下的历史副本
+        legacy = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement_templates" / filename
+        if legacy.exists():
+            filepath = legacy
+        else:
+            return jsonify(error="模板文件不存在"), 404
 
     return send_file(
         str(filepath),

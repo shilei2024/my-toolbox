@@ -16,21 +16,35 @@ export class ProductionGenerationPipeline {
     const started = Date.now();
     let cancellation: Promise<unknown> | undefined;
     let externalRequestId: string | undefined;
+    // Durable task metadata: survives provider-internal state loss (e.g. a
+    // worker restart) so getStatus() can keep polling an already-submitted
+    // upstream job instead of failing it and refunding credits.
+    const providerContext: ProviderCallContext = {
+      ...context,
+      taskMetadata: {
+        ...(request.mediaType ? { mediaType: request.mediaType } : {}),
+        ...(request.width ? { width: request.width } : {}),
+        ...(request.height ? { height: request.height } : {}),
+        ...(request.mediaType === "video" && typeof request.parameters.durationSeconds === "number"
+          ? { durationSeconds: request.parameters.durationSeconds }
+          : {}),
+      },
+    };
     const cancelUpstream = (): void => {
       if (!externalRequestId || cancellation) return;
-      const { signal: _signal, ...cancelContext } = context;
+      const { signal: _signal, ...cancelContext } = providerContext;
       cancellation = provider.cancel(externalRequestId, cancelContext).catch(() => undefined);
     };
     context.signal?.addEventListener("abort", cancelUpstream, { once: true });
     this.#logger.info("generation.started", { generationId: request.jobId, provider: provider.descriptor.code, workflow: request.workflow.workflowId, workflowVersion: request.workflow.version });
     try {
-      const submission = await provider.generate(request, binding, context);
+      const submission = await provider.generate(request, binding, providerContext);
       externalRequestId = submission.externalRequestId;
       if (context.signal?.aborted) {
         cancelUpstream();
         throw new ProviderError({ providerCode: provider.descriptor.code, category: "cancelled", code: "generation_cancelled", message: "Generation was cancelled", retryable: false, externalRequestId });
       }
-      const status = await this.#polling.wait(provider, submission, context, binding.timeoutSeconds > 0 ? binding.timeoutSeconds * 1000 : undefined, binding.providerConfig.retryOnTimeout !== false);
+      const status = await this.#polling.wait(provider, submission, providerContext, binding.timeoutSeconds > 0 ? binding.timeoutSeconds * 1000 : undefined, binding.providerConfig.retryOnTimeout !== false);
       if (status.state !== "succeeded") throw new ProviderError({ providerCode: provider.descriptor.code, category: status.state === "cancelled" ? "cancelled" : "upstream", code: status.error?.code ?? `provider_${status.state}`, message: status.error?.message ?? "Provider generation failed", retryable: status.error?.retryable ?? false, externalRequestId: status.externalRequestId });
       const generatedAt = Date.now();
       const outputMediaType = request.mediaType ?? "image";

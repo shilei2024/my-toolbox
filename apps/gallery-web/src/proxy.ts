@@ -13,7 +13,9 @@ import { NextRequest, NextResponse } from "next/server";
  * Artwork URLs point at Tencent COS/CDN over HTTPS. The Generation Service
  * already validates every asset URL against the configured COS/CDN host
  * allowlist before the browser receives it, so `img-src https:` is safe here
- * and intentionally does not duplicate the backend allowlist.
+ * and intentionally does not duplicate the backend allowlist. Video output
+ * URLs use the same COS/CDN hosts, so `media-src` mirrors `img-src`; `blob:`
+ * covers MediaSource / object URLs used by some players.
  */
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -23,6 +25,7 @@ export function proxy(request: NextRequest) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' https: data: blob:",
+    "media-src 'self' https: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
     "object-src 'none'",

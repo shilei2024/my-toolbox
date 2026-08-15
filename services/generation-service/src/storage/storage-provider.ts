@@ -6,5 +6,7 @@ export interface StorageProvider {
   upload(input: StorageUpload): Promise<StoredAsset>;
   download(objectKey: string): Promise<Buffer>;
   delete(objectKey: string): Promise<void>;
+  /** List object keys under a prefix (used for temp-object TTL sweeps). */
+  list?(prefix: string): Promise<readonly string[]>;
 }
 

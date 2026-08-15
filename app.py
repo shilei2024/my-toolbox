@@ -391,6 +391,16 @@ def _ensure_user_nickname_column(app: Flask) -> None:
 
 
 def _init_extensions(app: Flask) -> None:
+    # Trust X-Forwarded-For/X-Forwarded-Proto only when the app sits behind a
+    # known reverse proxy (Nginx / Cloudflare). Without this, a client could
+    # spoof X-Forwarded-For to bypass IP rate limits or poison usage logs.
+    # PROXY_FIX_COUNT is the number of trusted proxy hops; 0 disables it.
+    proxy_hops = int(os.environ.get("PROXY_FIX_COUNT", "0") or "0")
+    if proxy_hops > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix  # noqa: PLC0415
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_hops, x_proto=proxy_hops, x_host=1)
+
     # Resolve SQLite path to the app's instance_path if user didn't override.
     # Skip for in-memory DB (used on Vercel / read-only FS), absolute paths,
     # and when VERCEL env var is detected.
@@ -518,6 +528,18 @@ def _register_context(app: Flask) -> None:
     def china_time_filter(value, fmt: str = "%Y-%m-%d %H:%M:%S"):  # noqa: ANN001
         local = to_china_time(value)
         return local.strftime(fmt) if local else "—"
+
+    @app.template_filter("static_url")
+    def static_url_filter(filename: str) -> str:  # noqa: ANN001
+        """Static URL with a cache-busting version query.
+
+        /static/ assets are served with a long immutable cache (see
+        deploy/nginx.conf). Bumping APP_VERSION (or passing ?v=) forces
+        browsers to refetch after a release instead of silently running stale
+        JS/CSS.
+        """
+        version = app.config.get("APP_VERSION") or "dev"
+        return f"{url_for('static', filename=filename)}?v={version}"
 
     @app.context_processor
     def inject_globals():  # noqa: ANN202

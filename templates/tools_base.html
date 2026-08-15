@@ -65,5 +65,5 @@
 </div>
 {% endblock %}
 {% block scripts_extra %}
-{% for js in (tool_js_list or []) %}<script src="{{ url_for('static', filename=js) }}"></script>{% endfor %}
+{% for js in (tool_js_list or []) %}<script src="{{ js|static_url }}"></script>{% endfor %}
 {% endblock %}

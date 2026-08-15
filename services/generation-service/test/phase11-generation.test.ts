@@ -84,6 +84,42 @@ describe("M1 generation API domain", () => {
     await assert.rejects(service.create({ ...validBody, width: 16 }, "create-attempt-1", viewer), (error) => error instanceof GenerationError && error.code === "invalid_request");
   });
 
+  it("strips caller-supplied inputImages from parameters (arbitrary objectKey injection)", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({ repository });
+    // A caller must never be able to smuggle objectKeys through parameters;
+    // reference images are only persisted server-side via the top-level
+    // inputImages field under temp/inputs/{userId}/{requestId}/.
+    const body = {
+      ...validBody,
+      parameters: {
+        steps: 20,
+        inputImages: [{ objectKey: "images/another-user/00000000000000000000000000000000/0.png", mimeType: "image/png" }],
+      },
+    };
+    await service.create(body, "create-attempt-injection-1", viewer);
+    const stored = repository.created?.parameters as Record<string, unknown>;
+    assert.ok(stored);
+    assert.equal("inputImages" in stored, false, "parameters.inputImages must be stripped");
+    assert.equal(stored.steps, 20, "other parameters must be preserved");
+  });
+
+  it("server-owned top-level inputImages override any parameters value", async () => {
+    const repository = new FakeRepository();
+    const service = new GenerationService({ repository });
+    const images = [
+      { name: "ref.png", data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII=" },
+    ];
+    const body = { ...validBody, inputImages: images, parameters: { inputImages: [{ objectKey: "evil/key.png", mimeType: "image/png" }] } };
+    const serviceWithStorage = new GenerationService({ repository, storage: { code: "test", upload: async (input: { objectKey: string; body: Buffer | import("node:stream").Readable }) => ({ storageProvider: "tencent_cos", bucket: "b", region: "r", objectKey: input.objectKey, url: `https://cos/${input.objectKey}` }), download: async () => Buffer.alloc(0), delete: async () => undefined } });
+    await serviceWithStorage.create(body, "create-attempt-upload-1", viewer);
+    const stored = repository.created?.parameters as Record<string, unknown>;
+    assert.ok(Array.isArray(stored.inputImages));
+    const keys = (stored.inputImages as { objectKey: string }[]).map((item) => item.objectKey);
+    assert.equal(keys.length, 1);
+    assert.ok(keys[0]!.startsWith("temp/inputs/7/"), `expected server-owned prefix, got ${keys[0]}`);
+  });
+
   it("queries only through viewer-scoped repository methods and cancels idempotently", async () => {
     const repository = new FakeRepository(); const service = new GenerationService({ repository });
     assert.equal((await service.get("job-1", viewer)).id, "job-1");
