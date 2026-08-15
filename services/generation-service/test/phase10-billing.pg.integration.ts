@@ -62,22 +62,24 @@ describe("Phase 10 PostgreSQL credit ledger", { skip: !databaseUrl }, () => {
 
   it("credits a credit pack exactly once when both Stripe events are processed", async () => {
     const repository = new PostgresBillingRepository(pool);
-    await pool.query(`INSERT INTO ai.billing_plans (id, slug, name, description, kind, currency, amount_minor, credit_amount, is_enabled, is_public)
-      VALUES ($1, 'phase10-pack', 'Phase 10 Pack', '', 'credit_pack', 'cny', '100', '20.0000', true, false)`, [PLAN_ID]);
-    await pool.query(`INSERT INTO ai.payment_orders (id, user_id, plan_id, payment_provider, idempotency_key, status, amount_minor)
-      VALUES ($1, $2, $3, 'stripe', 'pack-idem-1', 'paid', '100')`, [ORDER_ID, USER_ID, PLAN_ID]);
+    // credit_pack 的 CHECK 约束要求 payment_provider/external_price_ref 非空；
+    // currency 约束为大写（currency = upper(currency)）。
+    await pool.query(`INSERT INTO ai.billing_plans (id, slug, display_name, description, kind, currency, amount_minor, credit_amount, payment_provider, external_price_ref, is_enabled, is_public)
+      VALUES ($1, 'phase10-pack', 'Phase 10 Pack', '', 'credit_pack', 'CNY', 100, '20.0000', 'stripe', 'price_phase10_pack', true, false)`, [PLAN_ID]);
+    await pool.query(`INSERT INTO ai.payment_orders (id, user_id, plan_id, payment_provider, idempotency_key, status, currency, amount_minor)
+      VALUES ($1, $2, $3, 'stripe', 'pack-idem-1', 'paid', 'CNY', 100)`, [ORDER_ID, USER_ID, PLAN_ID]);
     const before = (await pool.query<{ available_amount: string }>("SELECT available_amount FROM ai.credit_accounts WHERE user_id = $1", [USER_ID])).rows[0]?.available_amount ?? "0";
     const eventA: Parameters<typeof repository.recordWebhook>[0] = { provider: "stripe", externalEventId: "evt_checkout_1", eventType: "checkout.completed", eventCreatedAt: "2026-08-02T00:00:00.000Z", data: { orderId: ORDER_ID, paymentStatus: "paid", mode: "payment" } };
     const eventB: Parameters<typeof repository.recordWebhook>[0] = { provider: "stripe", externalEventId: "evt_intent_1", eventType: "checkout.completed", eventCreatedAt: "2026-08-02T00:00:01.000Z", data: { orderId: ORDER_ID, paymentId: "pi_1", paymentStatus: "paid", mode: "payment" } };
     await repository.recordWebhook(eventA, "sha-a");
     await repository.recordWebhook(eventB, "sha-b");
+    // 必须处理 claim 返回的真实收件箱行：processWebhookEvent 会校验行存在且
+    // 状态为 processing，伪造 id 会被直接跳过，积分不会发放。
     const claimed = await repository.claimWebhookEvents(10);
-    const processor = { id: "inbox-x", event: eventA, attempt: 1 };
-    await repository.processWebhookEvent(processor);
-    await repository.processWebhookEvent({ id: "inbox-x", event: eventB, attempt: 1 });
+    assert.equal(claimed.length, 2);
+    for (const stored of claimed) await repository.processWebhookEvent(stored);
     const afterCredits = (await pool.query<{ available_amount: string }>("SELECT available_amount FROM ai.credit_accounts WHERE user_id = $1", [USER_ID])).rows[0]?.available_amount ?? "0";
     // Both events target the same order; the pack must be granted exactly once.
     assert.equal(Number(afterCredits) - Number(before), 20);
-    assert.equal(claimed.length >= 1, true);
   });
 });
