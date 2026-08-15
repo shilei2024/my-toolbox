@@ -102,12 +102,17 @@ def china_day_utc_bounds(day: str | date) -> tuple[datetime, datetime]:
 
 
 def get_client_ip() -> str:
-    """Return the best-guess client IP, respecting X-Forwarded-For if behind a proxy."""
+    """Return the best-guess client IP.
+
+    When PROXY_FIX_COUNT is configured (app behind Nginx/Cloudflare),
+    werkzeug's ProxyFix already rewrote request.remote_addr from the trusted
+    X-Forwarded-For chain, so we trust remote_addr alone and never read the
+    header directly — otherwise a direct client could spoof X-Forwarded-For to
+    fake its IP. Without ProxyFix, remote_addr is the socket peer (the proxy),
+    which is the honest value we can compute.
+    """
     from flask import request
 
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
     return request.remote_addr or "0.0.0.0"
 
 

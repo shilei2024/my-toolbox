@@ -168,7 +168,31 @@ class DevConfig(Config):
 class ProdConfig(Config):
     DEBUG = False
 
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+
+    @classmethod
+    def verify(cls) -> None:
+        """Fail fast in production when default secrets are still in use.
+
+        Called from get_config(); raises so the app refuses to boot instead of
+        silently running with a publicly known SECRET_KEY / admin password.
+        """
+        if cls.SECRET_KEY in {"dev-only-change-me", "please-change-me-to-a-long-random-string-at-least-32-chars"}:
+            raise RuntimeError(
+                "SECRET_KEY is still the development default. Set a random value "
+                "of at least 32 characters in the production environment."
+            )
+        if cls.ADMIN_PASSWORD == "ChangeMe123!":
+            raise RuntimeError(
+                "ADMIN_PASSWORD is still the default. Set a strong password for "
+                "the bootstrap admin account in the production environment."
+            )
+
 
 def get_config() -> type[Config]:
     env = os.environ.get("FLASK_ENV", "production").lower()
-    return DevConfig if env in {"development", "dev"} else ProdConfig
+    config_cls = DevConfig if env in {"development", "dev"} else ProdConfig
+    if config_cls is ProdConfig:
+        ProdConfig.verify()
+    return config_cls

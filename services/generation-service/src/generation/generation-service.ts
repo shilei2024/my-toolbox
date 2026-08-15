@@ -46,11 +46,18 @@ export class GenerationService {
     const visibility = enumValue(input.visibility, "visibility", ["public", "private"] as const);
     const promptVisibility = enumValue(input.promptVisibility, "promptVisibility", ["public", "hidden"] as const);
     const parameters = jsonObject(input.parameters ?? {}, "parameters");
+    // The `inputImages` key inside `parameters` is NEVER trusted: reference
+    // images must be uploaded through the top-level `inputImages` field, which
+    // is persisted by `persistInputImages` with server-owned object keys under
+    // `temp/inputs/{userId}/{requestId}/`. A caller-supplied objectKey here
+    // would otherwise let a user read or delete arbitrary storage objects via
+    // provider reference-image handling (see comfyui provider). Strip it.
+    const { inputImages: _untrustedInputImages, ...safeParameters } = parameters;
     const creditTier = input.creditTier === undefined ? "free" : enumValue(input.creditTier, "creditTier", ["free", "member"] as const);
     const key = token(idempotencyKey, "Idempotency-Key", 128);
     const inputImages = await this.persistInputImages(input.inputImages, userId, viewer.requestId);
     try {
-      return await this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters: inputImages.length ? { ...parameters, inputImages } : parameters, creditTier }, this.#defaultCreditCost);
+      return await this.#repository.create({ userId, requestId: viewer.requestId, idempotencyKey: key, workflowSlug, prompt, negativePrompt, width, height, count, visibility, promptVisibility, parameters: inputImages.length ? { ...safeParameters, inputImages } : safeParameters, creditTier }, this.#defaultCreditCost);
     } catch (error) {
       await Promise.allSettled(inputImages.map((image) => this.#storage?.delete(image.objectKey)));
       throw error;

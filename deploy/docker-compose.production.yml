@@ -128,6 +128,14 @@ services:
     stop_grace_period: 30s
     mem_limit: 256m
 
+  # 定期清理 COS 上过期的用户参考图（temp/inputs/ 前缀），避免未被认领
+  # 任务的隐私图片永久残留。TTL 与轮询间隔见 REFERENCE_INPUT_* 环境变量。
+  reference-input-cleanup:
+    <<: *generation-service
+    command: ["npm", "run", "gallery:reference-input-cleanup"]
+    stop_grace_period: 30s
+    mem_limit: 256m
+
   caddy:
     image: ${CADDY_IMAGE:?set CADDY_IMAGE to an immutable image digest}
     restart: unless-stopped

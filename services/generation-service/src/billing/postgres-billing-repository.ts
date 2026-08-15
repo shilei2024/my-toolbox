@@ -215,7 +215,7 @@ const planSelect = `SELECT id, slug, display_name, description, kind, billing_in
 const orderSelect = `SELECT o.id, o.user_id, o.plan_id, o.payment_provider, o.idempotency_key, o.status, o.external_checkout_id, o.external_checkout_url FROM ai.payment_orders o`;
 
 async function processCheckout(client: PoolClient, event: Extract<NormalizedPaymentEvent, { eventType: "checkout.completed" }>): Promise<void> {
-  const orderResult = await client.query<{ id: string; user_id: number; plan_id: string; kind: BillingPlan["kind"]; credit_amount: string }>(`SELECT o.id, o.user_id, o.plan_id, p.kind, p.credit_amount
+  const orderResult = await client.query<{ id: string; user_id: number; plan_id: string; kind: BillingPlan["kind"]; credit_amount: string; credited_amount: string; refunded_amount_minor: string; amount_minor: string }>(`SELECT o.id, o.user_id, o.plan_id, p.kind, p.credit_amount, o.credited_amount, o.refunded_amount_minor, o.amount_minor
     FROM ai.payment_orders o JOIN ai.billing_plans p ON p.id = o.plan_id
     WHERE o.id = $1 AND o.payment_provider = $2 FOR UPDATE OF o`, [event.data.orderId, event.provider]);
   const order = orderResult.rows[0];
@@ -230,7 +230,23 @@ async function processCheckout(client: PoolClient, event: Extract<NormalizedPaym
       paid_at = CASE WHEN $2 THEN COALESCE(paid_at, now()) ELSE paid_at END
     WHERE id = $1`, [order.id, isPaid, event.data.paymentId ?? null, event.data.subscriptionId ?? null]);
   if (order.kind === "credit_pack" && isPaid) {
-    await grantCredits(client, order.user_id, order.credit_amount, "pack_purchase", "payment_order", order.id, `${event.provider}:checkout:${event.externalEventId}`);
+    // Idempotency is anchored to the ORDER, not the webhook event: Stripe
+    // delivers both checkout.session.completed and payment_intent.succeeded for
+    // one synchronous payment, and normalizing both to checkout.completed with
+    // distinct externalEventIds would otherwise double-credit the pack.
+    const total = BigInt(order.amount_minor || "0");
+    const refunded = BigInt(order.refunded_amount_minor || "0");
+    let creditAmount = order.credit_amount;
+    if (total > 0n && refunded > 0n) {
+      // A refund may arrive before this checkout event in replay/out-of-order
+      // scenarios. Only grant the un-refunded share so the user can neither
+      // keep the full pack after a refund nor be short-changed.
+      const remaining = total - refunded;
+      const scale = 10_000n;
+      const scaled = decimalToScaled(creditAmount, scale) * remaining / total;
+      creditAmount = scaledToDecimal(scaled, scale);
+    }
+    await grantCredits(client, order.user_id, creditAmount, "pack_purchase", "payment_order", order.id, `pack_purchase:${order.id}`);
     await client.query("UPDATE ai.payment_orders SET credited_amount = GREATEST(credited_amount, $2) WHERE id = $1", [order.id, order.credit_amount]);
   }
 }

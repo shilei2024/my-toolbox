@@ -252,11 +252,29 @@ def set_user_credits(user_id: int):
         flash("调整值为 0，未做任何修改。", "warning")
         return redirect(url_for("admin.users"))
 
-    idempotency = f"admin-credit:{user.id}:{datetime.now(timezone.utc).isoformat()}"
+    # Stable idempotency key derived from the request payload: retrying the
+    # exact same adjustment (e.g. double-click, network retry) must not apply
+    # twice. A timestamp-based key would make every resubmission distinct and
+    # double-adjust credits.
+    idempotency = f"admin-credit:{user.id}:{account}:{delta:.4f}"
     table = "ai.member_credit_accounts" if account == "member" else "ai.credit_accounts"
     account_type = "member" if account == "member" else "free"
     try:
         with db.engine.begin() as conn:
+            # Idempotency: if this exact adjustment was already applied, do not
+            # touch the balance again (credit_ledger_entries has a UNIQUE
+            # (user_id, account_type, idempotency_key) constraint).
+            already = conn.execute(
+                text(
+                    "SELECT 1 FROM ai.credit_ledger_entries "
+                    "WHERE user_id = :uid AND account_type = :acct AND idempotency_key = :idem"
+                ),
+                {"uid": user.id, "acct": account_type, "idem": idempotency},
+            ).scalar()
+            if already:
+                flash("该笔积分调整已应用过（重复提交已忽略）。", "warning")
+                return redirect(url_for("admin.users"))
+
             current = conn.execute(
                 text(f"SELECT available_amount FROM {table} WHERE user_id = :uid FOR UPDATE"),
                 {"uid": user.id},
@@ -283,7 +301,6 @@ def set_user_credits(user_id: int):
                 ),
                 {"uid": user.id, "account_type": account_type, "delta": delta, "after": new_available, "ref": f"user:{user.id}", "idem": idempotency, "op": current_user.id},
             )
-            db.session.rollback()
     except Exception:  # noqa: BLE001
         db.session.rollback()
         flash("积分调整失败，请确认 ai 数据库表已迁移（0005）。", "danger")

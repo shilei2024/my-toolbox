@@ -72,7 +72,16 @@ export class ArkVideoProvider implements GenerationProvider {
 
   async getStatus(externalRequestId: string, context: ProviderCallContext): Promise<ProviderStatusResult> {
     const task = this.#tasks.get(externalRequestId);
-    if (!task) throw invalid("unknown_external_request", "Ark video task context is unavailable");
+    // Worker-restart resilience: the in-memory task map may be gone while the
+    // upstream job is still running. Reconstruct from the durable request
+    // metadata so we keep polling instead of failing the job (and refunding
+    // credits) for an upstream task that is still executing.
+    const recoveredTask: VideoTaskContext | undefined = task ?? (
+      context.taskMetadata?.width && context.taskMetadata?.height
+        ? { width: context.taskMetadata.width, height: context.taskMetadata.height, durationSeconds: context.taskMetadata.durationSeconds ?? 5, model: "unknown" }
+        : undefined
+    );
+    if (!recoveredTask) throw new ProviderError({ providerCode: "ark-video", category: "timeout", code: "unknown_external_request", message: "Ark video task context is unavailable", retryable: true, externalRequestId });
     const signal = callSignal(context);
     try {
       const response = await requestRemoteJson(this.#config, `/contents/generations/tasks/${encodeURIComponent(externalRequestId)}`, {
@@ -82,16 +91,16 @@ export class ArkVideoProvider implements GenerationProvider {
       }, this.#fetcher);
       const result = statusBody(response.data);
       if (result.status === "queued" || result.status === "running") {
-        return { externalRequestId, state: result.status, ...(result.status === "running" ? { progress: 0.5 } : {}), outputs: [], providerMetadata: { model: task.model, outputCount: 0 } };
+        return { externalRequestId, state: result.status, ...(result.status === "running" ? { progress: 0.5 } : {}), outputs: [], providerMetadata: { model: recoveredTask.model, outputCount: 0 } };
       }
-      if (result.status === "cancelled") return { externalRequestId, state: "cancelled", outputs: [], providerMetadata: { model: task.model, outputCount: 0 } };
+      if (result.status === "cancelled") return { externalRequestId, state: "cancelled", outputs: [], providerMetadata: { model: recoveredTask.model, outputCount: 0 } };
       if (result.status === "failed") {
-        return { externalRequestId, state: "failed", outputs: [], providerMetadata: { model: task.model, outputCount: 0 }, error: failure(result.error, externalRequestId) };
+        return { externalRequestId, state: "failed", outputs: [], providerMetadata: { model: recoveredTask.model, outputCount: 0 }, error: failure(result.error, externalRequestId) };
       }
       const url = videoUrl(result.content);
-      const output: ProviderVideoOutput = { mediaType: "video", kind: "remote-url", url, mimeType: "video/mp4", width: task.width, height: task.height, durationSeconds: responseDuration(response.data) ?? task.durationSeconds };
-      this.#tasks.delete(externalRequestId);
-      return { externalRequestId, state: "succeeded", progress: 1, outputs: [output], providerMetadata: { model: task.model, outputCount: 1 } };
+      const output: ProviderVideoOutput = { mediaType: "video", kind: "remote-url", url, mimeType: "video/mp4", width: recoveredTask.width, height: recoveredTask.height, durationSeconds: responseDuration(response.data) ?? recoveredTask.durationSeconds };
+      if (task) this.#tasks.delete(externalRequestId);
+      return { externalRequestId, state: "succeeded", progress: 1, outputs: [output], providerMetadata: { model: recoveredTask.model, outputCount: 1 } };
     } catch (error) {
       throw mapRemoteHttpError(error, "ark-video", contentPolicyError);
     }

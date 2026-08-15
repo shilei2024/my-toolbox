@@ -51,7 +51,7 @@ Test 89abc 0.5</textarea>
         const list = document.getElementById('matchList');
         if(d.matches.length){
           list.innerHTML = '<label class="form-label text-muted small mt-2">匹配详情</label>' + d.matches.map((m,i)=>
-            `<div class="card bg-light mb-1 p-2"><small><strong>#${i+1}</strong> "${m.match}" <span class="text-muted">[${m.start}-${m.end}]</span>${m.groups.length?' · 组: '+m.groups.map(g=>`"${g||''}"`).join(', '):''}</small></div>`
+            `<div class="card bg-light mb-1 p-2"><small><strong>#${i+1}</strong> "${escapeHtml(m.match)}" <span class="text-muted">[${m.start}-${m.end}]</span>${m.groups.length?' · 组: '+m.groups.map(g=>`"${escapeHtml(g||'')}"`).join(', '):''}</small></div>`
           ).join('');
         } else { list.innerHTML=''; }
         document.getElementById('result').classList.remove('d-none');
@@ -61,5 +61,8 @@ Test 89abc 0.5</textarea>
       }
     } catch(e){ document.getElementById('errorBox').textContent='请求失败: '+e; document.getElementById('errorBox').classList.remove('d-none'); }
   };
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
 })();
 </script>

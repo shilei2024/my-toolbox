@@ -48,8 +48,13 @@ export function isSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   const configured = process.env.GALLERY_PUBLIC_ORIGIN?.trim();
-  const expected = configured || new URL(request.url).origin;
   try {
+    // Prefer the explicitly configured public origin: it is stable across
+    // hosts, ports and deployments. When it is missing, fall back to the
+    // request URL origin, which is derived from the Host the client actually
+    // reached — never from the Origin header itself, so an attacker cannot
+    // make a request "same-origin" by echoing a target origin.
+    const expected = configured || new URL(request.url).origin;
     return new URL(origin).origin === new URL(expected).origin;
   } catch {
     return false;

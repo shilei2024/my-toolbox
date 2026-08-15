@@ -135,6 +135,7 @@ def pn_list():
 
 
 @tool_bp.post("/api/pn")
+@limiter.limit(lambda: "30/minute")
 def pn_create():
     data = request.get_json(silent=True) or {}
     pn = (data.get("part_number") or "").strip()
@@ -161,6 +162,7 @@ def pn_create():
 
 
 @tool_bp.put("/api/pn/<int:row_id>")
+@limiter.limit(lambda: "30/minute")
 def pn_update(row_id: int):
     data = request.get_json(silent=True) or {}
     row = db.session.get(PnMapping, row_id)
@@ -188,6 +190,7 @@ def pn_update(row_id: int):
 
 
 @tool_bp.delete("/api/pn/<int:row_id>")
+@limiter.limit(lambda: "30/minute")
 def pn_delete(row_id: int):
     row = db.session.get(PnMapping, row_id)
     if row is None:
@@ -201,6 +204,7 @@ def pn_delete(row_id: int):
 
 
 @tool_bp.post("/api/pn/import")
+@limiter.limit(lambda: "10/minute")
 def pn_import():
     """Batch import from an .xlsx file with columns: 品号 / 原厂料号 / 品牌."""
     f = request.files.get("file")

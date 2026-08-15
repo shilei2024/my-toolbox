@@ -1,7 +1,7 @@
 import { createWriteStream } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ComfyUIConfig } from "../config.ts";
 import { ProviderError } from "../providers/errors.ts";
@@ -52,7 +52,21 @@ export class ComfyUIClient {
     const response = await this.#request(`/view?${query}`, { method: "GET", ...(signal ? { signal } : {}) }, this.config.downloadTimeoutMs);
     if (!response.body) throw this.#error("upstream", "empty_output_body", "ComfyUI returned an empty output");
     await mkdir(path.dirname(destination), { recursive: true });
-    try { await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination)); }
+    // Stream with a byte ceiling so a malicious or broken workflow cannot fill
+    // the worker's temporary volume before the post-download size check runs.
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > this.config.maxOutputBytes) {
+      throw this.#error("upstream", "output_too_large", "ComfyUI output exceeds the configured size limit");
+    }
+    let received = 0;
+    const maxBytes = this.config.maxOutputBytes;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length;
+        callback(received > maxBytes ? new Error("ComfyUI output exceeds the configured size limit") : undefined, chunk);
+      },
+    });
+    try { await pipeline(Readable.fromWeb(response.body as never), limiter, createWriteStream(destination, { flags: "wx" })); }
     catch (error) { await rm(destination, { force: true }); throw this.#error("upstream", "output_download_failed", "ComfyUI output download failed", error); }
   }
 

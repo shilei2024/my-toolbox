@@ -88,6 +88,19 @@ export interface ProviderCallContext {
   readonly attemptId: string;
   readonly deadlineAt?: Date;
   readonly signal?: AbortSignal;
+  /**
+   * Durable task metadata derived from the generation request. Providers that
+   * poll an external asynchronous job (ComfyUI / Ark video) keep a richer
+   * per-task context in memory; after a worker restart that memory is gone,
+   * and this fallback lets getStatus() keep serving the task instead of
+   * failing it (and refunding credits) while the upstream job still runs.
+   */
+  readonly taskMetadata?: {
+    readonly mediaType?: MediaType;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationSeconds?: number;
+  };
 }
 
 interface OutputBase {

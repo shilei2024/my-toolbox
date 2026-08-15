@@ -169,6 +169,7 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
     putObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { ETag?: string }) => void): void { uploads.push(options); callback(null, { ETag: "etag-1" }); },
     getObject(options: Record<string, unknown>, callback: (error: Error | null, data?: { Body?: Buffer | string }) => void): void { callback(null, { Body: Buffer.from("x") }); },
     deleteObject(options: Record<string, unknown>, callback: (error: Error | null) => void): void { deletes.push(String(options.Key)); callback(null); },
+    getBucket(options: Record<string, unknown>, callback: (error: Error | null, data?: { Contents?: Array<{ Key?: string; LastModified?: string }>; IsTruncated?: boolean; NextMarker?: string }) => void): void { callback(null, { Contents: [], IsTruncated: false }); },
   };
   const cos = new TencentCosStorage(cosConfig(), cosClient);
   const provider = new ComfyUIProvider(new ComfyUIClient(comfyConfig(root), fetcher), new WorkflowLoader(workflowDirectory));
@@ -177,7 +178,7 @@ test("ComfyUI provider, polling and Tencent COS persistence complete end to end"
     info(event: string, fields: Record<string, unknown>): void { logs.push({ level: "info", event, fields }); },
     error(event: string, fields: Record<string, unknown>): void { logs.push({ level: "error", event, fields }); },
   };
-  const pipeline = new ProductionGenerationPipeline(new PollingService({ intervalMs: 1, maxAttempts: 2 }, async () => undefined), new ImagePersistenceService(cos, root, 1000, fetcher), logger);
+  const pipeline = new ProductionGenerationPipeline(new PollingService({ intervalMs: 1, maxAttempts: 2 }, async () => undefined), new ImagePersistenceService(cos, root, 1000, 100 * 1024 * 1024, fetcher), logger);
   try {
     const result = await pipeline.execute(provider, request, binding, context);
     assert.equal(result.assets.length, 1);
@@ -318,8 +319,88 @@ test("persistence compensates earlier COS uploads and removes temporary files af
   }
 });
 
+test("reference images outside the server-owned temp/inputs prefix are rejected", async () => {
+  const fetcher = (async () => Response.json({})) as typeof fetch;
+  const provider = new ComfyUIProvider(new ComfyUIClient(comfyConfig(workflowDirectory), fetcher), new WorkflowLoader(workflowDirectory));
+  const injected: GenerationRequest = {
+    ...request,
+    parameters: { inputImages: [{ objectKey: "images/another-user/00000000000000000000000000000000/0.png", mimeType: "image/png" }] },
+  };
+  await assert.rejects(provider.generate(injected, binding, context), (error) => error instanceof ProviderError && error.code === "unsafe_reference_image");
+});
+
+test("cleanup only deletes reference objects this request actually downloaded", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phase4-ref-cleanup-"));
+  const deleted: string[] = [];
+  const storage = {
+    code: "test",
+    async upload(_input: { objectKey: string; body: Buffer | import("node:stream").Readable }) { return { storageProvider: "test", bucket: "b", region: "r", objectKey: _input.objectKey, url: "https://example.test/object" }; },
+    async download() { return PNG_1X1; },
+    async delete(objectKey: string) { deleted.push(objectKey); },
+  };
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/upload/image")) {
+      const form = init?.body as FormData | undefined;
+      const file = form?.get("image") as File | undefined;
+      return Response.json({ name: `uploaded-${file?.name ?? "unknown"}`, subfolder: "input", type: "input" });
+    }
+    if (url.endsWith("/prompt")) return Response.json({ prompt_id: "prompt-ref-cleanup" });
+    if (url.includes("/history/prompt-ref-cleanup")) return Response.json({ "prompt-ref-cleanup": { status: { completed: true, status_str: "success" }, outputs: { "10": { images: [{ filename: "out.png", subfolder: "output", type: "output" }] } } } });
+    if (url.includes("/view?")) return new Response(PNG_1X1, { status: 200, headers: { "content-type": "image/png" } });
+    throw new Error(`Unexpected request ${url}`);
+  }) as typeof fetch;
+  try {
+    const provider = new ComfyUIProvider(new ComfyUIClient(comfyConfig(root), fetcher), new WorkflowLoader(workflowDirectory), {}, storage);
+    const owned: GenerationRequest = {
+      ...request,
+      parameters: { inputImages: [{ objectKey: "temp/inputs/7/request-1/0.png", mimeType: "image/png" }] },
+    };
+    await provider.generate(owned, binding, context);
+    assert.deepEqual(deleted, ["temp/inputs/7/request-1/0.png"], "only the server-owned downloaded object is deleted");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("getStatus recovers from task-context loss via durable request metadata", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phase4-recover-"));
+  const fetcher = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/history/prompt-recover")) return Response.json({
+      "prompt-recover": {
+        status: { completed: true, status_str: "success" },
+        outputs: { "19": { gifs: [{ filename: "ltx-video_00001.mp4", subfolder: "generation", type: "output", format: "video/h264-mp4", frame_rate: 24 }] } },
+      },
+    });
+    if (url.includes("/view?")) return new Response(Buffer.from("fake-mp4"), { status: 200, headers: { "content-type": "video/mp4" } });
+    throw new Error(`Unexpected request ${url}`);
+  }) as typeof fetch;
+  try {
+    // A fresh provider instance simulates a worker restart: its in-memory task
+    // map is empty, but the upstream ComfyUI job is still running/complete.
+    const provider = new ComfyUIProvider(new ComfyUIClient(comfyConfig(root), fetcher), new WorkflowLoader(workflowDirectory));
+    const recoveredContext: ProviderCallContext = {
+      ...context,
+      taskMetadata: { mediaType: "video", width: 960, height: 544, durationSeconds: 5 },
+    };
+    const status = await provider.getStatus("prompt-recover", recoveredContext);
+    assert.equal(status.state, "succeeded");
+    assert.equal(status.outputs.length, 1);
+    const output = status.outputs[0];
+    assert.ok(output?.kind === "local-file");
+    if (output?.kind === "local-file") {
+      await access(output.path);
+      assert.equal("width" in output ? output.width : undefined, 960);
+      assert.equal("durationSeconds" in output ? output.durationSeconds : undefined, 5);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 function comfyConfig(downloadDirectory: string, overrides: Partial<ComfyUIConfig> = {}): ComfyUIConfig {
-  return { baseUrl: "http://comfy.internal:8188", headers: {}, requestTimeoutMs: 1000, downloadTimeoutMs: 1000, retryCount: 0, retryDelayMs: 0, pollIntervalMs: 10, pollMaxAttempts: 5, allowGlobalInterrupt: false, workflowDirectory, downloadDirectory, ...overrides };
+  return { baseUrl: "http://comfy.internal:8188", headers: {}, requestTimeoutMs: 1000, downloadTimeoutMs: 1000, maxOutputBytes: 100 * 1024 * 1024, retryCount: 0, retryDelayMs: 0, pollIntervalMs: 10, pollMaxAttempts: 5, allowGlobalInterrupt: false, workflowDirectory, downloadDirectory, ...overrides };
 }
 
 function cosConfig(): TencentCosConfig {

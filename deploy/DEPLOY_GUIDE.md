@@ -47,6 +47,20 @@
 sudo apt update && sudo apt upgrade -y
 ```
 
+安装中文字体（**Word 转 PDF 与 PDF 加水印工具必需**；服务器默认无任何 CJK 字体，
+不装则中文文档转换结果全是乱码/方块）：
+
+```bash
+sudo apt install -y fonts-noto-cjk
+```
+
+> 为什么需要：`word_to_pdf` / `pdf_watermark` 在渲染 PDF 时会按顺序查找项目捆绑字体
+> （`static/fonts/NotoSansSC-Regular.ttf`）、Windows 字体目录、`/usr/share/fonts` 下的
+> Noto / 文泉驿字体。Linux 服务器上如果没有 CJK 字体，会回退到仅支持拉丁字符的
+> Helvetica，中文全部丢失。安装 `fonts-noto-cjk` 后路径
+> `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` 即存在，转换自动可用。
+> 验证：`fc-list | grep -i noto` 应能看到 Noto Sans CJK。
+
 安装 Docker（腾讯云国内源会更快）：
 
 ```bash

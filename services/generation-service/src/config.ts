@@ -6,6 +6,8 @@ export interface ComfyUIConfig {
   readonly headers: Readonly<Record<string, string>>;
   readonly requestTimeoutMs: number;
   readonly downloadTimeoutMs: number;
+  /** Max bytes of a single ComfyUI output (image/video) streamed to disk. */
+  readonly maxOutputBytes: number;
   readonly retryCount: number;
   readonly retryDelayMs: number;
   readonly pollIntervalMs: number;
@@ -56,6 +58,7 @@ export function loadPhase4Config(env: NodeJS.ProcessEnv = process.env): Phase4Co
       headers: jsonStringMap(env, "COMFYUI_HEADERS_JSON", {}),
       requestTimeoutMs: positiveInt(env, "COMFYUI_REQUEST_TIMEOUT_MS"),
       downloadTimeoutMs: positiveInt(env, "COMFYUI_DOWNLOAD_TIMEOUT_MS"),
+      maxOutputBytes: positiveInt(env, "COMFYUI_MAX_OUTPUT_BYTES", 100 * 1024 * 1024),
       retryCount: nonNegativeInt(env, "COMFYUI_RETRY_COUNT"),
       retryDelayMs: nonNegativeInt(env, "COMFYUI_RETRY_DELAY_MS"),
       pollIntervalMs: positiveInt(env, "COMFYUI_POLL_INTERVAL_MS"),
@@ -86,9 +89,10 @@ function optional(env: NodeJS.ProcessEnv, key: string): string | undefined {
   return env[key]?.trim() || undefined;
 }
 
-function positiveInt(env: NodeJS.ProcessEnv, key: string): number {
-  const value = Number(required(env, key));
-  if (!Number.isInteger(value) || value <= 0) throw new ConfigurationError(key);
+function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback?: number): number {
+  const raw = env[key]?.trim();
+  const value = raw ? Number(raw) : fallback;
+  if (value === undefined || !Number.isInteger(value) || value <= 0) throw new ConfigurationError(key);
   return value;
 }
 
