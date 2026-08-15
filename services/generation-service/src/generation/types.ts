@@ -28,6 +28,10 @@ export interface GenerationWorkflowView {
     readonly visibility: GenerationVisibility;
     readonly promptVisibility: PromptVisibility;
     readonly durationSeconds?: number;
+    /** 同族工作流的模式元数据（如 MiniMax H3 三合一）：驱动前端模式页签与参考图上传入口。 */
+    readonly modeMeta?: { readonly key: string; readonly label: string; readonly maxImages: number };
+    /** 工作流允许的分辨率档位（来自迁移 0021 等）：驱动前端分辨率下拉且服务端 create 校验同源。 */
+    readonly videoResolutions?: readonly { readonly key: string; readonly label: string; readonly height: number }[];
   };
   readonly countRange: { readonly min: number; readonly max: number };
   readonly sizes: readonly { readonly width: number; readonly height: number }[];
