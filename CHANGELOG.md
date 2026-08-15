@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.7 · 修复 H3 参考图上传入口不显示：listWorkflows 透传 mode_meta / 2026-08-15
+- 根因：`workflowView()` 重建 defaults 时丢弃了迁移 0019 写入的 `mode_meta`
+  与 0021 写入的 `videoResolutions`，前端 `h3Meta` 恒为 undefined，
+  "单图生视频 / 多图参考视频"的上传入口与分辨率限档均未生效。
+- 修复：`GenerationWorkflowView.defaults` 增加 `modeMeta` / `videoResolutions`
+  字段，`workflowView()` 防御性校验后透传（DB JSONB 结构非法时降级省略，
+  不影响列表接口可用性）。
+- 纵深防御：create 事务内校验参考图模式（`mode_meta.maxImages>0`）必须携带
+  1..maxImages 张参考图，空提交 400 且任务不落库，防止 API 直调绕过前端
+  校验、任务到 ComfyUI 才失败白耗积分。
+- 测试：phase13 新增集成用例——H3 三模式 modeMeta 透传（t2v=0/i2v=1/ref=3）、
+  480p/720p 限档透传、普通工作流字段省略、空/超量参考图 create 拒绝且不落库。
+
 ## 0.9.6 · 视频生成体验修复：轮询不再重复执行、视频进画廊 / 2026-08-15
 - 修复“任务重复执行三次”：轮询以 binding `timeout_seconds` 的 deadline 为主，
   `maxAttempts` 不再提前截断（10 分钟尝试预算曾先于 2 小时超时耗尽，抛可重试

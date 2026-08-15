@@ -13,6 +13,7 @@ const JOB_ID = "b33e4567-e89b-42d3-a456-426614174000";
 const ASSET_ID = "b43e4567-e89b-42d3-a456-426614174000";
 const PROJECTION_JOB_ID = "b53e4567-e89b-42d3-a456-426614174000";
 const PROJECTION_ATTEMPT_ID = "b63e4567-e89b-42d3-a456-426614174000";
+const BINDING_ID = "b73e4567-e89b-42d3-a456-426614174000";
 
 describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   const pool = new Pool({ connectionString: databaseUrl });
@@ -103,6 +104,76 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
     assert.equal(assets.rows[0]?.height, 544);
     assert.equal(assets.rows[0]?.duration_seconds, "5.000");
     assert.equal(assets.rows[0]?.sha256, "a".repeat(64));
+  });
+
+  it("exposes H3 mode metadata via listWorkflows and enforces reference image rules on create", async () => {
+    const repository = new PostgresGenerationRepository(pool);
+    // ① 迁移 0019/0021 写入的 mode_meta 与 videoResolutions 必须透传到工作流
+    //    视图：否则前端拿不到 maxImages，H3 单图/多图参考的上传入口不渲染
+    //    （0.9.6 线上"无上传入口"的根因），分辨率档位也会 fallback 到默认 1080p/2K。
+    const videoWorkflows = await repository.listWorkflows("0.1000", "workflow", "video");
+    const byMode = new Map(videoWorkflows.filter((item) => item.category === "MiniMax H3").map((item) => [item.defaults.modeMeta?.key, item]));
+    assert.equal(byMode.get("t2v")?.defaults.modeMeta?.maxImages, 0, "t2v 文生视频不要求参考图");
+    assert.equal(byMode.get("t2v")?.defaults.modeMeta?.label, "文生视频");
+    assert.equal(byMode.get("i2v")?.defaults.modeMeta?.maxImages, 1, "i2v 单图参考要求 1 张");
+    assert.equal(byMode.get("ref")?.defaults.modeMeta?.maxImages, 3, "ref 多图参考最多 3 张");
+    for (const item of byMode.values()) {
+      assert.ok(Array.isArray(item.defaults.videoResolutions) && item.defaults.videoResolutions.length > 0, "H3 工作流必须透传 0021 的限档分辨率");
+      assert.deepEqual(item.defaults.videoResolutions?.map((entry) => entry.key), ["480p", "720p"]);
+    }
+    // ② 无 mode_meta 的普通工作流：字段省略（undefined），前端 fallback 到默认 UI。
+    //    listWorkflows 要求工作流至少有一个启用的 provider binding，先给装置
+    //    工作流绑定 comfyui（defaults 保持为空对象，不带 mode_meta）。
+    await pool.query("UPDATE ai.workflow_versions SET defaults = '{}'::jsonb WHERE id = $1", [VERSION_ID]);
+    await pool.query(
+      `INSERT INTO ai.workflow_provider_bindings (id, workflow_version_id, provider_id, provider_workflow_ref)
+       SELECT $1, $2, p.id, 'phase13-media-test.json' FROM ai.providers p WHERE p.code = 'comfyui'
+       ON CONFLICT (workflow_version_id, provider_id) DO UPDATE SET is_enabled = true`,
+      [BINDING_ID, VERSION_ID],
+    );
+    const visible = await repository.listWorkflows("0.1000", "workflow", "video");
+    const plain = visible.find((item) => item.slug === "phase13-media-test");
+    assert.ok(plain);
+    assert.equal(plain.defaults.modeMeta, undefined);
+    assert.equal(plain.defaults.videoResolutions, undefined);
+
+    // ③ 参考图模式的服务端强制校验：给装置工作流写入 maxImages=1 的 mode_meta
+    //    后，空参考图提交必须在 create 内被 400 拒绝且任务不落库。
+    await pool.query(
+      `UPDATE ai.workflow_versions SET defaults = jsonb_build_object(
+         'width', 960, 'height', 544, 'count', 1,
+         'visibility', 'public', 'prompt_visibility', 'public', 'duration_seconds', 5,
+         'mode_meta', jsonb_build_object('key', 'i2v', 'label', '单图生视频', 'maxImages', 1)
+       ) WHERE id = $1`,
+      [VERSION_ID],
+    );
+    const withModeMeta = await repository.listWorkflows("0.1000", "workflow", "video");
+    assert.equal(withModeMeta.find((item) => item.slug === "phase13-media-test")?.defaults.modeMeta?.maxImages, 1, "写入 mode_meta 后立即透传");
+    await assert.rejects(
+      repository.create({
+        userId: USER_ID, requestId: "phase13-ref-guard", idempotencyKey: "phase13-ref-guard-1",
+        workflowSlug: "phase13-media-test", prompt: "需要参考图的模式", negativePrompt: "",
+        width: 960, height: 544, count: 1, visibility: "public", promptVisibility: "public",
+        parameters: { durationSeconds: 5 }, creditTier: "free",
+      }, "0.1000"),
+      (error: unknown) => error instanceof GenerationError && error.code === "invalid_request" && /参考图/.test(error.message),
+    );
+    const leaked = await pool.query("SELECT 1 FROM ai.generation_jobs WHERE idempotency_key = 'phase13-ref-guard-1'");
+    assert.equal(leaked.rowCount, 0, "被拒绝的请求不得留下任务记录");
+    // ④ 超出 maxImages 的提交同样拒绝（maxImages=1 时传 2 张由 persistInputImages 之前的
+    //    数量校验兜底，此处校验 parameters 合并后的上限）。
+    await assert.rejects(
+      repository.create({
+        userId: USER_ID, requestId: "phase13-ref-guard", idempotencyKey: "phase13-ref-guard-2",
+        workflowSlug: "phase13-media-test", prompt: "超量参考图", negativePrompt: "",
+        width: 960, height: 544, count: 1, visibility: "public", promptVisibility: "public",
+        parameters: { durationSeconds: 5, inputImages: [{ objectKey: "a" }, { objectKey: "b" }] },
+        creditTier: "free",
+      }, "0.1000"),
+      (error: unknown) => error instanceof GenerationError && error.code === "invalid_request",
+    );
+    await pool.query("DELETE FROM ai.workflow_provider_bindings WHERE id = $1", [BINDING_ID]);
+    await pool.query("UPDATE ai.workflow_versions SET defaults = '{}'::jsonb WHERE id = $1", [VERSION_ID]);
   });
 
   it("rejects non-video media types and duplicate positions", async () => {

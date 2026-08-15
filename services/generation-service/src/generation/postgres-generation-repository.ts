@@ -59,6 +59,18 @@ export class PostgresGenerationRepository implements GenerationRepository {
         ) FOR SHARE`, [input.workflowSlug]);
       const workflow = workflowResult.rows[0];
       if (!workflow) throw new GenerationError("workflow_unavailable", "所选创作方式当前不可用。", 409);
+      // 参考图模式（mode_meta.maxImages>0，如 H3 单图/多图参考）必须携带
+      // 1..maxImages 张参考图：与前端同一约束，防止 API 直调提交空图任务
+      // 到 ComfyUI 后才失败、白白消耗积分（此前 parameters.inputImages 由
+      // generation-service 上传合并，此处校验数量即可）。
+      const requiredImages = parseModeMeta(workflow.defaults.mode_meta).modeMeta;
+      if (workflow.media_type === "video" && requiredImages && requiredImages.maxImages > 0) {
+        const uploaded = Array.isArray((input.parameters as Record<string, unknown> | undefined)?.inputImages)
+          ? ((input.parameters as Record<string, unknown>).inputImages as unknown[]).length
+          : 0;
+        if (uploaded === 0) throw new GenerationError("invalid_request", "该创作模式需要至少 1 张参考图。", 400);
+        if (uploaded > requiredImages.maxImages) throw new GenerationError("invalid_request", `参考图最多 ${requiredImages.maxImages} 张。`, 400);
+      }
       const bounds = workflowBounds(workflow.input_schema);
       if (input.width < bounds.width.min || input.width > bounds.width.max || input.height < bounds.height.min || input.height > bounds.height.max
         || input.count < bounds.count.min || input.count > bounds.count.max) {
@@ -238,12 +250,45 @@ function workflowView(row: WorkflowRow, defaultCreditCost: string): GenerationWo
   return {
     slug: row.slug, name: row.name, description: row.description, category: row.category,
     mode: row.mode === "api" ? "api" : "workflow", mediaType: row.media_type,
-    defaults: { ...defaults, count: clampToBounds(defaults.count, bounds.count) },
+    defaults: {
+      ...defaults,
+      count: clampToBounds(defaults.count, bounds.count),
+      // mode_meta 驱动前端"单图/多图参考"模式页签与参考图上传入口（maxImages>0
+      // 才渲染上传 UI）；videoResolutions 驱动分辨率下拉。两者来自迁移写入的
+      // defaults JSONB，解析失败时降级省略（前端 fallback 到默认 UI），绝不影响列表接口可用性。
+      ...parseModeMeta(row.defaults.mode_meta),
+      ...parseVideoResolutions(row.defaults.videoResolutions),
+    },
     countRange: { min: bounds.count.min, max: bounds.count.max },
     sizes: workflowMediaSizePresets(bounds, defaults, row.media_type),
     durations: row.media_type === "video" ? workflowDurationOptions(row.input_schema, defaults.durationSeconds ?? 5) : [],
     creditCost: workflowCreditCost(row.defaults, defaultCreditCost),
   };
+}
+/** 校验并透传 defaults.mode_meta（迁移 0019 写入）：结构非法时返回空对象，由前端 fallback。 */
+function parseModeMeta(value: unknown): { modeMeta?: { readonly key: string; readonly label: string; readonly maxImages: number } } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const meta = value as Record<string, unknown>;
+  const key = typeof meta.key === "string" && meta.key.trim() ? meta.key.trim() : undefined;
+  const label = typeof meta.label === "string" && meta.label.trim() ? meta.label.trim() : undefined;
+  const maxImages = Number(meta.maxImages);
+  if (!key || !label || !Number.isSafeInteger(maxImages) || maxImages < 0 || maxImages > 3) return {};
+  return { modeMeta: { key, label, maxImages } };
+}
+/** 校验并透传 defaults.videoResolutions（迁移 0021 写入）：至少一档合法才透传，否则由前端 fallback 默认档。 */
+function parseVideoResolutions(value: unknown): { videoResolutions?: readonly { readonly key: string; readonly label: string; readonly height: number }[] } {
+  if (!Array.isArray(value) || value.length === 0) return {};
+  const entries: { key: string; label: string; height: number }[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const key = typeof entry.key === "string" && entry.key.trim() ? entry.key.trim() : undefined;
+    const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : undefined;
+    const height = Number(entry.height);
+    if (!key || !label || !Number.isSafeInteger(height) || height < 120 || height > 2160) continue;
+    entries.push({ key, label, height });
+  }
+  return entries.length > 0 ? { videoResolutions: entries } : {};
 }
 function workflowCreditCost(defaults: Record<string, unknown>, fallback: string): string {
   const value = defaults.credit_cost;
