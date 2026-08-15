@@ -15,6 +15,8 @@ export interface AdminImageItem {
   readonly slug: string;
   readonly title: string;
   readonly workflowName: string;
+  /** 作品媒体类型：视频与图片共用审核队列，前端据此切换预览方式。 */
+  readonly mediaType: "image" | "video";
   readonly moderationStatus: "pending" | "manual_review" | "approved" | "rejected";
   readonly visibility: "public" | "private";
   readonly promptVisibility: "public" | "hidden";

@@ -138,6 +138,21 @@ export class PostgresGenerationJobRepository implements GenerationJobRepository 
             ) VALUES ($1, $2, 'video', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (job_id, position) DO NOTHING`, [jobId, attemptId, index, asset.storageProvider, asset.bucket, asset.region,
             asset.objectKey, asset.url, asset.mimeType, asset.byteSize, asset.width, asset.height, asset.durationSeconds, asset.sha256]);
+          // 视频同样投影到画廊媒体表：复用图片的审核（moderation）、可见性、
+          // 发布、点赞收藏与 SEO 链路。卡片静态显示首帧、悬停播放由前端完成。
+          const videoImage = await client.query<{ id: string }>(`INSERT INTO ai.images (
+              job_id, successful_attempt_id, creator_user_id, provider_id, workflow_version_id, slug, title,
+              prompt, negative_prompt, provider_code_snapshot, model_snapshot, workflow_name_snapshot,
+              width, height, media_type, duration_seconds, generation_ms, visibility, prompt_visibility, moderation_status, published_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $7, $12, $13, 'video', $14, $15, $16, $17, $18,
+              CASE WHEN $18::ai.moderation_status = 'approved' AND $16::ai.image_visibility = 'public' THEN now() ELSE NULL END)
+            ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id`, [jobId, attemptId, job.user_id, providerId, job.workflow_version_id,
+            `${jobId}-${index + 1}`, job.workflow_name, job.prompt, job.negative_prompt, result.providerCode, modelFrom(result.providerMetadata),
+            asset.width, asset.height, asset.durationSeconds, result.generationDurationMs, job.visibility, job.prompt_visibility, this.#defaultModerationStatus]);
+          await client.query(`INSERT INTO ai.image_assets (image_id, variant, storage_provider, bucket, region, object_key, public_url, mime_type, byte_size, width, height, sha256)
+            VALUES ($1, 'original', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (image_id, variant) DO NOTHING`, [videoImage.rows[0]!.id, asset.storageProvider, asset.bucket, asset.region, asset.objectKey,
+            job.visibility === "public" ? asset.url : null, asset.mimeType, asset.byteSize, asset.width, asset.height, asset.sha256]);
           continue;
         }
         const image = await client.query<{ id: string }>(`INSERT INTO ai.images (

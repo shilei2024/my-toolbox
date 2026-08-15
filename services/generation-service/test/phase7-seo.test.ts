@@ -67,7 +67,7 @@ function serviceFor(repository: GalleryRepository, cache: GalleryCache): Gallery
 }
 
 function summary(): GalleryImageSummary {
-  return { id: IMAGE_ID, slug: "public-artwork", title: "", description: "", width: 1024, height: 1024, workflowName: "portrait", publishedAt: "2026-08-02T00:00:00.000Z", asset: { url: "https://assets.example.test/public.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" }, tags: [], likeCount: 0, favoriteCount: 0, viewerHasLiked: false, viewerHasFavorited: false };
+  return { id: IMAGE_ID, slug: "public-artwork", title: "", description: "", width: 1024, height: 1024, mediaType: "image", workflowName: "portrait", publishedAt: "2026-08-02T00:00:00.000Z", asset: { url: "https://assets.example.test/public.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" }, tags: [], likeCount: 0, favoriteCount: 0, viewerHasLiked: false, viewerHasFavorited: false };
 }
 
 const silentLogger: StructuredLogger = { info() {}, error() {} };
