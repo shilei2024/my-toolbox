@@ -18,6 +18,7 @@ interface ImageRow extends QueryResultRow {
   slug: string;
   title: string;
   workflow_name_snapshot: string;
+  media_type: "image" | "video";
   moderation_status: AdminImageItem["moderationStatus"];
   visibility: AdminImageItem["visibility"];
   prompt_visibility: AdminImageItem["promptVisibility"];
@@ -217,7 +218,7 @@ export class PostgresAdminRepository implements AdminRepository {
       objectKey: row.asset_object_key,
       ...(row.asset_public_url ? { publicUrl: row.asset_public_url } : {}),
     };
-    return { id: row.id, slug: row.slug, title: row.title, workflowName: row.workflow_name_snapshot, moderationStatus: row.moderation_status, visibility: row.visibility, promptVisibility: row.prompt_visibility, thumbnailUrl: await this.#assets.resolve(asset, false), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
+    return { id: row.id, slug: row.slug, title: row.title, workflowName: row.workflow_name_snapshot, mediaType: row.media_type === "video" ? "video" : "image", moderationStatus: row.moderation_status, visibility: row.visibility, promptVisibility: row.prompt_visibility, thumbnailUrl: await this.#assets.resolve(asset, false), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
   }
 
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -229,7 +230,7 @@ export class PostgresAdminRepository implements AdminRepository {
 }
 
 function imageSelect(): string {
-  return `SELECT i.id, i.slug, i.title, i.workflow_name_snapshot, i.moderation_status, i.visibility, i.prompt_visibility, i.created_at, i.updated_at,
+  return `SELECT i.id, i.slug, i.title, i.workflow_name_snapshot, i.media_type, i.moderation_status, i.visibility, i.prompt_visibility, i.created_at, i.updated_at,
       asset.storage_provider AS asset_storage_provider, asset.bucket AS asset_bucket, asset.region AS asset_region,
       asset.object_key AS asset_object_key, asset.public_url AS asset_public_url
     FROM ai.images i JOIN LATERAL (

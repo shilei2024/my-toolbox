@@ -187,6 +187,7 @@ function summary(): GalleryImageSummary {
     description: "",
     width: 1024,
     height: 1024,
+    mediaType: "image",
     workflowName: "portrait",
     publishedAt: "2026-08-02T00:00:00.000Z",
     asset: { url: "https://assets.example.test/image.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" },

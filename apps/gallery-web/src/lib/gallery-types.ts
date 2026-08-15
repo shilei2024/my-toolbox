@@ -57,6 +57,10 @@ export interface GalleryImageSummary {
   readonly description: string;
   readonly width: number;
   readonly height: number;
+  /** 作品媒体类型：视频与图片共用画廊、审核与发布链路。 */
+  readonly mediaType?: "image" | "video";
+  /** 视频时长（秒），仅 mediaType=video 时返回。 */
+  readonly durationSeconds?: number;
   readonly workflowName: string;
   readonly publishedAt: string;
   readonly asset: ImageAssetView;

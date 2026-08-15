@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { Pool } from "pg";
 import { GenerationError } from "../src/generation/errors.ts";
 import { PostgresGenerationRepository } from "../src/generation/postgres-generation-repository.ts";
+import { PostgresGenerationJobRepository } from "../src/queue/postgres-generation-job-repository.ts";
 
 const databaseUrl = process.env.PHASE13_TEST_DATABASE_URL;
 const USER_ID = 9013;
@@ -10,6 +11,8 @@ const WORKFLOW_ID = "b13e4567-e89b-42d3-a456-426614174000";
 const VERSION_ID = "b23e4567-e89b-42d3-a456-426614174000";
 const JOB_ID = "b33e4567-e89b-42d3-a456-426614174000";
 const ASSET_ID = "b43e4567-e89b-42d3-a456-426614174000";
+const PROJECTION_JOB_ID = "b53e4567-e89b-42d3-a456-426614174000";
+const PROJECTION_ATTEMPT_ID = "b63e4567-e89b-42d3-a456-426614174000";
 
 describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   const pool = new Pool({ connectionString: databaseUrl });
@@ -19,8 +22,9 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
     await pool.query("DELETE FROM ai.generation_jobs WHERE id = $1", [JOB_ID]);
     await pool.query("DELETE FROM ai.workflow_versions WHERE id = $1", [VERSION_ID]);
     await pool.query("DELETE FROM ai.workflows WHERE id = $1", [WORKFLOW_ID]);
-    await pool.query("DELETE FROM public.users WHERE id = $1", [USER_ID]);
-    await pool.query("INSERT INTO public.users (id, email) VALUES ($1, 'phase13-media@example.test')", [USER_ID]);
+    // credit_ledger_entries 不可变且 users 被积分表 RESTRICT 引用：测试用户与
+    // 积分账户均改为幂等写入，避免依赖破坏性清理，保证套件可重复运行。
+    await pool.query("INSERT INTO public.users (id, email) VALUES ($1, 'phase13-media@example.test') ON CONFLICT (id) DO NOTHING", [USER_ID]);
     await pool.query(
       "INSERT INTO ai.credit_accounts (user_id, available_amount, lifetime_granted) VALUES ($1, 100, 100) ON CONFLICT (user_id) DO UPDATE SET available_amount = EXCLUDED.available_amount",
       [USER_ID],
@@ -54,6 +58,11 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   });
 
   after(async () => {
+    await pool.query("DELETE FROM ai.image_assets WHERE image_id IN (SELECT id FROM ai.images WHERE job_id = $1)", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.images WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_assets WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_attempts WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_jobs WHERE id = $1", [PROJECTION_JOB_ID]);
     await pool.query("UPDATE ai.providers SET status = 'disabled' WHERE code = 'comfyui'");
     await pool.end();
   });
@@ -97,6 +106,8 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
   });
 
   it("rejects non-video media types and duplicate positions", async () => {
+    // 用 PostgreSQL 错误码断言（23514=check_violation，23505=unique_violation），
+    // 与服务器消息语言无关，中文/英文 locale 的数据库下行为一致。
     await assert.rejects(
       pool.query(
         `INSERT INTO ai.generation_assets (
@@ -109,7 +120,7 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
          )`,
         [JOB_ID],
       ),
-      /check/,
+      (error: { code?: string }) => error.code === "23514",
     );
     await assert.rejects(
       pool.query(
@@ -123,8 +134,76 @@ describe("Phase 13 PostgreSQL media generation", { skip: !databaseUrl }, () => {
          )`,
         [JOB_ID],
       ),
-      /unique/,
+      (error: { code?: string }) => error.code === "23505",
     );
+  });
+
+  it("projects completed video jobs into the shared gallery media tables", async () => {
+    // 清理投影测试的历史数据（图片/资产/尝试/任务按外键顺序删除）。
+    await pool.query("DELETE FROM ai.image_assets WHERE image_id IN (SELECT id FROM ai.images WHERE job_id = $1)", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.images WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_assets WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_attempts WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    await pool.query("DELETE FROM ai.generation_jobs WHERE id = $1", [PROJECTION_JOB_ID]);
+    // 公开视频任务 + running 状态：markCompleted 应同时完成资产落库与画廊投影。
+    await pool.query(
+      `INSERT INTO ai.generation_jobs (id, user_id, workflow_version_id, prompt, requested_width, requested_height, status, visibility, prompt_visibility)
+       VALUES ($1, $2, $3, 'video gallery projection', 960, 544, 'running', 'public', 'public')`,
+      [PROJECTION_JOB_ID, USER_ID, VERSION_ID],
+    );
+    await pool.query(
+      `INSERT INTO ai.generation_attempts (id, job_id, provider_id, attempt_no, status, started_at)
+       VALUES ($1, $2, (SELECT id FROM ai.providers WHERE code = 'comfyui'), 1, 'running', now())`,
+      [PROJECTION_ATTEMPT_ID, PROJECTION_JOB_ID],
+    );
+
+    const repository = new PostgresGenerationJobRepository(pool);
+    await repository.markCompleted(PROJECTION_JOB_ID, PROJECTION_ATTEMPT_ID, {
+      externalRequestId: "ext-video-projection-1",
+      providerCode: "comfyui",
+      providerMetadata: { model: "minimax_h3_fl2va_int8_convrot.safetensors" },
+      generationDurationMs: 1234,
+      storageDurationMs: 12,
+      assets: [{
+        mediaType: "video",
+        storageProvider: "tencent_cos",
+        bucket: "bucket",
+        region: "ap-guangzhou",
+        objectKey: "videos/9013/projection/0.mp4",
+        url: "https://cdn.example/videos/9013/projection/0.mp4",
+        mimeType: "video/mp4",
+        byteSize: 2048,
+        width: 960,
+        height: 544,
+        sha256: "b".repeat(64),
+        durationSeconds: 5,
+      }],
+    });
+
+    // 画廊媒体表投影：视频复用图片的审核/可见性/发布链路（默认待审核，未发布）。
+    const image = await pool.query<{ id: string; media_type: string; duration_seconds: number; moderation_status: string; visibility: string; published_at: Date | null }>(
+      "SELECT id, media_type, duration_seconds, moderation_status, visibility, published_at FROM ai.images WHERE job_id = $1",
+      [PROJECTION_JOB_ID],
+    );
+    assert.equal(image.rows.length, 1);
+    assert.equal(image.rows[0]?.media_type, "video");
+    assert.equal(image.rows[0]?.duration_seconds, 5);
+    assert.equal(image.rows[0]?.moderation_status, "pending");
+    assert.equal(image.rows[0]?.published_at, null);
+    const asset = await pool.query<{ mime_type: string; public_url: string | null; width: number; height: number }>(
+      `SELECT a.mime_type, a.public_url, a.width, a.height FROM ai.image_assets a WHERE a.image_id = $1 AND a.variant = 'original'`,
+      [image.rows[0]?.id],
+    );
+    assert.equal(asset.rows.length, 1);
+    assert.equal(asset.rows[0]?.mime_type, "video/mp4");
+    assert.equal(asset.rows[0]?.public_url, "https://cdn.example/videos/9013/projection/0.mp4");
+    assert.equal(asset.rows[0]?.width, 960);
+    assert.equal(asset.rows[0]?.height, 544);
+    // 任务终态与资产表同时就绪：任务中心与画廊共享同一份完成事实。
+    const job = await pool.query<{ status: string }>("SELECT status FROM ai.generation_jobs WHERE id = $1", [PROJECTION_JOB_ID]);
+    assert.equal(job.rows[0]?.status, "completed");
+    const durable = await pool.query<{ object_key: string }>("SELECT object_key FROM ai.generation_assets WHERE job_id = $1", [PROJECTION_JOB_ID]);
+    assert.equal(durable.rows[0]?.object_key, "videos/9013/projection/0.mp4");
   });
 
   it("rejects a second video job for the same user while one is active", async () => {

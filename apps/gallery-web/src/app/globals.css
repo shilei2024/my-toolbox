@@ -758,13 +758,11 @@ select:focus-visible {
   font-size: 12px;
 }
 
+/* 最近创作嵌入右栏：与预览区同列，最新任务在最上方。 */
 .recent-panel {
-  margin-top: 18px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-overlay);
-  background: rgb(255 255 255 / 88%);
-  box-shadow: var(--shadow-soft);
+  margin-top: 14px;
+  padding: 16px 4px 4px;
+  border-top: 1px solid var(--line);
 }
 
 .recent-empty {
@@ -777,8 +775,42 @@ select:focus-visible {
 
 .recent-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* 视频任务在最近列表中的缩略占位（与图片缩略等高）。 */
+.recent-video-mark {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #cfe1ff;
+  background: rgb(23 40 61 / 60%);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 视频预览的下载入口。 */
+.generated-download {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  padding: 7px 12px;
+  border-radius: 9px;
+  color: #fff;
+  background: rgb(13 110 253 / 88%);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 8px 20px rgb(4 12 24 / 40%);
+}
+
+.generated-download:hover {
+  background: rgb(13 110 253);
 }
 
 .recent-item {

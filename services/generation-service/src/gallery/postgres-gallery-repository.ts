@@ -14,6 +14,8 @@ interface GalleryRow extends QueryResultRow {
   negative_prompt: string;
   prompt_visibility: "public" | "hidden";
   visibility: "public" | "private";
+  media_type: "image" | "video";
+  duration_seconds: number | null;
   creator_user_id: number | null;
   provider_code_snapshot: string;
   model_snapshot: string | null;
@@ -142,7 +144,8 @@ export class PostgresGalleryRepository implements GalleryRepository {
 
   async listSeoImages(cursor: DecodedCursor | undefined, limit: number): Promise<RepositoryPage<SeoImageEntry>> {
     const values: unknown[] = [limit + 1];
-    const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL"];
+    // og:image / sitemap 只接受图片资源；视频作品不进入 SEO 资产列表。
+    const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL", "i.media_type = 'image'"];
     if (cursor) {
       values.push(cursor.at, cursor.id);
       conditions.push(`(i.published_at, i.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
@@ -291,6 +294,8 @@ export class PostgresGalleryRepository implements GalleryRepository {
       description: row.description,
       width: row.width,
       height: row.height,
+      mediaType: row.media_type === "video" ? "video" : "image",
+      ...(row.media_type === "video" && row.duration_seconds !== null ? { durationSeconds: Number(row.duration_seconds) } : {}),
       workflowName: row.workflow_name_snapshot,
       publishedAt: iso(row.published_at ?? row.created_at),
       asset,

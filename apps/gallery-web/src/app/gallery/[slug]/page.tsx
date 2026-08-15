@@ -18,6 +18,8 @@ export async function generateMetadata({ params }: DetailPageProps): Promise<Met
   try {
     const image = await getPublicSeoDetail(slug);
     const seo = buildArtworkSeo(image);
+    // 视频资源不能作为 og:image/twitter 图片被社交平台抓取，视频详情只保留文本卡片。
+    const isVideo = image.mediaType === "video" || image.asset.mimeType.startsWith("video/");
     return {
       title: seo.title,
       description: seo.description,
@@ -29,9 +31,9 @@ export async function generateMetadata({ params }: DetailPageProps): Promise<Met
         title: seo.title,
         description: seo.description,
         publishedTime: image.publishedAt,
-        images: [{ url: seo.imageUrl, width: image.asset.width, height: image.asset.height, alt: seo.title }],
+        ...(isVideo ? {} : { images: [{ url: seo.imageUrl, width: image.asset.width, height: image.asset.height, alt: seo.title }] }),
       },
-      twitter: { card: "summary_large_image", title: seo.title, description: seo.description, images: [seo.imageUrl] },
+      twitter: { card: isVideo ? "summary" : "summary_large_image", title: seo.title, description: seo.description, ...(isVideo ? {} : { images: [seo.imageUrl] }) },
       robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
     };
   } catch {
@@ -58,7 +60,14 @@ export default async function GalleryDetailPage({ params }: DetailPageProps) {
         <Link href="/gallery">作品库</Link><span aria-hidden="true">/</span><span aria-current="page">{image.title || "未命名作品"}</span>
       </nav>
       <div className="detail-shell">
-        <div className="detail-art real-detail-art"><img src={image.asset.url} width={image.asset.width} height={image.asset.height} alt={image.title || "AI 生成作品"} /></div>
+        <div className="detail-art real-detail-art">
+          {image.mediaType === "video" || image.asset.mimeType.startsWith("video/") ? (
+            // 视频作品：进入详情页后提供完整播放控制，静态时显示首帧。
+            <video src={`${image.asset.url}#t=0.1`} width={image.asset.width} height={image.asset.height} controls preload="metadata" playsInline aria-label={image.title || "AI 生成视频"} />
+          ) : (
+            <img src={image.asset.url} width={image.asset.width} height={image.asset.height} alt={image.title || "AI 生成作品"} />
+          )}
+        </div>
         <aside className="detail-panel">
           <p className="eyebrow"><span className="eyebrow-dot" />Artwork detail</p>
           <h1>{image.title || "未命名作品"}</h1>
@@ -67,7 +76,8 @@ export default async function GalleryDetailPage({ params }: DetailPageProps) {
             <MetadataRow label="创作者" value={image.creator?.displayName || "未设置公开名称"} />
             <MetadataRow label="工作流" value={image.workflowName} />
             <MetadataRow label="生成模型" value={image.model || image.providerCode} />
-            <MetadataRow label="图片尺寸" value={`${image.width} × ${image.height}`} />
+            <MetadataRow label={image.mediaType === "video" ? "视频尺寸" : "图片尺寸"} value={`${image.width} × ${image.height}`} />
+            {image.mediaType === "video" && image.durationSeconds !== undefined && <MetadataRow label="视频时长" value={`${image.durationSeconds} 秒`} />}
             <MetadataRow label="创建时间" value={formatDate(image.createdAt)} />
             {image.seed && <MetadataRow label="Seed" value={image.seed} />}
             {image.sampler && <MetadataRow label="采样器" value={image.sampler} />}

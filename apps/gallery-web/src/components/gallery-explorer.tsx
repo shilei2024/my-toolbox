@@ -118,8 +118,28 @@ export function ArtworkCard({ item, authenticated, onFavorite }: { item: Gallery
     <article className="art-card">
       <Link href={`/gallery/${item.slug}`} className="art-link" aria-label={item.title || "查看未命名作品"}>
         {/* The backend validates every asset URL against the configured COS/CDN allowlist. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="real-art" src={item.asset.url} width={item.asset.width} height={item.asset.height} alt={item.title || "AI 生成作品"} loading="lazy" />
+        {item.mediaType === "video" || item.asset.mimeType.startsWith("video/") ? (
+          // 视频卡片：静态显示首帧（preload=metadata + #t=0.1 保证 Safari 也出画面），
+          // 仅在鼠标悬停时静音播放，移开即复位回首帧，与图片卡片视觉一致。
+          <video
+            className="real-art"
+            src={`${item.asset.url}#t=0.1`}
+            width={item.asset.width}
+            height={item.asset.height}
+            muted
+            playsInline
+            preload="metadata"
+            aria-label={item.title || "AI 生成视频"}
+            onMouseEnter={(event) => { void event.currentTarget.play().catch(() => undefined); }}
+            onMouseLeave={(event) => { const video = event.currentTarget; video.pause(); video.currentTime = 0.1; }}
+          />
+        ) : (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="real-art" src={item.asset.url} width={item.asset.width} height={item.asset.height} alt={item.title || "AI 生成作品"} loading="lazy" />
+          </>
+        )}
+        {(item.mediaType === "video" || item.asset.mimeType.startsWith("video/")) && <span className="media-badge video">视频{item.durationSeconds ? ` · ${item.durationSeconds}s` : ""}</span>}
       </Link>
       <div className="card-body">
         <div className="card-title-row">

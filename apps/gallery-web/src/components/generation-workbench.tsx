@@ -160,6 +160,15 @@ export function GenerationWorkbench() {
     return () => { active = false; mountedRef.current = false; if (pollRef.current?.timer) clearTimeout(pollRef.current.timer); };
   }, [applyComposerData, fetchComposerData]);
 
+  // 最近任务自动同步：只要列表里还有排队/生成中的任务，就定时刷新状态与
+  // 缩略图，无需用户手动点选任务（符合大众使用习惯）。
+  const hasActiveRecent = useMemo(() => recent.some((item) => !terminal.has(item.status)), [recent]);
+  useEffect(() => {
+    if (!hasActiveRecent) return;
+    const timer = setInterval(() => { if (mountedRef.current) void refreshRecent(); }, 6000);
+    return () => clearInterval(timer);
+  }, [hasActiveRecent, refreshRecent]);
+
   function retryLoad() {
     setLoadState("loading");
     setMessage("");
@@ -208,7 +217,8 @@ export function GenerationWorkbench() {
     const [width, height] = size.split("x").map(Number) as [number, number];
     try {
       const parameters = workflow.mediaType === "video" ? { durationSeconds } : {};
-      const body: Record<string, unknown> = { workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility: workflow.mediaType === "video" ? "private" : visibility, promptVisibility: workflow.mediaType === "video" ? "hidden" : promptVisibility, creditTier, parameters };
+      // 视频与图片使用同一套可见性/提示词隐私选项：公开视频经审核后进入画廊。
+      const body: Record<string, unknown> = { workflowSlug: workflow.slug, prompt: prompt.trim(), negativePrompt: negativePrompt.trim(), width, height, count, visibility, promptVisibility, creditTier, parameters };
       if (workflow.mediaType === "video" && h3Meta && h3Meta.maxImages > 0) {
         if (inputImages.length === 0) {
           setMessage("请先上传参考图。");
@@ -243,7 +253,7 @@ export function GenerationWorkbench() {
         const current = await fetch(`/api/generations/${encodeURIComponent(id)}`, { cache: "no-store" }).then(readJson) as GenerationView;
         if (!mountedRef.current) return;
         setGeneration(current);
-        if (current.status === "completed" && current.images.length > 0) {
+        if (current.status === "completed" && current.mediaType !== "video" && current.images.length > 0) {
           void loadPreviews(current.images.map((image) => image.slug));
         }
         if (!terminal.has(current.status)) schedulePoll(id, 2000);
@@ -277,7 +287,7 @@ export function GenerationWorkbench() {
   function selectTask(item: GenerationView) {
     setGeneration(item);
     if (!terminal.has(item.status)) schedulePoll(item.id);
-    if (item.status === "completed") void loadPreviews(item.images.map((image) => image.slug));
+    if (item.status === "completed" && item.mediaType !== "video") void loadPreviews(item.images.map((image) => image.slug));
   }
 
   async function cancelTask(item: GenerationView) {
@@ -337,12 +347,12 @@ export function GenerationWorkbench() {
             ? <div className="workflow-loading">该分类暂无可用方式，请切换分类或稍后再试。</div>
             : <div className="workflow-grid" role="radiogroup" aria-label={mode === "workflow" ? "工作流创作方式" : "API 模型创作方式"}>
               {otherWorkflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
-              {h3Workflows.length === 3 ? <label className={`workflow-option${h3Selected ? " selected" : ""}`}><input type="radio" name="workflow" value="minimax-h3-family" checked={h3Selected} onChange={() => selectWorkflow(h3Workflows[0]!)} /><span className="workflow-tone">MiniMax H3</span><strong>MiniMax H3 全能参考视频</strong><small>文生 / 单图 / 多图参考三合一：原生音视频，支持 4/5/8/10 秒。</small><span className="workflow-check">{h3Selected ? "✓ 已选" : ""}</span></label> : h3Workflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
+              {h3Workflows.length >= 2 ? <label className={`workflow-option${h3Selected ? " selected" : ""}`}><input type="radio" name="workflow" value="minimax-h3-family" checked={h3Selected} onChange={() => selectWorkflow(h3Workflows[0]!)} /><span className="workflow-tone">MiniMax H3</span><strong>MiniMax H3 全能参考视频</strong><small>文生 / 单图 / 多图参考三合一：原生音视频，支持 4/5/8/10 秒。</small><span className="workflow-check">{h3Selected ? "✓ 已选" : ""}</span></label> : h3Workflows.map((item) => <label className={`workflow-option${selected === item.slug ? " selected" : ""}`} key={item.slug}><input type="radio" name="workflow" value={item.slug} checked={selected === item.slug} onChange={() => selectWorkflow(item)} /><span className="workflow-tone">{item.category}</span><strong>{item.name}</strong><small>{item.description}</small><span className="workflow-check">{selected === item.slug ? "✓ 已选" : ""}</span></label>)}
             </div>}
-          {h3Selected && h3Workflows.length === 3 ? <>
-            <div className="creation-mode-tabs" role="tablist" aria-label="MiniMax H3 生成模式">
+          {h3Selected ? <>
+            {h3Workflows.length >= 2 ? <div className="creation-mode-tabs" role="tablist" aria-label="MiniMax H3 生成模式">
               {h3Workflows.map((item) => <button key={item.slug} type="button" role="tab" aria-selected={selected === item.slug} className={`mode-tab${selected === item.slug ? " active" : ""}`} onClick={() => selectWorkflow(item)}>{item.defaults.modeMeta?.label ?? item.name}</button>)}
-            </div>
+            </div> : null}
             {h3Meta && h3Meta.maxImages > 0 ? <div className="reference-upload">
               <label className="reference-upload-field"><span>参考图（{inputImages.length}/{h3Meta.maxImages}）</span><input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => { addInputImages(event.target.files); event.target.value = ""; }} /></label>
               {inputImages.length > 0
@@ -361,15 +371,17 @@ export function GenerationWorkbench() {
           <label><span>积分档位</span><select value={creditTier} onChange={(event) => setCreditTier(event.target.value as "free" | "member")}><option value="free">免费积分</option><option value="member">会员积分</option></select></label>
           {workflow?.mediaType === "video" ? <>
             <label><span>画面比例</span><select value={aspect} onChange={(event) => { const next = event.target.value; setAspect(next); const resolutions = workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS; setSize(videoSizeFor(next, resolutionHeight(resolution, resolutions))); }}>{VIDEO_ASPECTS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-            <label><span>分辨率</span><select value={resolution} onChange={(event) => { const next = event.target.value; setResolution(next); const resolutions = workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS; setSize(videoSizeFor(aspect, resolutionHeight(next, resolutions))); }}>{(workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+            <label><span>分辨率</span><select value={resolution} onChange={(event) => { const next = event.target.value; setResolution(next); const resolutions = workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS; setSize(videoSizeFor(aspect, resolutionHeight(next, resolutions))); }}>{(workflow.defaults.videoResolutions ?? VIDEO_RESOLUTIONS).map((item) => <option key={item.key} value={item.key}>{resolutionOptionLabel(item, aspect)}</option>)}</select></label>
             <label><span>视频时长</span><select value={durationSeconds} onChange={(event) => setDurationSeconds(Number(event.target.value))}>{(workflow.durations?.length ? workflow.durations : [5]).map((value) => <option key={value} value={value}>{value} 秒</option>)}</select></label>
-            <label><span>作品可见性</span><select value="private" disabled><option value="private">仅自己可见</option></select></label>
+            <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>
           </> : <>
             <label><span>画面比例</span><select value={size} onChange={(event) => setSize(event.target.value)}>{workflow?.sizes?.length ? workflow.sizes.map((item) => { const key = sizeKey(item); return <option key={key} value={key}>{sizeLabel(key)}</option>; }) : <option value={size}>加载中…</option>}</select></label>
             <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value))}>{workflow ? countOptions(workflow).map((value) => <option key={value} value={value}>{value} 张</option>) : <option value={count}>加载中…</option>}</select></label>
             <label><span>作品可见性</span><select value={visibility} onChange={(event) => setVisibility(event.target.value as GenerationVisibility)}><option value="private">仅自己可见</option><option value="public">公开到画廊</option></select></label>
           </>}
-        </div>{workflow?.mediaType === "video" ? <p className="panel-hint">视频暂只在本人创作记录和任务中心可见。</p> : <label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label>}</div>
+        </div>
+        {workflow?.mediaType === "video" && <p className="panel-hint">当前输出尺寸：{sizeLabel(size)}。公开视频与图片一样，审核通过后会在画廊展示（悬停播放）。</p>}
+        <label className="prompt-privacy"><input type="checkbox" checked={promptVisibility === "hidden"} onChange={(event) => setPromptVisibility(event.target.checked ? "hidden" : "public")} />隐藏作品 Prompt</label></div>
 
         {message && loadState !== "error" ? <div className="inline-error" role="alert">{message}</div> : null}
         <div className="composer-submit"><div><span>本次预计</span><strong>{estimate} 积分</strong></div>{loggedIn
@@ -380,7 +392,10 @@ export function GenerationWorkbench() {
       <aside className="creation-preview" aria-labelledby="preview-title">
         <div className={`preview-stage${generation ? ` task-${generation.status}` : ""}`}>
           {generation?.status === "completed" && generation.mediaType === "video" && generation.outputs[0] ? (
-            <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}><video src={generation.outputs[0].url} controls preload="metadata" playsInline aria-label="生成的视频" /></div>
+            <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}>
+              <video src={`${generation.outputs[0].url}#t=0.1`} controls preload="metadata" playsInline aria-label="生成的视频" />
+              <a className="generated-download" href={generation.outputs[0].url} download target="_blank" rel="noreferrer">下载视频</a>
+            </div>
           ) : generation?.status === "completed" && generation.images.length > 0 ? (
             <div className="preview-images" style={{ aspectRatio: `${generation.width} / ${generation.height}` }}>
               {generation.images.map((image, index) => {
@@ -392,30 +407,31 @@ export function GenerationWorkbench() {
           {generation?.images.length ? <div className="generated-links">{generation.images.map((image, index) => <Link key={image.id} href={`/gallery/${image.slug}`}>查看作品 {index + 1}</Link>)}</div> : null}
         </div>
         <div className="task-strip"><span className={`task-indicator${generation ? ` ${generation.status}` : ""}`} /><div><strong>{generation ? `${generation.workflowName} · ${statusLabel(generation.status)}` : "尚未创建任务"}</strong><small>{generation ? `任务 ${generation.id.slice(0, 8)} · ${generation.width}×${generation.height}` : "队列状态、耗时和取消操作将显示在这里"}</small></div>{generation && !terminal.has(generation.status) && !(generation.mediaType === "video" && generation.status === "running" && generation.mode !== "workflow") ? <button className="button task-cancel" type="button" onClick={() => void cancel()}>取消</button> : null}</div>
+
+        <section className="recent-panel" aria-labelledby="recent-title">
+          <div className="panel-heading compact"><div><span className="step-index">04</span><h2 id="recent-title">最近创作</h2></div><span className="panel-hint">最新在最上</span></div>
+          {recentState === "loading" ? <div className="workflow-loading">正在读取最近任务…</div>
+            : recent.length === 0 ? <div className="recent-empty">最近任务会显示在这里（新的在最上方）。</div>
+            : <div className="recent-list">{recent.map((item) => {
+              const first = item.images[0];
+              const firstUrl = first ? previewUrls[first.slug] : undefined;
+              const itemVideo = item.mediaType === "video" && item.outputs.length > 0;
+              return <div className="recent-item" key={item.id}>
+                <button className="recent-select" type="button" onClick={() => selectTask(item)}>
+                  <span className={`task-indicator ${item.status}`} />
+                  <span className="recent-thumb">{itemVideo ? <span className="recent-video-mark">视频</span> : firstUrl ? <Image src={firstUrl} alt="" width={96} height={64} sizes="96px" unoptimized /> : <span>{item.status === "failed" ? "失败" : item.images.length ? `${item.images.length} 张` : "…"}</span>}</span>
+                  <span className="recent-main"><strong>{item.workflowName}</strong><small>{promptSummary(item.prompt)}</small></span>
+                  <span className="recent-meta"><em>{statusLabel(item.status)}</em><time>{formatTime(item.createdAt)}</time></span>
+                </button>
+                <div className="recent-actions">
+                  {!terminal.has(item.status) && !(item.mediaType === "video" && item.status === "running" && item.mode !== "workflow") ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
+                  {item.status === "failed" ? <button className="button primary recent-action" type="button" onClick={() => retryTask(item)}>重新创作</button> : null}
+                </div>
+              </div>;
+            })}</div>}
+        </section>
       </aside>
     </div>
-
-    <section className="recent-panel" aria-labelledby="recent-title">
-      <div className="panel-heading compact"><div><span className="step-index">04</span><h2 id="recent-title">最近创作</h2></div><span className="panel-hint">点击任务查看状态与结果，失败任务可回填重新创作</span></div>
-      {recentState === "loading" ? <div className="workflow-loading">正在读取最近任务…</div>
-        : recent.length === 0 ? <div className="recent-empty">最近任务会显示在这里。</div>
-        : <div className="recent-list">{recent.map((item) => {
-          const first = item.images[0];
-          const firstUrl = first ? previewUrls[first.slug] : undefined;
-          return <div className="recent-item" key={item.id}>
-            <button className="recent-select" type="button" onClick={() => selectTask(item)}>
-              <span className={`task-indicator ${item.status}`} />
-              <span className="recent-thumb">{firstUrl ? <Image src={firstUrl} alt="" width={96} height={64} sizes="96px" unoptimized /> : <span>{item.status === "failed" ? "失败" : item.mediaType === "video" && item.outputs.length ? "视频" : item.images.length ? `${item.images.length} 张` : "…"}</span>}</span>
-              <span className="recent-main"><strong>{item.workflowName}</strong><small>{promptSummary(item.prompt)}</small></span>
-              <span className="recent-meta"><em>{statusLabel(item.status)}</em><time>{formatTime(item.createdAt)}</time></span>
-            </button>
-            <div className="recent-actions">
-              {!terminal.has(item.status) && !(item.mediaType === "video" && item.status === "running" && item.mode !== "workflow") ? <button className="button recent-action" type="button" onClick={() => void cancelTask(item)}>取消</button> : null}
-              {item.status === "failed" ? <button className="button primary recent-action" type="button" onClick={() => retryTask(item)}>重新创作</button> : null}
-            </div>
-          </div>;
-        })}</div>}
-    </section>
   </main>;
 }
 
@@ -506,6 +522,14 @@ function nearestAspect(width: number, height: number): string {
 
 function resolutionHeight(key: string, resolutions: readonly { readonly key: string; readonly height: number }[]): number {
   return resolutions.find((entry) => entry.key === key)?.height ?? 704;
+}
+
+/**
+ * 分辨率下拉文案与生图侧统一：附带当前比例下的实际输出像素，
+ * 让用户在提交前即可看到与图片侧一致的尺寸描述（如“720p 高清（1248×704）”）。
+ */
+function resolutionOptionLabel(entry: { readonly key: string; readonly label: string; readonly height: number }, aspectKey: string): string {
+  return `${entry.label}（${videoSizeFor(aspectKey, entry.height).replace("x", "×")}）`;
 }
 
 function videoSizeFor(aspectKey: string, height: number): string {
