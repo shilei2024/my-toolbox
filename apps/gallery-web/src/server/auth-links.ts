@@ -22,10 +22,14 @@ export function logoutUrl(returnTo?: string): string | undefined {
 }
 
 function configuredAuthUrl(name: string): string | undefined {
-  const raw = process.env[name]?.trim();
-  if (!raw) return undefined;
+  return configuredUrl(process.env[name]);
+}
+
+function configuredUrl(raw?: string): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
   let url: URL;
-  try { url = new URL(raw); } catch { return undefined; }
+  try { url = new URL(value); } catch { return undefined; }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) return undefined;
   return url.toString();
 }

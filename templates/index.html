@@ -1,54 +1,63 @@
 {% extends "base.html" %}
 {% block title %}{{ site_name }} — 首页{% endblock %}
 {% block content %}
-<section class="text-center py-4 mb-4 hero">
-  <h1 class="display-5 fw-bold mb-2">{{ site_name }}</h1>
-  <p class="lead text-muted mx-auto" style="max-width: 640px;">{{ site_tagline }}</p>
-  {% if not current_user.is_authenticated %}
-    <div class="mt-3 d-flex gap-2 justify-content-center flex-wrap">
-      <a class="btn btn-primary" href="{{ url_for('auth.register') }}">
-        <i class="bi bi-person-plus"></i> 免费注册
-      </a>
-      <a class="btn btn-outline-secondary" href="{{ url_for('auth.login') }}">
-        已有账号？登录
-      </a>
+<section class="home-hero" aria-labelledby="home-title">
+  <div class="home-hero-copy">
+    <p class="section-eyebrow"><span></span>Mindful tools for focused work</p>
+    <h1 id="home-title">把日常文件，<br /><em>处理得更轻一点。</em></h1>
+    <p class="home-hero-lead">{{ site_tagline }}</p>
+    <div class="home-hero-actions">
+      <a class="btn btn-primary btn-lg" href="#tool-library">浏览全部工具 <i class="bi bi-arrow-down-short"></i></a>
+      {% if config.AI_IMAGE_EXTERNAL_URL %}
+        <a class="btn btn-outline-dark btn-lg" href="/gallery">探索 AI Gallery <i class="bi bi-arrow-up-right"></i></a>
+      {% elif not current_user.is_authenticated %}
+        <a class="btn btn-outline-dark btn-lg" href="{{ url_for('auth.register') }}">免费注册</a>
+      {% endif %}
     </div>
-  {% else %}
-    <p class="text-muted mt-2">
-      欢迎回来，<strong>{{ current_user.email }}</strong>。
-      {% if is_admin %}（管理员）{% endif %}
-    </p>
-  {% endif %}
+    {% if current_user.is_authenticated %}
+      <p class="home-welcome"><span></span>欢迎回来，{{ current_user.display_name }}{% if is_admin %} · 管理员{% endif %}</p>
+    {% else %}
+      <p class="home-account-hint">无需安装即可试用；<a href="{{ url_for('auth.login') }}">登录</a>后保留更完整的使用额度。</p>
+    {% endif %}
+  </div>
+  <aside class="home-hero-panel" aria-label="平台能力概览">
+    <div class="hero-panel-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="hero-panel-content">
+      <p>一个账户，两种工作方式</p>
+      <strong>工具处理</strong>
+      <span>PDF · 图片 · 文本 · 数据</span>
+      <div class="hero-panel-divider"><i class="bi bi-plus"></i></div>
+      <strong>AI 创作</strong>
+      <span>生成 · 任务 · 作品 · 收藏</span>
+    </div>
+  </aside>
 </section>
 
 {% set ai_tool = tools | selectattr("id", "equalto", "ai_image") | first %}
 {% if ai_tool and ai_tool.external_url %}
-<section class="ai-hero-card mb-5">
-  <div class="ai-hero-grid" aria-hidden="true"></div>
-  <div class="ai-hero-body">
-    <span class="ai-hero-badge"><i class="bi bi-stars"></i> AI IMAGE STUDIO</span>
-    <h2>AI 生图 · 画廊展示</h2>
-    <p>输入一句话，生成高质量 AI 图片；作品自动进入画廊，支持多种模型、画幅与积分计价。</p>
-    <div class="ai-hero-actions">
-      <a class="btn btn-light" href="{{ ai_tool.external_url }}" target="_blank" rel="noopener">
-        <i class="bi bi-magic"></i> 开始创作
-      </a>
-      <a class="btn btn-outline-light" href="{{ ai_tool.external_url.replace('/create', '/gallery') }}" target="_blank" rel="noopener">
-        <i class="bi bi-images"></i> 浏览画廊
-      </a>
+<section class="ai-spotlight" aria-labelledby="ai-spotlight-title">
+  <div class="ai-spotlight-copy">
+    <p class="section-eyebrow light"><span></span>AI creative studio</p>
+    <h2 id="ai-spotlight-title">从一句描述，到一件可以收藏的作品。</h2>
+    <p>在独立 Gallery 中完成图片或视频创作，查看任务进度，并管理公开作品与收藏。</p>
+    <div class="ai-spotlight-actions">
+      <a class="btn btn-light" href="{{ ai_tool.external_url }}"><i class="bi bi-magic"></i> 开始创作</a>
+      <a class="btn btn-outline-light" href="{{ ai_tool.external_url.replace('/create', '/gallery') }}"><i class="bi bi-images"></i> 浏览 Gallery</a>
     </div>
-    <ul class="ai-hero-meta">
-      <li><i class="bi bi-grid-3x3-gap"></i> 多画幅</li>
-      <li><i class="bi bi-credit-card"></i> 积分计价</li>
-      <li><i class="bi bi-shield-check"></i> 内容审核</li>
-    </ul>
   </div>
+  <ul class="ai-spotlight-meta" aria-label="AI Gallery 特性">
+    <li><i class="bi bi-aspect-ratio"></i><span><strong>多种画幅</strong>适配不同创作场景</span></li>
+    <li><i class="bi bi-list-check"></i><span><strong>任务可追踪</strong>生成状态集中管理</span></li>
+    <li><i class="bi bi-shield-check"></i><span><strong>作品可控</strong>隐私与审核边界清晰</span></li>
+  </ul>
 </section>
 {% endif %}
 
 {# 实时汇率 - 双向切换 #}
-<div id="exchangeRate" class="text-center mb-3">
-  <div class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill border bg-white shadow-sm" style="min-width:fit-content;">
+<section class="utility-strip" aria-label="实时汇率">
+  <div class="utility-strip-label"><i class="bi bi-globe2"></i><span>实时汇率</span></div>
+  <div id="exchangeRate" class="exchange-rate">
+    <div class="exchange-rate-inner">
     <span id="fxFromBadge" class="d-inline-flex align-items-center gap-1 px-2 py-1 rounded-pill small fw-semibold"
           style="background:#f0f0f0;cursor:default;">
       <img id="fxFromFlag" src="https://flagcdn.com/16x12/us.png" width="16" height="12" alt="USD" style="object-fit:cover;border-radius:2px;"/>
@@ -70,95 +79,71 @@
     <button id="rateRefresh" class="btn btn-outline-secondary btn-sm rounded-circle p-0" style="width:26px;height:26px;line-height:1;" title="刷新汇率">
       <i class="bi bi-arrow-repeat" style="font-size:0.75rem;"></i>
     </button>
+    </div>
   </div>
-</div>
+</section>
 
 {# Quick-jump category chips (sticky so they're always reachable) #}
-<nav class="category-chips mb-4 d-flex flex-wrap gap-2 sticky-top bg-white py-2" style="z-index: 1020;">
+<nav class="category-chips sticky-top" aria-label="工具分类">
+  <span class="category-chips-label">快速定位</span>
   {% for cat in categories %}
     {% set meta = category_meta.get(cat, {"title": cat, "icon": "bi-grid", "color": "#6c757d"}) %}
-    <a href="#cat-{{ cat }}" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 rounded-pill">
+    <a href="#cat-{{ cat }}" class="category-chip">
       <i class="bi {{ meta.icon }}" style="color: {{ meta.color }};"></i>
       <span>{{ meta.title }}</span>
-      <span class="badge bg-light text-dark rounded-pill ms-1">{{ groups[cat] | length }}</span>
+      <span class="category-count">{{ groups[cat] | length }}</span>
     </a>
   {% endfor %}
 </nav>
 
+<div id="tool-library" class="tool-library-heading">
+  <div>
+    <p class="section-eyebrow"><span></span>Tool library</p>
+    <h2>找到工具，马上开始。</h2>
+  </div>
+  <p>所有处理都按类别整理；专有工具仅向获授权账户显示。</p>
+</div>
+
 {% for cat in categories %}
   {% set meta = category_meta.get(cat, {"title": cat, "icon": "bi-grid", "color": "#6c757d", "description": ""}) %}
-  <section id="cat-{{ cat }}" class="mb-5 tool-section">
-    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom category-header">
-      <span class="category-badge d-inline-flex align-items-center justify-content-center"
+  <section id="cat-{{ cat }}" class="tool-section">
+    <div class="category-header">
+      <span class="category-badge"
             style="background: {{ meta.color }}1a; color: {{ meta.color }};">
         <i class="bi {{ meta.icon }}"></i>
       </span>
-      <h2 class="h4 mb-0">{{ meta.title }}</h2>
-      <span class="text-muted small">{{ groups[cat] | length }} 个工具</span>
+      <div><h3>{{ meta.title }}</h3>{% if meta.description %}<p>{{ meta.description }}</p>{% endif %}</div>
+      <span class="category-total">{{ groups[cat] | length }} 个工具</span>
     </div>
 
-    <div class="row g-3">
+    <div class="tool-grid">
       {% for tool in groups[cat] %}
-        <div class="col-12 col-sm-6 col-lg-3">
+        <article>
           {% if tool.external_url %}
-            <a class="text-decoration-none tool-card-link" href="{{ tool.external_url }}" target="_blank" rel="noopener">
+            <a class="tool-card-link" href="{{ tool.external_url }}">
           {% else %}
-            <a class="text-decoration-none tool-card-link" href="{{ tool.route }}">
+            <a class="tool-card-link" href="{{ tool.route }}">
           {% endif %}
-            <div class="card tool-card h-100 shadow-sm border-0">
-              <div class="card-body d-flex flex-column">
-                <div class="d-flex align-items-center gap-2 mb-2">
-                  <span class="tool-icon" style="background: {{ tool.color }}1a; color: {{ tool.color }};">
-                    <i class="bi {{ tool.icon }}"></i>
-                  </span>
-                  <h5 class="card-title mb-0">{{ tool.name }}</h5>
-                  {% if tool.required_plan == 'private' %}
-                    <span class="badge bg-warning text-dark ms-auto"><i class="bi bi-lock-fill"></i> 专有</span>
-                  {% endif %}
-                </div>
-                <p class="card-text text-muted small flex-grow-1">{{ tool.description }}</p>
-                <div class="d-flex justify-content-between align-items-center small text-muted">
-                  <span>
-                    {% if tool.external_url %}
-                      新链路
-                    {% elif current_user.is_authenticated and is_admin %}
-                      今日剩余 <strong class="text-dark">∞</strong> 次
-                    {% elif current_user.is_authenticated %}
-                      今日剩余 <strong class="text-dark">{{ remaining_for(tool.id) }}</strong> 次
-                    {% else %}
-                      试用 <strong class="text-dark">3</strong> 次
-                    {% endif %}
-                  </span>
-                  <span class="text-primary">打开 <i class="bi bi-arrow-right-short"></i></span>
-                </div>
+            <div class="tool-card">
+              <div class="tool-card-topline">
+                <span class="tool-icon" style="background: {{ tool.color }}1a; color: {{ tool.color }};"><i class="bi {{ tool.icon }}"></i></span>
+                {% if tool.required_plan == 'private' %}<span class="tool-private"><i class="bi bi-lock-fill"></i> 专有</span>{% endif %}
+              </div>
+              <h4>{{ tool.name }}</h4>
+              <p>{{ tool.description }}</p>
+              <div class="tool-card-footer">
+                <span>{% if tool.external_url %}独立应用{% elif current_user.is_authenticated and is_admin %}今日剩余 <strong>∞</strong> 次{% elif current_user.is_authenticated %}今日剩余 <strong>{{ remaining_for(tool.id) }}</strong> 次{% else %}可试用 <strong>3</strong> 次{% endif %}</span>
+                <i class="bi bi-arrow-up-right"></i>
               </div>
             </div>
           </a>
-        </div>
+        </article>
       {% endfor %}
     </div>
   </section>
 {% else %}
   <div class="alert alert-info">暂无可用工具。</div>
 {% endfor %}
-
-<style>
-  .category-chips { box-shadow: 0 4px 8px -8px rgba(0,0,0,0.1); }
-  .category-chips .btn { white-space: nowrap; }
-  .category-badge {
-    width: 40px; height: 40px; border-radius: 10px; font-size: 1.25rem;
-  }
-  .category-header h2 { letter-spacing: -0.02em; }
-  .tool-card-link:hover .tool-card { transform: translateY(-2px); }
-  .tool-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .tool-icon {
-    width: 36px; height: 36px; border-radius: 9px;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 1.1rem;
-  }
-  /* smooth-scroll anchor offset for sticky navbar */
-  section[id^="cat-"] { scroll-margin-top: 80px; }
-</style>
 {% endblock %}
 {% block scripts_extra %}
 <script>

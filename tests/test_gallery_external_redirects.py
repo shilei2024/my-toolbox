@@ -34,12 +34,21 @@ class GalleryExternalRedirectTest(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "https://gallery.example.com/gallery")
 
+    def test_homepage_exposes_responsive_main_and_gallery_navigation(self) -> None:
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'class="navbar navbar-expand-lg site-navbar', response.data)
+        self.assertIn(b'id="tool-library"', response.data)
+        self.assertIn(b'class="tool-grid"', response.data)
+        self.assertIn(b'href="/gallery"', response.data)
+
     def test_fails_closed_when_gallery_url_unconfigured(self) -> None:
         previous = self.app.config.get("AI_IMAGE_EXTERNAL_URL")
         self.app.config["AI_IMAGE_EXTERNAL_URL"] = ""
         try:
             self.assertEqual(self.client.get("/create").status_code, 404)
             self.assertEqual(self.client.get("/gallery").status_code, 404)
+            self.assertNotIn(b'href="/gallery"', self.client.get("/").data)
         finally:
             self.app.config["AI_IMAGE_EXTERNAL_URL"] = previous
 

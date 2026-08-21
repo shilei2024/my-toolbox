@@ -70,6 +70,7 @@ M1.1 新增服务端变量：
 | --- | --- | --- | --- |
 | `BILLING_SIGNUP_GRANT` | Generation API（Billing） | `10` | 新用户首次账户汇总时发放的一次性积分；`0` 关闭 |
 | `GALLERY_DEFAULT_MODERATION` | Generation Worker | `pending` | 新图片审核状态；`approved` 会直接发布公开图片 |
+| `MAVIS_SITE_URL` | Next Server Runtime | 无 | 主站公开 Origin，用于 Gallery 的“返回工具箱”导航；可选，未配置时从安全的登录 URL 推导 |
 | `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL` | Next Server Runtime | 无 | Flask 登录/退出页 HTTPS URL，Gallery 登录入口依赖前者 |
 
 ## 主站 ↔ Gallery 登录桥接变量
@@ -84,6 +85,7 @@ Flask 主站与 Vercel Gallery Web 通过共享 Cookie 与签名会话内省识�
 | `SESSION_COOKIE_DOMAIN` | Flask 主站 | 空 | 双方共享受控父域（如 `.example.com`）；`*.vercel.app` 无法共享业务 Cookie |
 | `SESSION_COOKIE_SECURE` | Flask 主站 | `false` | 生产必须为 `true`；Gallery 为 HTTPS 时预检直接失败 |
 | `MAVIS_AUTH_INTROSPECTION_URL` | Vercel | 空 | Flask 内部会话检查 HTTPS URL（`/internal/gallery/session`） |
+| `MAVIS_SITE_URL` | Vercel | 空 | Flask 主站公开 Origin；只接受 HTTPS（本地回环可用 HTTP），非法值会隐藏 Gallery 的主站返回入口；未配置时回退到 `MAVIS_AUTH_LOGIN_URL` 的 Origin |
 | `MAVIS_AUTH_LOGIN_URL` | Vercel | 空 | Flask 登录页 HTTPS URL；未配置时 Gallery 隐藏登录入口 |
 | `MAVIS_AUTH_LOGOUT_URL` | Vercel | 空 | Flask 退出页 HTTPS URL；可选，未配置时隐藏退出入口 |
 

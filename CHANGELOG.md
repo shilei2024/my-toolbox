@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.8 · 主站与 Gallery 响应式体验重构 / 2026-08-21
+- 主站重构为统一的响应式平台首页：新增可访问导航、双应用 Hero、AI Gallery 入口、
+  横向分类导航、1–4 列自适应工具卡与多栏页脚；保留原有工具、登录、额度和汇率逻辑。
+- Gallery 增加完整移动导航，不再在平板宽度直接隐藏主要入口；桌面和移动端均可返回
+  主站工具箱，并保留发现、我的图片、任务、收藏、会员、账单、后台和创作入口。
+- 新增可选 `MAVIS_SITE_URL`。服务端只接受 HTTPS 或本地 loopback HTTP；未配置时从
+  `MAVIS_AUTH_LOGIN_URL` 推导 Origin，非法值隐藏入口且不向客户端传递登录路径。
+- 无数据库/API/依赖变更；回滚只涉及模板、CSS、Header 与链接辅助函数。生产发布仍需
+  Preview 的 320px / 768px / 1280px 人工验收与批准。
+
 ## 0.9.7 · 修复 H3 参考图上传入口不显示：listWorkflows 透传 mode_meta / 2026-08-15
 - 根因：`workflowView()` 重建 defaults 时丢弃了迁移 0019 写入的 `mode_meta`
   与 0021 写入的 `videoResolutions`，前端 `h3Meta` 恒为 undefined，

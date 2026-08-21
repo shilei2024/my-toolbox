@@ -16,23 +16,30 @@
   <link href="{{ 'css/style.css'|static_url }}" rel="stylesheet" />
   {% block head_extra %}{% endblock %}
 </head>
-<body>
-<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm sticky-top">
-  <div class="container">
-    <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
-      <i class="bi bi-stars text-primary"></i>
-      <span>{{ site_name }}</span>
+<body class="site-body">
+<a class="skip-link" href="#main-content">跳到主要内容</a>
+<nav class="navbar navbar-expand-lg site-navbar sticky-top" aria-label="全站导航">
+  <div class="container site-navbar-inner">
+    <a class="navbar-brand site-brand" href="/" aria-label="{{ site_name }} 首页">
+      <img src="{{ 'img/favicon.svg'|static_url }}" width="34" height="34" alt="" />
+      <span class="site-brand-copy">
+        <strong>{{ site_name }}</strong>
+        <small>AI Toolbox</small>
+      </span>
     </a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+    <button class="navbar-toggler site-nav-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+            aria-controls="mainNav" aria-expanded="false" aria-label="打开导航菜单">
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="mainNav">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <a class="nav-link" href="/">首页</a>
-        </li>
+      <ul class="navbar-nav site-primary-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/">首页</a></li>
+        <li class="nav-item"><a class="nav-link" href="/#tool-library">工具库</a></li>
+        {% if config.AI_IMAGE_EXTERNAL_URL %}
+          <li class="nav-item"><a class="nav-link" href="/gallery">Gallery</a></li>
+        {% endif %}
       </ul>
-      <ul class="navbar-nav">
+      <ul class="navbar-nav site-account-nav">
         {% if current_user.is_authenticated %}
           {% if is_admin %}
             <li class="nav-item">
@@ -62,7 +69,7 @@
             <a class="nav-link" href="{{ url_for('auth.login') }}">登录</a>
           </li>
           <li class="nav-item">
-            <a class="btn btn-primary btn-sm ms-2" href="{{ url_for('auth.register') }}">注册</a>
+            <a class="btn btn-primary site-nav-cta" href="{{ url_for('auth.register') }}">免费注册</a>
           </li>
         {% endif %}
       </ul>
@@ -70,7 +77,7 @@
   </div>
 </nav>
 
-<main class="container py-4">
+<main id="main-content" class="container site-main py-4">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <div class="mb-3">
@@ -86,12 +93,21 @@
   {% block content %}{% endblock %}
 </main>
 
-<footer class="border-top mt-5 py-4 bg-white">
-  <div class="container text-center text-muted small">
-    <div>© {{ now().year }} {{ site_name }} · Built with Flask + Bootstrap · v{{ config.APP_VERSION }}</div>
-    <div class="mt-1">
-      <a class="text-muted me-2" href="{{ url_for('privacy') }}">隐私</a>
-      <a class="text-muted" href="{{ url_for('terms') }}">条款</a>
+<footer class="site-footer">
+  <div class="container site-footer-inner">
+    <div>
+      <a class="site-footer-brand" href="/">{{ site_name }}</a>
+      <p>让实用工具与 AI 创作，共用一个简单可靠的账户。</p>
+    </div>
+    <div class="site-footer-links" aria-label="页脚导航">
+      <a href="/">工具首页</a>
+      {% if config.AI_IMAGE_EXTERNAL_URL %}<a href="/gallery">Gallery</a>{% endif %}
+      <a href="{{ url_for('privacy') }}">隐私</a>
+      <a href="{{ url_for('terms') }}">条款</a>
+    </div>
+    <div class="site-footer-meta">
+      <span>© {{ now().year }} {{ site_name }}</span>
+      <span>v{{ config.APP_VERSION }}</span>
     </div>
   </div>
 </footer>

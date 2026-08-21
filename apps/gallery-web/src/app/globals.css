@@ -119,12 +119,30 @@ select:focus-visible {
 
 .brand-lockup {
   gap: 11px;
-  font-weight: 760;
   letter-spacing: -0.02em;
 }
 
 .brand-lockup img {
   box-shadow: 0 5px 12px rgb(13 110 253 / 20%);
+}
+
+.brand-lockup > span {
+  display: grid;
+  line-height: 1;
+}
+
+.brand-lockup strong {
+  font-size: 15px;
+  font-weight: 780;
+}
+
+.brand-lockup small {
+  margin-top: 5px;
+  color: var(--ink-muted);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: .16em;
+  text-transform: uppercase;
 }
 
 .nav-links {
@@ -144,9 +162,82 @@ select:focus-visible {
   background: var(--surface);
 }
 
+.nav-link.active {
+  color: var(--brand-blue-dark);
+  background: var(--brand-blue-soft);
+}
+
+.nav-link-main {
+  position: relative;
+  margin-right: 7px;
+  padding-right: 18px;
+}
+
+.nav-link-main::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: -4px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--line-strong);
+}
+
 .header-actions {
   gap: 9px;
 }
+
+.mobile-menu-toggle,
+.mobile-nav-panel {
+  display: none;
+}
+
+.mobile-menu-toggle {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  place-content: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.mobile-menu-toggle span {
+  width: 18px;
+  height: 2px;
+  display: block;
+  border-radius: 999px;
+  background: currentColor;
+  transition: transform 180ms ease;
+}
+
+.mobile-menu-toggle.open span:first-child { transform: translateY(4px) rotate(45deg); }
+.mobile-menu-toggle.open span:last-child { transform: translateY(-4px) rotate(-45deg); }
+
+.mobile-nav-panel {
+  width: min(100% - 28px, 640px);
+  max-height: calc(100vh - 92px);
+  margin: 0 auto 14px;
+  padding: 14px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-overlay);
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 24px 58px rgb(31 54 80 / 18%);
+}
+
+.mobile-nav-panel.open { display: block; }
+.mobile-nav-primary { display: grid; }
+.mobile-nav-primary a { min-height: 48px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); color: var(--ink-muted); font-size: 14px; font-weight: 650; }
+.mobile-nav-primary a.active { color: var(--brand-blue-dark); }
+.mobile-nav-primary a:last-child { border-bottom: 0; }
+.mobile-nav-primary i { color: #8c9bad; font-size: 13px; font-style: normal; }
+.mobile-nav-primary .mobile-nav-main { margin-bottom: 6px; border: 0; border-radius: 10px; color: var(--brand-blue-dark); background: var(--brand-blue-soft); }
+.mobile-nav-actions { margin-top: 12px; padding-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--line); }
+.mobile-nav-actions .button { width: 100%; }
 
 .button,
 .icon-button {
@@ -2105,8 +2196,10 @@ select:focus-visible {
   to { background-position-x: -220%; }
 }
 
-@media (max-width: 1050px) {
-  .nav-links { display: none; }
+@media (max-width: 1120px) {
+  .nav-links,
+  .header-actions { display: none; }
+  .mobile-menu-toggle { display: grid; }
   .gallery-grid.grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .gallery-grid.compact { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .detail-shell { grid-template-columns: minmax(0, 1fr) 350px; }
@@ -2118,7 +2211,6 @@ select:focus-visible {
   .header-inner,
   .page-shell { width: min(100% - 28px, 1440px); }
   .header-inner { min-height: 64px; }
-  .header-actions .button:not(.primary) { display: none; }
   .page-shell { padding-top: 32px; }
   .gallery-hero { grid-template-columns: 1fr; gap: 22px; }
   .phase-note { width: 100%; }
@@ -2149,8 +2241,8 @@ select:focus-visible {
 }
 
 @media (max-width: 480px) {
-  .brand-lockup span { display: none; }
-  .header-actions .primary { padding-inline: 12px; }
+  .brand-lockup small { display: none; }
+  .mobile-nav-actions { grid-template-columns: 1fr; }
   .hero-title { font-size: 42px; }
   .gallery-panel { padding: 9px; }
   .gallery-grid.masonry { columns: 2 130px; gap: 8px; }
