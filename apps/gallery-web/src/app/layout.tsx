@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
 import { resolvePublicOrigin } from "@/lib/seo";
+import { mainSiteUrl } from "@/lib/site-links";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -40,7 +41,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <SiteHeader />
+        <SiteHeader mainSiteUrl={mainSiteUrl()} />
         {children}
       </body>
     </html>
