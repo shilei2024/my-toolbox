@@ -911,6 +911,96 @@ def _write_cell(source, target, sheet_index: int, row: int, col: int, value: Any
     target_row._Row__cells[col].xf_idx = old_xf
 
 
+def _write_xf_cell(
+    target, sheet_index: int, row: int, col: int, value: Any, xf_idx: int
+) -> None:
+    """Write a cell using a cached XF index from the copied workbook."""
+    sheet = target.get_sheet(sheet_index)
+    target_row = sheet.row(row)
+    sheet.write(row, col, value)
+    target_row._Row__cells[col].xf_idx = xf_idx
+
+
+def _copy_row_height(source, target, sheet_index: int, row: int, style_row: int) -> None:
+    """Copy the template row height when dynamically extending a detail table."""
+    source_info = source.sheet_by_index(sheet_index).rowinfo_map.get(style_row)
+    if source_info is None:
+        return
+    target_row = target.get_sheet(sheet_index).row(row)
+    target_row.height = source_info.height
+    target_row.height_mismatch = 1
+
+
+def _prepare_detail_table(
+    source,
+    target,
+    *,
+    sheet_index: int,
+    data_start: int,
+    template_total_row: int,
+    column_count: int,
+    item_count: int,
+) -> int:
+    """Clear/extend data rows and return the dynamically positioned total row."""
+    capacity = max(template_total_row - data_start, item_count)
+    total_row = data_start + capacity
+    sheet = target.get_sheet(sheet_index)
+    template_xfs = {
+        row: [
+            sheet.row(row)._Row__cells.get(col).xf_idx
+            if sheet.row(row)._Row__cells.get(col) is not None
+            else 0
+            for col in range(column_count)
+        ]
+        for row in range(data_start, template_total_row + 1)
+    }
+    for row in range(data_start, total_row):
+        style_row = row if row < template_total_row else data_start
+        _copy_row_height(source, target, sheet_index, row, style_row)
+        for col in range(column_count):
+            _write_xf_cell(
+                target, sheet_index, row, col, "", template_xfs[style_row][col]
+            )
+    _copy_row_height(
+        source, target, sheet_index, total_row, template_total_row
+    )
+    for col in range(column_count):
+        _write_xf_cell(
+            target,
+            sheet_index,
+            total_row,
+            col,
+            "",
+            template_xfs[template_total_row][col],
+        )
+    return total_row
+
+
+def _finalize_detail_sheet(
+    target, *, sheet_index: int, last_row: int, column_count: int
+) -> None:
+    """Trim legacy blank cells and force each detail sheet onto one print page."""
+    sheet = target.get_sheet(sheet_index)
+    rows = sheet._Worksheet__rows
+    for row_index in list(rows):
+        if row_index > last_row:
+            del rows[row_index]
+            continue
+        cells = rows[row_index]._Row__cells
+        for col_index in list(cells):
+            if col_index >= column_count:
+                del cells[col_index]
+    columns = sheet._Worksheet__cols
+    for col_index in list(columns):
+        if col_index >= column_count:
+            del columns[col_index]
+    sheet.fit_num_pages = 1
+    sheet.fit_width_to_pages = 1
+    sheet.fit_height_to_pages = 1
+    sheet.horz_page_breaks = []
+    sheet.vert_page_breaks = []
+
+
 def _excel_date(value: str) -> date | str:
     return _date(value) or ""
 
@@ -982,19 +1072,19 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
     vehicles = _normalize_vehicle_rows(
         _sort_rows_by_date(aux["vehicle"]), legacy_km_from_end=True
     )
-    if len(entertainment) > 9:
-        raise ValueError("应酬费母版最多容纳 9 条明细")
-    if len(vehicles) > 11:
-        raise ValueError("派车单母版最多容纳 11 条明细")
-    if len(travels) > 17:
-        raise ValueError("出差明细母版需保留最后一行为合计，最多容纳 17 条明细")
     source, target = _template_copy(DETAIL_TEMPLATE)
     header = data["header"]
 
     _write_cell(source, target, 0, 1, 0, f"员工姓名：{header['employee_name']}")
-    for row in range(3, 12):
-        for col in range(8):
-            _write_cell(source, target, 0, row, col, "")
+    entertainment_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=0,
+        data_start=3,
+        template_total_row=12,
+        column_count=8,
+        item_count=len(entertainment),
+    )
     for offset, item in enumerate(entertainment):
         amount = float(item.get("amount") or 0)
         values = [
@@ -1009,15 +1099,28 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 0, 3 + offset, col, value)
-    _write_cell(source, target, 0, 12, 0, "合计")
-    _write_cell(source, target, 0, 12, 5, Formula("SUM(F4:F12)"))
+    _write_cell(source, target, 0, entertainment_total_row, 0, "合计")
+    _write_cell(
+        source,
+        target,
+        0,
+        entertainment_total_row,
+        5,
+        Formula(f"SUM(F4:F{entertainment_total_row})"),
+    )
 
     _write_cell(source, target, 1, 1, 0, f"员工姓名：{header['employee_name']}")
     _write_cell(source, target, 1, 1, 9, f" {header['period']}派车单")
     _write_cell(source, target, 1, 2, 9, "产品线")
-    for row in range(4, 15):
-        for col in range(10):
-            _write_cell(source, target, 1, row, col, "")
+    vehicle_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=1,
+        data_start=4,
+        template_total_row=15,
+        column_count=10,
+        item_count=len(vehicles),
+    )
     for offset, item in enumerate(vehicles):
         date_value = _date(item.get("date"))
         compact_date = int(date_value.strftime("%Y%m%d")) if date_value else ""
@@ -1037,13 +1140,27 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 1, 4 + offset, col, value)
-    for col, formula in zip((6, 7, 8), ("SUM(G5:G15)", "SUM(H5:H15)", "SUM(I5:I15)")):
-        _write_cell(source, target, 1, 15, col, Formula(formula))
+    _write_cell(source, target, 1, vehicle_total_row, 0, "合计")
+    for col, column_letter in zip((6, 7, 8), ("G", "H", "I")):
+        _write_cell(
+            source,
+            target,
+            1,
+            vehicle_total_row,
+            col,
+            Formula(f"SUM({column_letter}5:{column_letter}{vehicle_total_row})"),
+        )
 
     _write_cell(source, target, 2, 1, 0, f"员工姓名：{header['employee_name']}")
-    for row in range(3, 21):
-        for col in range(6):
-            _write_cell(source, target, 2, row, col, "")
+    travel_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=2,
+        data_start=3,
+        template_total_row=20,
+        column_count=6,
+        item_count=len(travels),
+    )
     for offset, item in enumerate(travels):
         values = [
             _excel_date(item.get("date", "")),
@@ -1055,8 +1172,26 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 2, 3 + offset, col, value)
-    _write_cell(source, target, 2, 20, 0, "合计")
-    _write_cell(source, target, 2, 20, 4, Formula("SUM(E4:E20)"))
+    _write_cell(source, target, 2, travel_total_row, 0, "合计")
+    _write_cell(
+        source,
+        target,
+        2,
+        travel_total_row,
+        4,
+        Formula(f"SUM(E4:E{travel_total_row})"),
+    )
+    for sheet_index, total_row, column_count in (
+        (0, entertainment_total_row, 8),
+        (1, vehicle_total_row, 10),
+        (2, travel_total_row, 6),
+    ):
+        _finalize_detail_sheet(
+            target,
+            sheet_index=sheet_index,
+            last_row=total_row,
+            column_count=column_count,
+        )
     output = io.BytesIO()
     target.save(output)
     output.seek(0)

@@ -159,20 +159,23 @@ class ReimbursementManagerTests(unittest.TestCase):
             ["earlier-first", "earlier-second", "later", "missing", "invalid"],
         )
 
-    def assert_template_layout_preserved(self, template, output, style_cells):
+    def assert_template_layout_preserved(
+        self, template, output, style_cells, *, preserve_dimensions=True
+    ):
         source = xlrd.open_workbook(str(template), formatting_info=True)
         generated = xlrd.open_workbook(file_contents=output.getvalue(), formatting_info=True)
         self.assertEqual(source.sheet_names(), generated.sheet_names())
         for index in range(source.nsheets):
             left, right = source.sheet_by_index(index), generated.sheet_by_index(index)
-            self.assertEqual((left.nrows, left.ncols), (right.nrows, right.ncols))
+            if preserve_dimensions:
+                self.assertEqual((left.nrows, left.ncols), (right.nrows, right.ncols))
             self.assertEqual(set(left.merged_cells), set(right.merged_cells))
             self.assertEqual(left.vertical_page_breaks, right.vertical_page_breaks)
             self.assertEqual(left.horizontal_page_breaks, right.horizontal_page_breaks)
-            for row in range(left.nrows):
+            for row in range(min(left.nrows, right.nrows)):
                 left_info, right_info = left.rowinfo_map.get(row), right.rowinfo_map.get(row)
                 self.assertEqual(left_info.height if left_info else None, right_info.height if right_info else None)
-            for col in range(left.ncols):
+            for col in range(min(left.ncols, right.ncols)):
                 left_info, right_info = left.colinfo_map.get(col), right.colinfo_map.get(col)
                 self.assertEqual(left_info.width if left_info else None, right_info.width if right_info else None)
         for sheet_index, row, col in style_cells:
@@ -919,6 +922,11 @@ class ReimbursementManagerTests(unittest.TestCase):
             DETAIL_TEMPLATE,
             output,
             [(0, 0, 0), (0, 1, 0), (0, 2, 0), (0, 3, 0), (0, 3, 5), (1, 0, 0), (2, 0, 0)],
+            preserve_dimensions=False,
+        )
+        self.assertEqual(
+            [(sheet.nrows, sheet.ncols) for sheet in generated.sheets()],
+            [(13, 8), (16, 10), (21, 6)],
         )
         detail = generated.sheet_by_name("应酬费明细表")
         self.assertEqual(detail.cell_value(1, 0), "员工姓名：测试员工")
@@ -943,6 +951,115 @@ class ReimbursementManagerTests(unittest.TestCase):
                 (1, 15, 7),
                 (1, 15, 8),
                 (2, 20, 4),
+            }.issubset(formulas)
+        )
+
+    def test_detail_export_expands_past_template_row_limits(self):
+        entertainment = [
+            {
+                "date": f"2026-07-{index + 1:02d}",
+                "category": "餐费",
+                "place": f"应酬地点{index}",
+                "amount": index + 1,
+            }
+            for index in range(12)
+        ]
+        vehicles = [
+            {
+                "date": "2026-07-01",
+                "from_location": "公司",
+                "to_location": f"目的地{index}",
+                "km_start": 100 if index == 0 else "",
+                "km_total": index + 1,
+                "toll_fee": 1,
+                "parking_fee": 2,
+                "product_line": f"产品线{index}",
+            }
+            for index in range(14)
+        ]
+        travels = [
+            {
+                "date": f"2026-07-{index + 1:02d}",
+                "location": f"出差地{index}",
+                "amount": index + 1,
+            }
+            for index in range(20)
+        ]
+
+        output = _build_detail_xls(
+            self.cover_data,
+            {
+                "entertainment": entertainment,
+                "vehicle": vehicles,
+                "travel": travels,
+            },
+        )
+        generated = xlrd.open_workbook(
+            file_contents=output.getvalue(), formatting_info=True
+        )
+        baseline = xlrd.open_workbook(
+            file_contents=_build_detail_xls(
+                self.cover_data,
+                {"entertainment": [], "vehicle": [], "travel": []},
+            ).getvalue(),
+            formatting_info=True,
+        )
+        self.assertEqual(
+            [(sheet.nrows, sheet.ncols) for sheet in generated.sheets()],
+            [(16, 8), (19, 10), (24, 6)],
+        )
+
+        detail = generated.sheet_by_name("应酬费明细表")
+        baseline_detail = baseline.sheet_by_name("应酬费明细表")
+        self.assertEqual(detail.cell_value(14, 2), "应酬地点11")
+        self.assertEqual(detail.cell_value(15, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, detail, 14, 2),
+            _style_signature(baseline, baseline_detail, 3, 2),
+        )
+        self.assertEqual(
+            _style_signature(generated, detail, 15, 5),
+            _style_signature(baseline, baseline_detail, 12, 5),
+        )
+        self.assertEqual(detail.rowinfo_map[14].height, baseline_detail.rowinfo_map[3].height)
+
+        vehicle = generated.sheet_by_name("派车单")
+        baseline_vehicle = baseline.sheet_by_name("派车单")
+        self.assertEqual(vehicle.cell_value(17, 9), "产品线13")
+        self.assertEqual(vehicle.cell_value(18, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, vehicle, 17, 9),
+            _style_signature(baseline, baseline_vehicle, 4, 9),
+        )
+        self.assertEqual(
+            _style_signature(generated, vehicle, 18, 6),
+            _style_signature(baseline, baseline_vehicle, 15, 6),
+        )
+        self.assertEqual(vehicle.rowinfo_map[17].height, baseline_vehicle.rowinfo_map[4].height)
+
+        travel = generated.sheet_by_name("出差明细表")
+        baseline_travel = baseline.sheet_by_name("出差明细表")
+        self.assertEqual(travel.cell_value(22, 1), "出差地19")
+        self.assertEqual(travel.cell_value(23, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, travel, 22, 1),
+            _style_signature(baseline, baseline_travel, 3, 1),
+        )
+        self.assertEqual(
+            _style_signature(generated, travel, 23, 4),
+            _style_signature(baseline, baseline_travel, 20, 4),
+        )
+        self.assertEqual(travel.rowinfo_map[22].height, baseline_travel.rowinfo_map[3].height)
+
+        formulas = _formula_cells(output.getvalue())
+        self.assertTrue(
+            {
+                (0, 15, 5),
+                (1, 17, 5),
+                (1, 18, 6),
+                (1, 18, 7),
+                (1, 18, 8),
+                (2, 23, 4),
             }.issubset(formulas)
         )
 
