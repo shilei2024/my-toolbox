@@ -77,6 +77,16 @@ def _money(value: Any) -> Decimal:
         return Decimal("0.00")
 
 
+def _sort_rows_by_date(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stable-sort detail rows by their first-column date, leaving missing dates last."""
+
+    def key(row: dict[str, Any]) -> tuple[bool, int]:
+        parsed = _date(row.get("date"))
+        return parsed is None, parsed.toordinal() if parsed else 0
+
+    return sorted(rows, key=key)
+
+
 def _normalize_vehicle_rows(
     rows: list[dict[str, Any]], *, legacy_km_from_end: bool = False
 ) -> list[dict[str, Any]]:
@@ -528,8 +538,10 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
             continue
         value["id"] = row.id
         result.setdefault(row.kind, []).append(value)
+    result["entertainment"] = _sort_rows_by_date(result["entertainment"])
+    result["travel"] = _sort_rows_by_date(result["travel"])
     result["vehicle"] = _normalize_vehicle_rows(
-        vehicle_rows, legacy_km_from_end=True
+        _sort_rows_by_date(vehicle_rows), legacy_km_from_end=True
     )
     return result
 
@@ -965,8 +977,11 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
 def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]) -> io.BytesIO:
     from xlwt import Formula
 
-    entertainment, travels = aux["entertainment"], aux["travel"]
-    vehicles = _normalize_vehicle_rows(aux["vehicle"], legacy_km_from_end=True)
+    entertainment = _sort_rows_by_date(aux["entertainment"])
+    travels = _sort_rows_by_date(aux["travel"])
+    vehicles = _normalize_vehicle_rows(
+        _sort_rows_by_date(aux["vehicle"]), legacy_km_from_end=True
+    )
     if len(entertainment) > 9:
         raise ValueError("应酬费母版最多容纳 9 条明细")
     if len(vehicles) > 11:

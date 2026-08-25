@@ -34,6 +34,7 @@ from tools.reimbursement.manager import (
     _normalize_vehicle_rows,
     _period_parts,
     _seed_product_lines,
+    _sort_rows_by_date,
     _summary,
     _sync_invoice_aux,
     register_routes,
@@ -141,6 +142,22 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(rows[1]["km_total"], 20.0)
         self.assertEqual(rows[1]["km_start"], 110.0)
         self.assertEqual(rows[1]["km_end"], 130.0)
+
+    def test_detail_rows_sort_by_date_stably_with_missing_dates_last(self):
+        rows = [
+            {"date": "", "label": "missing"},
+            {"date": "2026-07-03", "label": "later"},
+            {"date": "2026-07-01", "label": "earlier-first"},
+            {"date": "2026-07-01", "label": "earlier-second"},
+            {"date": "not-a-date", "label": "invalid"},
+        ]
+
+        sorted_rows = _sort_rows_by_date(rows)
+
+        self.assertEqual(
+            [row["label"] for row in sorted_rows],
+            ["earlier-first", "earlier-second", "later", "missing", "invalid"],
+        )
 
     def assert_template_layout_preserved(self, template, output, style_cells):
         source = xlrd.open_workbook(str(template), formatting_info=True)
@@ -838,6 +855,15 @@ class ReimbursementManagerTests(unittest.TestCase):
             {
                 "entertainment": [
                     {
+                        "date": "2026-06-30",
+                        "category": "礼品",
+                        "place": "更早地点",
+                        "customer": "客户B",
+                        "participants": "李四",
+                        "amount": 50,
+                        "purpose": "MSTAR",
+                    },
+                    {
                         "date": "2026-07-01",
                         "category": "餐费",
                         "place": "测试餐厅",
@@ -857,6 +883,16 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "toll_fee": 10,
                         "parking_fee": 5,
                         "product_line": "DIODES",
+                    },
+                    {
+                        "date": "2026-07-01",
+                        "from_location": "家",
+                        "to_location": "公司",
+                        "km_start": 90,
+                        "km_total": 10,
+                        "toll_fee": 0,
+                        "parking_fee": 0,
+                        "product_line": "MSTAR",
                     }
                 ],
                 "travel": [
@@ -867,6 +903,14 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "expense_type": "住宿费",
                         "amount": 300,
                         "purpose": "DIODES",
+                    },
+                    {
+                        "date": "2026-07-01",
+                        "location": "杭州",
+                        "customer": "客户B",
+                        "expense_type": "交通费",
+                        "amount": 80,
+                        "purpose": "MSTAR",
                     }
                 ],
             },
@@ -878,13 +922,18 @@ class ReimbursementManagerTests(unittest.TestCase):
         )
         detail = generated.sheet_by_name("应酬费明细表")
         self.assertEqual(detail.cell_value(1, 0), "员工姓名：测试员工")
-        self.assertEqual(detail.cell_value(3, 2), "测试餐厅")
-        self.assertEqual(detail.cell_value(3, 5), 100.5)
+        self.assertEqual(detail.cell_value(3, 2), "更早地点")
+        self.assertEqual(detail.cell_value(3, 5), 50)
+        self.assertEqual(detail.cell_value(4, 2), "测试餐厅")
         self.assertEqual(detail.cell_value(12, 0), "合计")
         vehicle = generated.sheet_by_name("派车单")
         self.assertEqual(vehicle.cell_value(2, 9), "产品线")
-        self.assertEqual(vehicle.cell_value(4, 9), "DIODES")
-        self.assertEqual(generated.sheet_by_name("出差明细表").cell_value(20, 0), "合计")
+        self.assertEqual(vehicle.cell_value(4, 9), "MSTAR")
+        self.assertEqual(vehicle.cell_value(5, 9), "DIODES")
+        travel = generated.sheet_by_name("出差明细表")
+        self.assertEqual(travel.cell_value(3, 1), "杭州")
+        self.assertEqual(travel.cell_value(4, 1), "上海")
+        self.assertEqual(travel.cell_value(20, 0), "合计")
         formulas = _formula_cells(output.getvalue())
         self.assertTrue(
             {
@@ -918,6 +967,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("pointer-events:none", template)
         self.assertIn(".rb-nav-frame { position:relative; z-index:1;", template)
         self.assertIn('id="rbNavNext"', template)
+        self.assertIn("this.state.aux=d.aux;this.renderAux()", template)
         self.assertIn("scrollNav(direction)", template)
         self.assertIn("revealNavButton(button)", template)
         self.assertIn("normalizeVehicleRows()", template)
