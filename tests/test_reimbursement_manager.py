@@ -378,7 +378,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             diodes = ReimbursementProductLine.query.filter_by(
                 owner_type="anon", owner_id="product-test", name="DIODES"
             ).one()
-            self.assertEqual(diodes.code, "01")
+            self.assertEqual(diodes.code, "10")
             invoice = ReimbursementInvoice(
                 owner_type="anon",
                 owner_id="product-test",
@@ -395,11 +395,47 @@ class ReimbursementManagerTests(unittest.TestCase):
                 },
             )
             self.assertIsNone(error)
-            self.assertEqual((invoice.product_line, invoice.product_line_code), ("DIODES", "01"))
+            self.assertEqual((invoice.product_line, invoice.product_line_code), ("DIODES", "10"))
             self.assertEqual(
                 _assign_invoice_product_line(invoice, {"product_line_id": 999999}),
                 "请选择有效的产品线",
             )
+
+    def test_product_lines_replace_legacy_directory_once(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            db.session.add(
+                ReimbursementProductLine(
+                    owner_type="anon",
+                    owner_id="legacy-product-test",
+                    name="DIODES",
+                    code="01",
+                    office="深圳办",
+                    sort_order=10,
+                )
+            )
+            db.session.commit()
+
+            rows = _seed_product_lines("anon", "legacy-product-test")
+            self.assertEqual(
+                [(item.code, item.name) for item in rows],
+                [(item["code"], item["name"]) for item in PRODUCT_LINES],
+            )
+            self.assertEqual(rows[0].code, "01")
+            self.assertEqual(rows[0].name, "3PEAK")
+            self.assertEqual(rows[-1].code, "86")
+            self.assertEqual(rows[-1].name, "致象尔微")
+
+            rows[0].name = "自定义品牌"
+            db.session.commit()
+            rows_again = _seed_product_lines("anon", "legacy-product-test")
+            self.assertEqual(rows_again[0].name, "自定义品牌")
 
     def test_product_line_crud_updates_and_migrates_linked_invoices(self):
         app = Flask(__name__)
@@ -445,7 +481,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             },
         )
         self.assertEqual(invoice_response.status_code, 201)
-        self.assertEqual(invoice_response.get_json()["invoice"]["product_line_code"], "01")
+        self.assertEqual(invoice_response.get_json()["invoice"]["product_line_code"], "10")
 
         updated = client.put(
             f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}",
@@ -463,12 +499,12 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 409)
         self.assertTrue(blocked.get_json()["needs_migration"])
         migrated = client.delete(
-            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}?migrate_to={by_name['MSTAR']['id']}",
+            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}?migrate_to={by_name['3PEAK']['id']}",
             headers=headers,
         )
         self.assertEqual(migrated.status_code, 200)
         invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
-        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("MSTAR", "02"))
+        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("3PEAK", "01"))
 
     def test_office_crud_is_independent_and_prints_retained_invoice(self):
         app = Flask(__name__)
@@ -753,13 +789,13 @@ class ReimbursementManagerTests(unittest.TestCase):
             product_line = ReimbursementProductLine(
                 owner_type="anon",
                 owner_id="vehicle-cover",
-                name="DIODES",
+                name="3PEAK",
                 code="01",
             )
             second_product_line = ReimbursementProductLine(
                 owner_type="anon",
                 owner_id="vehicle-cover",
-                name="MSTAR",
+                name="Adaps",
                 code="02",
             )
             db.session.add_all(
@@ -773,7 +809,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                     period_id=period.id,
                     category_id=category.id,
                     total_amount=999,
-                    product_line="DIODES",
+                    product_line="3PEAK",
                     product_line_code="01",
                     office="深圳办",
                 )
@@ -791,7 +827,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 135.5,
                             "toll_fee": 10,
                             "parking_fee": 5,
-                            "product_line": "DIODES",
+                            "product_line": "3PEAK",
                         }
                     ),
                 )
@@ -809,7 +845,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 220,
                             "toll_fee": 2,
                             "parking_fee": 3,
-                            "product_line": "DIODES",
+                            "product_line": "3PEAK",
                         }
                     ),
                 )
@@ -827,7 +863,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 310,
                             "toll_fee": 1,
                             "parking_fee": 1,
-                            "product_line": "MSTAR",
+                            "product_line": "Adaps",
                         }
                     ),
                 )
@@ -836,10 +872,10 @@ class ReimbursementManagerTests(unittest.TestCase):
 
             payload = _cover_payload(period)
             group = next(
-                item for item in payload["groups"] if item["product_line"] == "DIODES"
+                item for item in payload["groups"] if item["product_line"] == "3PEAK"
             )
             second_group = next(
-                item for item in payload["groups"] if item["product_line"] == "MSTAR"
+                item for item in payload["groups"] if item["product_line"] == "Adaps"
             )
             self.assertEqual(group["totals"]["vehicle"], 75.5)
             self.assertEqual(second_group["totals"]["vehicle"], 12)

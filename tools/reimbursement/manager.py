@@ -299,9 +299,18 @@ def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementPro
         .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
         .all()
     )
+    from . import PRODUCT_LINES, _LEGACY_PRODUCT_LINES
+
     if rows:
-        return rows
-    from . import PRODUCT_LINES
+        legacy_pairs = {(item["name"], item["code"]) for item in _LEGACY_PRODUCT_LINES}
+        if not any((item.name, item.code) in legacy_pairs for item in rows):
+            return rows
+
+        # 旧目录只在首次访问时替换一次。发票保存的是品牌名称和编号文本，
+        # 因此替换目录行不会改写或破坏历史报销数据。
+        for item in rows:
+            db.session.delete(item)
+        db.session.flush()
 
     for index, item in enumerate(PRODUCT_LINES):
         db.session.add(
