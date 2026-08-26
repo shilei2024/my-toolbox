@@ -108,6 +108,10 @@ class Config:
     ANON_FREE_LIMIT: int = int(os.environ.get("ANON_FREE_LIMIT", "3"))
     MAX_UPLOAD_MB: int = int(os.environ.get("MAX_UPLOAD_MB", "25"))
     MAX_CONTENT_LENGTH: int = int(os.environ.get("MAX_UPLOAD_MB", "25")) * 1024 * 1024
+    # Invoice ZIPs keep multipart headroom below the global Flask request cap.
+    INVOICE_ZIP_MAX_MB: int = int(os.environ.get("INVOICE_ZIP_MAX_MB", "20"))
+    INVOICE_ZIP_BATCH_MB: int = int(os.environ.get("INVOICE_ZIP_BATCH_MB", "20"))
+    INVOICE_ZIP_RESPONSE_MB: int = int(os.environ.get("INVOICE_ZIP_RESPONSE_MB", "48"))
     MAX_PDF_FILES: int = int(os.environ.get("MAX_PDF_FILES", "10"))
     MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", "200"))
     TEMP_FILE_TTL_MINUTES: int = int(os.environ.get("TEMP_FILE_TTL_MINUTES", "30"))

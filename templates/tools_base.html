@@ -53,10 +53,14 @@
         <ul class="small text-muted ps-3 mb-0">
           {% if tool.id == 'reimbursement' %}
           <li>发票原件会随报销记录保留，删除发票记录时一并删除附件。</li>
+          {% elif tool.id == 'invoice_printer' %}
+          <li>ZIP 仅在请求内存中解压，不写入服务器磁盘；PDF 和图片只在浏览器本地处理。</li>
+          <li>单个 ZIP 最大 {{ invoice_limits.single_mb }} MB，本批 ZIP 合计最大 {{ invoice_limits.batch_mb }} MB。</li>
+          <li>直接添加的 PDF/JPG/PNG 单文件最大 30 MB。</li>
           {% else %}
           <li>文件处理完会立即从服务器删除。</li>
-          {% endif %}
           <li>单文件最大 {{ config.MAX_UPLOAD_MB }} MB。</li>
+          {% endif %}
           <li>遇到问题请刷新页面或换个浏览器试试。</li>
         </ul>
       </div>

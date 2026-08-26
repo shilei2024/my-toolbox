@@ -14,7 +14,7 @@ from flask_wtf.csrf import generate_csrf
 from extensions import csrf, db, limiter, login_manager
 from models import ReimbursementAttachment
 from tools.reimbursement import tool_bp as reimbursement_bp
-from tools.zip_extractor import _extract_deep, analyze_uploaded_archives
+from tools.zip_extractor import MB, _extract_deep, analyze_uploaded_archives, invoice_zip_limits
 from utils.helpers import safe_download_path, safe_filename, stage_download
 
 
@@ -78,6 +78,20 @@ def make_download_app(upload_dir: str) -> Flask:
 
 
 class PhaseASecurityTests(unittest.TestCase):
+    def test_invoice_zip_limits_follow_flask_request_cap(self):
+        app = Flask(__name__)
+        app.config.update(
+            MAX_CONTENT_LENGTH=10 * MB,
+            INVOICE_ZIP_MAX_MB=20,
+            INVOICE_ZIP_BATCH_MB=20,
+            INVOICE_ZIP_RESPONSE_MB=48,
+        )
+        with app.app_context():
+            limits = invoice_zip_limits()
+        self.assertEqual(limits["single_mb"], 9)
+        self.assertEqual(limits["batch_mb"], 9)
+        self.assertEqual(limits["response_bytes"], 48 * MB)
+
     def test_unified_invoice_endpoint_reuses_secure_extractor_and_usage_id(self):
         app = Flask(__name__)
         app.config.update(TESTING=True, SECRET_KEY="invoice-unified-test")
@@ -103,6 +117,61 @@ class PhaseASecurityTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["files"][0]["filename"], "invoice.pdf")
         commit.assert_called_once_with("invoice_printer", success=True)
+
+    def test_invoice_zip_larger_than_legacy_four_mb_limit_is_accepted(self):
+        app = Flask(__name__)
+        app.config.update(
+            TESTING=True,
+            SECRET_KEY="invoice-large-test",
+            MAX_CONTENT_LENGTH=25 * MB,
+            INVOICE_ZIP_MAX_MB=20,
+            INVOICE_ZIP_BATCH_MB=20,
+            INVOICE_ZIP_RESPONSE_MB=48,
+        )
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("invoice.pdf", b"%PDF-1.4\n" + b"A" * (5 * MB) + b"\n%%EOF")
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(archive.getvalue()), "five-mb.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["total"], 1)
+        commit.assert_called_once_with("invoice_printer", success=True)
+
+    def test_oversize_invoice_zip_is_rejected_without_charging_usage(self):
+        app = Flask(__name__)
+        app.config.update(
+            TESTING=True,
+            SECRET_KEY="invoice-oversize-test",
+            MAX_CONTENT_LENGTH=30 * MB,
+            INVOICE_ZIP_MAX_MB=20,
+            INVOICE_ZIP_BATCH_MB=25,
+        )
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(b"x" * (21 * MB)), "too-large.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(response.get_json()["success"])
+        commit.assert_not_called()
 
     def test_reimbursement_rejects_write_without_csrf_token(self):
         with tempfile.TemporaryDirectory() as upload_dir:
