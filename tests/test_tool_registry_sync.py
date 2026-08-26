@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import unittest
 
+import yaml
+
 os.environ.setdefault("FLASK_ENV", "production")
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
@@ -50,6 +52,49 @@ class ToolRegistrySyncTest(unittest.TestCase):
         tool = db.session.get(Tool, "pdf_merge")
         self.assertIsNotNone(tool)
         self.assertTrue(tool.enabled)
+
+    def test_invoice_tools_are_one_card_with_legacy_route_alias(self) -> None:
+        config_path = app.config["TOOLS_CONFIG_PATH"]
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        entries = {entry["id"]: entry for entry in config["tools"]}
+
+        self.assertNotIn("zip_extractor", entries)
+        self.assertEqual(
+            entries["invoice_printer"]["route_aliases"],
+            ["/tools/zip-extractor"],
+        )
+
+        rules = {rule.rule for rule in app.url_map.iter_rules()}
+        self.assertIn("/tools/invoice-printer/", rules)
+        self.assertIn("/tools/invoice-printer/analyze", rules)
+        self.assertIn("/tools/zip-extractor/", rules)
+        self.assertIn("/tools/zip-extractor/analyze", rules)
+
+        response = app.test_client().get("/tools/zip-extractor/")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("发票提取与批量打印", body)
+        self.assertIn('accept=".zip,.pdf', body)
+        self.assertIn("/tools/invoice-printer/analyze", body)
+
+    def test_removed_zip_extractor_card_is_disabled_during_sync(self) -> None:
+        db.session.add(
+            Tool(
+                id="zip_extractor",
+                name="批量提取PDF发票",
+                description="legacy duplicate card",
+                icon="bi-file-zip",
+                color="#6f42c1",
+                route="/tools/zip-extractor",
+                blueprint_module="tools.zip_extractor",
+                enabled=True,
+            )
+        )
+        db.session.commit()
+
+        sync_tool_registry(app)
+
+        self.assertFalse(db.session.get(Tool, "zip_extractor").enabled)
 
 
 if __name__ == "__main__":
