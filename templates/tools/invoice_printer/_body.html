@@ -1,4 +1,3 @@
-{% raw %}
 <style>
 :root {
   --ip-primary: #198754;
@@ -30,7 +29,11 @@
 .ip-queue-item .ip-q-icon { color: var(--ip-primary); font-size: 1rem; flex-shrink: 0; }
 .ip-queue-item .ip-q-name { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ip-queue-item .ip-q-size { color: #6c757d; font-size: 0.72rem; flex-shrink: 0; }
-.ip-queue-item .ip-q-del { flex-shrink: 0; cursor: pointer; color: #dc3545; font-size: 0.95rem; padding: 0 3px; }
+.ip-queue-item .ip-q-del {
+  flex-shrink: 0; color: #dc3545; font-size: 0.95rem; padding: 0.1rem 0.35rem;
+  border: 0; background: transparent; border-radius: 0.25rem; line-height: 1;
+}
+.ip-queue-item .ip-q-del:hover, .ip-queue-item .ip-q-del:focus-visible { background: #f8d7da; }
 
 .ip-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
 
@@ -112,9 +115,9 @@
 <div class="ip-upload-zone" id="ipUploadZone">
   <i class="bi bi-cloud-upload"></i>
   <p class="mt-2 mb-1 fw-bold">拖拽或点击选择发票文件</p>
-  <p class="text-muted small mb-0">支持 ZIP（含多层嵌套）、PDF、JPG、PNG、TIFF、BMP · 可混合多选和继续追加</p>
+  <p class="text-muted small mb-0">支持 ZIP（单包最大 {{ invoice_limits.single_mb }}MB，含多层嵌套）、PDF、JPG、PNG · 可混合多选和继续追加</p>
   <input type="file" id="ipFileInput" multiple
-         accept=".zip,.pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,image/*" hidden>
+         accept=".zip,.pdf,.jpg,.jpeg,.png,application/pdf,application/zip,image/jpeg,image/png" hidden>
 </div>
 
 <!-- 队列 -->
@@ -122,11 +125,11 @@
 
 <!-- 操作按钮 -->
 <div class="ip-actions hidden" id="ipActions">
-  <button class="btn btn-primary" id="ipStartBtn" onclick="processFiles(this)">
+  <button type="button" class="btn btn-primary" id="ipStartBtn">
     <i class="bi bi-check-circle"></i> 提取并加入工作台
   </button>
-  <button class="btn btn-outline-secondary btn-sm" onclick="clearAll()">
-    <i class="bi bi-trash"></i> 清空
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="ipClearQueueBtn">
+    <i class="bi bi-trash"></i> 清空待处理
   </button>
   <span class="text-muted small" id="ipQueueCount"></span>
 </div>
@@ -151,14 +154,18 @@
 
 <script>
 // ============== 状态 ==============
+const IP_LIMITS = {{ invoice_limits | tojson }};
+const IP_LOCAL_FILE_MAX_MB = 30;
+const IP_MAX_QUEUE_FILES = 200;
 const STATE = {
   queue: [],      // {file, name, size, sizeStr} — 待确认
   files: [],      // {name, size, sizeStr, type, _selected, dataUrl, blobUrl} — 已确认
+  busy: false,
 };
 
 // 支持的图片 MIME → 扩展名映射
-const IMG_MIME = { 'image/jpeg': 1, 'image/png': 1, 'image/tiff': 1, 'image/bmp': 1, 'image/webp': 1, 'image/gif': 1 };
-const IMG_EXT = new Set(['.jpg','.jpeg','.png','.tiff','.tif','.bmp','.webp','.gif']);
+const IMG_MIME = { 'image/jpeg': 1, 'image/png': 1 };
+const IMG_EXT = new Set(['.jpg','.jpeg','.png']);
 
 function isImageType(file) {
   return IMG_MIME[file.type] || IMG_EXT.has('.' + (file.name.split('.').pop() || '').toLowerCase());
@@ -179,6 +186,8 @@ function escapeHTML(value) {
 document.addEventListener('DOMContentLoaded', () => {
   const zone = document.getElementById('ipUploadZone');
   const input = document.getElementById('ipFileInput');
+  const queue = document.getElementById('ipQueue');
+  const result = document.getElementById('ipResult');
   zone.addEventListener('click', () => input.click());
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -187,6 +196,37 @@ document.addEventListener('DOMContentLoaded', () => {
     addToQueue(e.dataTransfer.files);
   });
   input.addEventListener('change', () => { addToQueue(input.files); input.value = ''; });
+  document.getElementById('ipStartBtn').addEventListener('click', event => processFiles(event.currentTarget));
+  document.getElementById('ipClearQueueBtn').addEventListener('click', clearPendingQueue);
+
+  queue.addEventListener('click', event => {
+    const button = event.target.closest('[data-remove-queue-index]');
+    if (!button) return;
+    removeFromQueue(Number(button.dataset.removeQueueIndex));
+  });
+
+  result.addEventListener('click', event => {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    const index = Number(button.dataset.index);
+    const actions = {
+      'clear-all': clearAll,
+      'delete-selected': deleteSelected,
+      'print-all': printAll,
+      'export-zip': exportZip,
+      'print-one': () => printOne(index),
+      'download-one': () => downloadOne(index),
+      'remove-file': () => removeFile(index),
+    };
+    actions[button.dataset.action]?.();
+  });
+
+  result.addEventListener('change', event => {
+    if (event.target.matches('[data-action="toggle-all"]')) toggleAll(event.target);
+    if (event.target.matches('[data-action="toggle-file"]')) {
+      onToggle(Number(event.target.dataset.index), event.target.checked);
+    }
+  });
 });
 
 document.addEventListener('keydown', e => {
@@ -209,42 +249,78 @@ function hideToast() {
 
 // ============== 队列管理 ==============
 function addToQueue(files) {
+  if (STATE.busy) {
+    showToast('正在处理当前清单，请稍候再添加文件', 'warn');
+    return;
+  }
   let added = 0;
+  let unsupported = 0;
+  let oversize = 0;
+  const queuedKeys = new Set(STATE.queue.map(item => fileIdentity(item.file)));
+  const existingKeys = new Set(STATE.files.map(item => item.key));
   for (const f of files) {
     if (!f || !f.name || f.size === 0) continue;
-    if (!isZipType(f) && !isPDFType(f) && !isImageType(f)) continue;
+    if (!isZipType(f) && !isPDFType(f) && !isImageType(f)) { unsupported++; continue; }
+    if (STATE.queue.length >= IP_MAX_QUEUE_FILES) break;
     // ZIP 受服务端安全门限约束；本地 PDF/图片只受浏览器内存门限约束。
-    const maxMB = isZipType(f) ? 4 : 30;
+    const maxMB = isZipType(f) ? IP_LIMITS.single_mb : IP_LOCAL_FILE_MAX_MB;
     if (f.size > maxMB * 1024 * 1024) {
-      showToast(`跳过 ${f.name}：超过 ${maxMB}MB 上限`, 'warn');
+      oversize++;
       continue;
     }
-    // 去重（同名 + 同大小）
-    if (STATE.queue.some(q => q.name === f.name && q.size === f.size)) continue;
+    const identity = fileIdentity(f);
+    if (queuedKeys.has(identity) || existingKeys.has(identity)) continue;
     STATE.queue.push({ file: f, name: f.name, size: f.size, sizeStr: formatSize(f.size) });
+    queuedKeys.add(identity);
     added++;
   }
   if (added > 0) renderQueue();
+  const warnings = [];
+  if (unsupported) warnings.push(`${unsupported} 个不支持的文件（仅支持 ZIP/PDF/JPG/PNG）`);
+  if (oversize) warnings.push(`${oversize} 个文件超过大小上限`);
+  if (STATE.queue.length >= IP_MAX_QUEUE_FILES) warnings.push(`待处理文件最多 ${IP_MAX_QUEUE_FILES} 个`);
+  if (warnings.length) showToast(warnings.join('；'), 'warn');
+}
+
+function fileIdentity(file) {
+  if (file._invoiceKey) return file._invoiceKey;
+  return `local:${file.name}:${file.size}:${file.lastModified || 0}`;
 }
 
 function removeFromQueue(idx) {
+  if (STATE.busy) return;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= STATE.queue.length) return;
   STATE.queue.splice(idx, 1);
   renderQueue();
+  showToast('已从待处理清单移除', 'info');
+}
+
+function clearPendingQueue() {
+  if (STATE.busy) return;
+  if (STATE.queue.length === 0) return;
+  const removed = STATE.queue.length;
+  STATE.queue = [];
+  renderQueue();
+  showToast(`已清空 ${removed} 个待处理文件`, 'info');
 }
 
 function clearAll() {
+  if (STATE.busy || PRINTING) {
+    showToast('正在处理文件，请稍候再清空', 'warn');
+    return;
+  }
   const hasFiles = STATE.files.length > 0;
   const hasQueue = STATE.queue.length > 0;
   if (!hasFiles && !hasQueue) return;
-  if (!confirm(`确定清空${hasFiles ? '所有已确认文件' : ''}${hasFiles && hasQueue ? '和' : ''}${hasQueue ? '待确认列表' : ''}吗？`)) return;
-
   // 先释放所有 Blob
+  const removed = STATE.files.length + STATE.queue.length;
   revokeAllBlobs();
   STATE.files = [];
   STATE.queue = [];
   hideResultPanel();
   renderQueue();
   hideProgress();
+  showToast(`已清空 ${removed} 个文件`, 'info');
 }
 
 function hideResultPanel() {
@@ -285,7 +361,7 @@ function renderQueue() {
       <span class="ip-q-icon"><i class="bi ${icon}"></i></span>
       <span class="ip-q-name" title="${safeName}">${safeName}</span>
       <span class="ip-q-size">${q.sizeStr}</span>
-      <span class="ip-q-del" onclick="removeFromQueue(${i})" title="移除">&times;</span>
+      <button type="button" class="ip-q-del" data-remove-queue-index="${i}" title="移除 ${safeName}" aria-label="移除 ${safeName}">&times;</button>
     </div>`;
   }).join('');
 }
@@ -298,9 +374,12 @@ function formatSize(bytes) {
 
 // ============== 确认文件 → 生成缩略图 ==============
 async function processFiles(btn) {
-  if (STATE.queue.length === 0) return;
+  if (STATE.busy || STATE.queue.length === 0) return;
 
+  STATE.busy = true;
   btn.disabled = true;
+  document.getElementById('ipClearQueueBtn').disabled = true;
+  document.getElementById('ipQueue').setAttribute('aria-busy', 'true');
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>提取并处理中…';
 
   const pending = [...STATE.queue];
@@ -308,19 +387,24 @@ async function processFiles(btn) {
   const localFiles = pending.filter(q => !isZipType(q.file)).map(q => q.file);
   showProgress(0, archives.length ? `准备提取 ${archives.length} 个压缩包…` : '准备文件…');
   try {
-    const extractedFiles = archives.length ? await extractArchives(archives) : [];
+    const archiveResult = archives.length
+      ? await extractArchives(archives)
+      : { files: [], failedItems: [], warnings: [] };
+    const extractedFiles = archiveResult.files;
     const filesToAdd = [...localFiles, ...extractedFiles];
-    const existing = new Set(STATE.files.map(f => `${f.name}|${f.size}`));
+    const existing = new Set(STATE.files.map(f => f.key));
+    let added = 0;
 
     for (let i = 0; i < filesToAdd.length; i++) {
       const file = filesToAdd[i];
-      const dedupeKey = `${file.name}|${file.size}`;
+      const dedupeKey = fileIdentity(file);
       if (existing.has(dedupeKey)) continue;
       existing.add(dedupeKey);
       const entry = {
         name: file.name,
         size: file.size,
         sizeStr: formatSize(file.size),
+        key: dedupeKey,
         type: isPDFType(file) ? 'pdf' : (isImageType(file) ? 'image' : 'unknown'),
         source: file._invoiceSource || '',
         _selected: true,
@@ -343,19 +427,29 @@ async function processFiles(btn) {
       }
 
       STATE.files.push(entry);
+      added++;
       showProgress(Math.round((i + 1) / Math.max(filesToAdd.length, 1) * 100), `加入工作台 ${i + 1}/${filesToAdd.length}`);
     }
 
-    if (STATE.files.length === 0) throw new Error('没有找到可用的 PDF 或图片发票');
-    renderResult();
-    STATE.queue = [];
-    // 隐藏队列面板（不要调 renderQueue，否则 ipEmpty 会与 ipResult 重叠）
-    document.getElementById('ipQueue').classList.add('hidden');
-    document.getElementById('ipActions').classList.add('hidden');
+    STATE.queue = archiveResult.failedItems;
+    if (STATE.files.length > 0) renderResult();
+    renderQueue();
+    if (archiveResult.warnings.length) {
+      const prefix = added > 0 ? `已加入 ${added} 个发票文件；` : '';
+      showToast(prefix + archiveResult.warnings.join('；'), 'warn');
+    } else if (added > 0) {
+      showToast(`已加入 ${added} 个发票文件`, 'info');
+    }
+    if (STATE.files.length === 0 && STATE.queue.length === 0) {
+      throw new Error('没有找到可用的 PDF 或图片发票');
+    }
   } catch (e) {
     showToast('处理失败：' + e.message, 'warn');
   } finally {
+    STATE.busy = false;
     btn.disabled = false;
+    document.getElementById('ipClearQueueBtn').disabled = false;
+    document.getElementById('ipQueue').removeAttribute('aria-busy');
     btn.innerHTML = '<i class="bi bi-check-circle"></i> 提取并加入工作台';
     hideProgress();
   }
@@ -366,7 +460,7 @@ function planArchiveBatches(queue) {
   let current = [];
   let bytes = 0;
   for (const item of queue) {
-    if (current.length && (bytes + item.size > 3 * 1024 * 1024 || current.length >= 50)) {
+    if (current.length && (bytes + item.size > IP_LIMITS.batch_bytes || current.length >= 50)) {
       batches.push(current);
       current = [];
       bytes = 0;
@@ -381,6 +475,7 @@ function planArchiveBatches(queue) {
 async function extractArchives(queue) {
   const batches = planArchiveBatches(queue);
   const extracted = [];
+  const failedItems = [];
   const warnings = [];
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
@@ -398,13 +493,17 @@ async function extractArchives(queue) {
       }
       for (const item of data.files || []) extracted.push(base64PDFToFile(item));
       if (data.truncated) warnings.push(`第 ${batchIndex + 1} 批有 ${data.truncated_count || 0} 个 PDF 因响应上限未加入`);
-      if (data.skipped_oversize?.length) warnings.push(`${data.skipped_oversize.length} 个压缩包因大小限制被跳过`);
+      if (data.skipped_oversize?.length) {
+        warnings.push(`${data.skipped_oversize.length} 个压缩包因大小限制被跳过并保留在待处理清单`);
+        const skippedNames = data.skipped_oversize.map(message => String(message).split('（', 1)[0]);
+        failedItems.push(...batch.filter(item => skippedNames.includes(item.name)));
+      }
     } catch (error) {
       warnings.push(`第 ${batchIndex + 1} 批提取失败：${error.message || '未知错误'}`);
+      failedItems.push(...batch);
     }
   }
-  if (warnings.length) showToast(warnings.join('；'), 'warn');
-  return extracted;
+  return { files: extracted, failedItems, warnings };
 }
 
 function base64PDFToFile(item) {
@@ -412,6 +511,7 @@ function base64PDFToFile(item) {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   const file = new File([bytes], item.filename || 'invoice.pdf', { type: 'application/pdf' });
+  file._invoiceKey = item.content_hash ? `sha256:${item.content_hash}` : `extracted:${item.filename}:${item.size || bytes.length}`;
   file._invoiceSource = (item.path_chain || []).join(' / ');
   return file;
 }
@@ -448,20 +548,20 @@ function renderResult() {
       <span class="badge bg-success">${selectedCount}/${total} 个文件</span>
       <span class="text-muted">${formatSize(totalSize)}</span>
       <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
-        <input type="checkbox" id="ipSelectAll" onchange="toggleAll(this)" checked
+        <input type="checkbox" id="ipSelectAll" data-action="toggle-all" checked
                style="accent-color:var(--ip-primary);"> 全选
       </label>
       <div class="btn-group btn-group-sm">
-        <button class="btn btn-outline-secondary" onclick="clearAll()" title="清空全部文件">
+        <button type="button" class="btn btn-outline-secondary" data-action="clear-all" title="清空全部文件">
           <i class="bi bi-eraser"></i>
         </button>
-        <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除勾选">
+        <button type="button" class="btn btn-outline-danger" data-action="delete-selected" title="删除勾选">
           <i class="bi bi-trash"></i> 删除选中
         </button>
-        <button class="btn btn-outline-primary" onclick="printAll()" title="批量自动打印">
+        <button type="button" class="btn btn-outline-primary" data-action="print-all" title="批量自动打印">
           <i class="bi bi-printer"></i> 批量打印
         </button>
-        <button class="btn btn-outline-success" onclick="exportZip()" title="导出 ZIP">
+        <button type="button" class="btn btn-outline-success" data-action="export-zip" title="导出 ZIP">
           <i class="bi bi-download"></i> 导出 ZIP
         </button>
       </div>
@@ -480,19 +580,19 @@ function renderResult() {
 
     html += `
       <div class="ip-card${deselected}" id="ipCard${i}">
-        <input type="checkbox" class="ip-cb" ${checked} onchange="onToggle(${i},this.checked)">
+        <input type="checkbox" class="ip-cb" ${checked} data-action="toggle-file" data-index="${i}" aria-label="选择 ${safeName}">
         <div class="ip-thumb">${thumbHTML}</div>
         <div class="ip-info">
           <div class="ip-name" title="${safeName}">${safeName}</div>
           <div class="ip-meta" title="${safeMeta}">${safeMeta}</div>
           <div class="ip-btns mt-1">
-            <button class="btn btn-outline-secondary btn-sm" onclick="printOne(${i})" title="打印">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-action="print-one" data-index="${i}" title="打印">
               <i class="bi bi-printer"></i> 打印
             </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="downloadOne(${i})" title="下载">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-action="download-one" data-index="${i}" title="下载">
               <i class="bi bi-download"></i>
             </button>
-            <button class="btn btn-outline-danger btn-sm" onclick="removeFile(${i})" title="删除">
+            <button type="button" class="btn btn-outline-danger btn-sm" data-action="remove-file" data-index="${i}" title="删除">
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
@@ -522,7 +622,10 @@ function ensurePdfLib() {
     s.onerror = () => reject(new Error('pdf-lib 加载失败，请检查网络'));
     document.head.appendChild(s);
   });
-  return _pdfLibReady;
+  return _pdfLibReady.catch(error => {
+    _pdfLibReady = null;
+    throw error;
+  });
 }
 
 /** 根据文件名后缀判断图片 MIME（用于 pdf-lib embedJpg / embedPng） */
@@ -731,23 +834,25 @@ function restoreSummaryPanel() {
     <span class="badge bg-success">${selectedCount}/${total} 个文件</span>
     <span class="text-muted">${formatSize(totalSize)}</span>
     <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
-      <input type="checkbox" id="ipSelectAll" onchange="toggleAll(this)" checked
+      <input type="checkbox" id="ipSelectAll" data-action="toggle-all" ${selectedCount === total ? 'checked' : ''}
              style="accent-color:var(--ip-primary);"> 全选
     </label>
     <div class="btn-group btn-group-sm">
-      <button class="btn btn-outline-secondary" onclick="clearAll()" title="清空全部文件">
+      <button type="button" class="btn btn-outline-secondary" data-action="clear-all" title="清空全部文件">
         <i class="bi bi-eraser"></i>
       </button>
-      <button class="btn btn-outline-danger" onclick="deleteSelected()" title="删除勾选">
+      <button type="button" class="btn btn-outline-danger" data-action="delete-selected" title="删除勾选">
         <i class="bi bi-trash"></i> 删除选中
       </button>
-      <button class="btn btn-outline-primary" onclick="printAll()" title="一键批量合并打印">
+      <button type="button" class="btn btn-outline-primary" data-action="print-all" title="一键批量合并打印">
         <i class="bi bi-printer"></i> 批量打印
       </button>
-      <button class="btn btn-outline-success" onclick="exportZip()" title="导出 ZIP">
+      <button type="button" class="btn btn-outline-success" data-action="export-zip" title="导出 ZIP">
         <i class="bi bi-download"></i> 导出 ZIP
       </button>
     </div>`;
+  const selectAll = document.getElementById('ipSelectAll');
+  if (selectAll) selectAll.indeterminate = selectedCount > 0 && selectedCount < total;
 }
 
 /** 为单个文件打开打印窗口（PDF embed / 图片 img + window.print） */
@@ -801,15 +906,20 @@ async function exportZip() {
   const selected = STATE.files.filter(f => !!f._selected);
   if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
 
-  // 懒加载 JSZip
-  if (typeof JSZip === 'undefined') {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('JSZip 加载失败'));
-      document.head.appendChild(s);
-    });
+  // 懒加载 JSZip；加载失败后给出可重试的明确提示。
+  try {
+    if (typeof JSZip === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('JSZip 加载失败，请检查网络后重试'));
+        document.head.appendChild(s);
+      });
+    }
+  } catch (error) {
+    showToast(error.message, 'warn');
+    return;
   }
 
   if (selected.length === 1) { downloadOne(STATE.files.indexOf(selected[0])); return; }
@@ -843,7 +953,7 @@ async function exportZip() {
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
     a.href = url; a.download = '发票文件.zip'; a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast(`已导出 ${selected.length} 个文件`, 'info');
   } catch (e) {
     showToast('打包失败: ' + e.message, 'warn');
@@ -861,28 +971,32 @@ function toggleAll(cb) {
 }
 
 function onToggle(idx, checked) {
+  if (!STATE.files[idx]) return;
   STATE.files[idx]._selected = checked;
   document.getElementById('ipCard' + idx)?.classList.toggle('deselected', !checked);
   const allCbs = document.querySelectorAll('.ip-cb');
   const allSel = document.getElementById('ipSelectAll');
-  if (allSel) allSel.checked = Array.from(allCbs).every(c => c.checked);
+  if (allSel) {
+    allSel.checked = Array.from(allCbs).every(c => c.checked);
+    allSel.indeterminate = Array.from(allCbs).some(c => c.checked) && !allSel.checked;
+  }
   refreshSummary();
 }
 
 function deleteSelected() {
   const toDelete = STATE.files.filter(f => f._selected);
   if (toDelete.length === 0) { showToast('请先勾选要删除的文件', 'warn'); return; }
-  if (!confirm(`确定删除 ${toDelete.length} 个文件吗？`)) return;
-
-  // 确认后才执行：先释放 Blob，再移除数组元素
   toDelete.forEach(f => { if (f.blobUrl) { URL.revokeObjectURL(f.blobUrl); f.blobUrl = null; } });
   STATE.files = STATE.files.filter(f => !f._selected);
 
   if (STATE.files.length === 0) {
     hideResultPanel();
+    renderQueue();
+    showToast(`已删除 ${toDelete.length} 个文件`, 'info');
     return;
   }
   renderResult();
+  showToast(`已删除 ${toDelete.length} 个文件`, 'info');
 }
 
 /** 单独删除一张卡片 */
@@ -893,9 +1007,12 @@ function removeFile(idx) {
   STATE.files.splice(idx, 1);
   if (STATE.files.length === 0) {
     hideResultPanel();
+    renderQueue();
+    showToast('已删除文件', 'info');
     return;
   }
   renderResult();
+  showToast('已删除文件', 'info');
 }
 
 function refreshSummary() {
@@ -906,15 +1023,17 @@ function refreshSummary() {
 }
 
 // ============== 进度 ==============
+let _hideProgressTimer = null;
 function showProgress(pct, text) {
+  clearTimeout(_hideProgressTimer);
   document.getElementById('ipProgressWrap').classList.remove('hidden');
   document.getElementById('ipProgressBar').style.width = pct + '%';
   document.getElementById('ipProgressText').textContent = text;
 }
 function hideProgress() {
-  setTimeout(() => {
+  clearTimeout(_hideProgressTimer);
+  _hideProgressTimer = setTimeout(() => {
     document.getElementById('ipProgressWrap').classList.add('hidden');
   }, 800);
 }
 </script>
-{% endraw %}

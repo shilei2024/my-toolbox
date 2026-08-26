@@ -5,7 +5,7 @@ from flask import Blueprint, render_template
 
 from auth.decorators import remaining_for, require_usage
 from extensions import limiter
-from tools.zip_extractor import analyze_uploaded_archives
+from tools.zip_extractor import analyze_uploaded_archives, invoice_zip_limits
 
 tool_bp = Blueprint("invoice_printer", __name__, template_folder="templates")
 
@@ -22,6 +22,7 @@ def index():
         },
         remaining=remaining_for("invoice_printer"),
         body_template="tools/invoice_printer/_body.html",
+        invoice_limits=invoice_zip_limits(),
     )
 
 

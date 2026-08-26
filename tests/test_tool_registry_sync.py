@@ -76,6 +76,12 @@ class ToolRegistrySyncTest(unittest.TestCase):
         self.assertIn("发票提取与批量打印", body)
         self.assertIn('accept=".zip,.pdf', body)
         self.assertIn("/tools/invoice-printer/analyze", body)
+        self.assertIn("单包最大 20MB", body)
+        self.assertIn('data-action="clear-all"', body)
+        self.assertIn('data-remove-queue-index=', body)
+        self.assertNotIn("onclick=", body)
+        self.assertNotIn("confirm(", body)
+        self.assertNotIn(".tif", body)
 
     def test_removed_zip_extractor_card_is_disabled_during_sync(self) -> None:
         db.session.add(
