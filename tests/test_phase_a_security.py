@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from flask import Flask, jsonify, send_file
 from flask_wtf.csrf import generate_csrf
@@ -13,7 +14,7 @@ from flask_wtf.csrf import generate_csrf
 from extensions import csrf, db, limiter, login_manager
 from models import ReimbursementAttachment
 from tools.reimbursement import tool_bp as reimbursement_bp
-from tools.zip_extractor import _extract_deep
+from tools.zip_extractor import _extract_deep, analyze_uploaded_archives
 from utils.helpers import safe_download_path, safe_filename, stage_download
 
 
@@ -77,6 +78,32 @@ def make_download_app(upload_dir: str) -> Flask:
 
 
 class PhaseASecurityTests(unittest.TestCase):
+    def test_unified_invoice_endpoint_reuses_secure_extractor_and_usage_id(self):
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY="invoice-unified-test")
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("nested/invoice.pdf", b"%PDF-1.4\n%%EOF\n")
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(archive.getvalue()), "invoices.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["files"][0]["filename"], "invoice.pdf")
+        commit.assert_called_once_with("invoice_printer", success=True)
+
     def test_reimbursement_rejects_write_without_csrf_token(self):
         with tempfile.TemporaryDirectory() as upload_dir:
             app = make_reimbursement_app(upload_dir)

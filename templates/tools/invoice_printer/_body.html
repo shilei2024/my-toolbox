@@ -102,9 +102,9 @@
 </style>
 
 <div class="mb-3">
-  <h5><i class="bi bi-printer"></i> 批量发票打印</h5>
+  <h5><i class="bi bi-receipt"></i> 发票提取与批量打印</h5>
   <p class="text-muted small mb-0">
-    上传发票文件（PDF / 图片），预览后一键打印或导出。所有处理在浏览器本地完成，不上传服务器。
+    ZIP 会在服务器内存中安全提取 PDF（不落盘、不保存）；PDF 和图片直接在浏览器本地预览、打印或导出。
   </p>
 </div>
 
@@ -112,9 +112,9 @@
 <div class="ip-upload-zone" id="ipUploadZone">
   <i class="bi bi-cloud-upload"></i>
   <p class="mt-2 mb-1 fw-bold">拖拽或点击选择发票文件</p>
-  <p class="text-muted small mb-0">支持 PDF、JPG、PNG、TIFF、BMP · 支持多选 · 可继续追加</p>
+  <p class="text-muted small mb-0">支持 ZIP（含多层嵌套）、PDF、JPG、PNG、TIFF、BMP · 可混合多选和继续追加</p>
   <input type="file" id="ipFileInput" multiple
-         accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,image/*" hidden>
+         accept=".zip,.pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,image/*" hidden>
 </div>
 
 <!-- 队列 -->
@@ -123,7 +123,7 @@
 <!-- 操作按钮 -->
 <div class="ip-actions hidden" id="ipActions">
   <button class="btn btn-primary" id="ipStartBtn" onclick="processFiles(this)">
-    <i class="bi bi-check-circle"></i> 确认文件
+    <i class="bi bi-check-circle"></i> 提取并加入工作台
   </button>
   <button class="btn btn-outline-secondary btn-sm" onclick="clearAll()">
     <i class="bi bi-trash"></i> 清空
@@ -143,7 +143,7 @@
 <!-- 空状态 -->
 <div class="ip-empty" id="ipEmpty">
   <i class="bi bi-inbox"></i>
-  <p>还没上传任何发票文件</p>
+  <p>还没加入任何发票文件</p>
 </div>
 
 <!-- Toast -->
@@ -165,6 +165,14 @@ function isImageType(file) {
 }
 function isPDFType(file) {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+}
+function isZipType(file) {
+  return file.type === 'application/zip' || file.type === 'application/x-zip-compressed' || file.name.toLowerCase().endsWith('.zip');
+}
+function escapeHTML(value) {
+  return String(value || '').replace(/[&<>'"]/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  })[ch]);
 }
 
 // ============== 事件绑定 ==============
@@ -204,11 +212,11 @@ function addToQueue(files) {
   let added = 0;
   for (const f of files) {
     if (!f || !f.name || f.size === 0) continue;
-    // 允许 PDF + 图片
-    if (!isPDFType(f) && !isImageType(f)) continue;
-    // 单文件 30MB 上限（浏览器内存友好）
-    if (f.size > 30 * 1024 * 1024) {
-      showToast(`跳过 ${f.name}：超过 30MB 上限`, 'warn');
+    if (!isZipType(f) && !isPDFType(f) && !isImageType(f)) continue;
+    // ZIP 受服务端安全门限约束；本地 PDF/图片只受浏览器内存门限约束。
+    const maxMB = isZipType(f) ? 4 : 30;
+    if (f.size > maxMB * 1024 * 1024) {
+      showToast(`跳过 ${f.name}：超过 ${maxMB}MB 上限`, 'warn');
       continue;
     }
     // 去重（同名 + 同大小）
@@ -270,11 +278,12 @@ function renderQueue() {
   countEl.textContent = `${STATE.queue.length} 个文件，共 ${formatSize(totalSize)}`;
 
   el.innerHTML = STATE.queue.map((q, i) => {
-    const icon = isPDFType(q.file) ? 'bi-file-pdf text-danger' : 'bi-file-image text-warning';
+    const icon = isZipType(q.file) ? 'bi-file-zip text-primary' : (isPDFType(q.file) ? 'bi-file-pdf text-danger' : 'bi-file-image text-warning');
+    const safeName = escapeHTML(q.name);
     return `
     <div class="ip-queue-item">
       <span class="ip-q-icon"><i class="bi ${icon}"></i></span>
-      <span class="ip-q-name" title="${q.name}">${q.name}</span>
+      <span class="ip-q-name" title="${safeName}">${safeName}</span>
       <span class="ip-q-size">${q.sizeStr}</span>
       <span class="ip-q-del" onclick="removeFromQueue(${i})" title="移除">&times;</span>
     </div>`;
@@ -291,21 +300,29 @@ function formatSize(bytes) {
 async function processFiles(btn) {
   if (STATE.queue.length === 0) return;
 
-  revokeAllBlobs();
-  STATE.files = [];
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>处理中…';
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>提取并处理中…';
 
-  const total = STATE.queue.length;
-  showProgress(0, `处理中 0/${total}`);
+  const pending = [...STATE.queue];
+  const archives = pending.filter(q => isZipType(q.file));
+  const localFiles = pending.filter(q => !isZipType(q.file)).map(q => q.file);
+  showProgress(0, archives.length ? `准备提取 ${archives.length} 个压缩包…` : '准备文件…');
   try {
-    for (let i = 0; i < STATE.queue.length; i++) {
-      const q = STATE.queue[i];
+    const extractedFiles = archives.length ? await extractArchives(archives) : [];
+    const filesToAdd = [...localFiles, ...extractedFiles];
+    const existing = new Set(STATE.files.map(f => `${f.name}|${f.size}`));
+
+    for (let i = 0; i < filesToAdd.length; i++) {
+      const file = filesToAdd[i];
+      const dedupeKey = `${file.name}|${file.size}`;
+      if (existing.has(dedupeKey)) continue;
+      existing.add(dedupeKey);
       const entry = {
-        name: q.name,
-        size: q.size,
-        sizeStr: q.sizeStr,
-        type: isPDFType(q.file) ? 'pdf' : (isImageType(q.file) ? 'image' : 'unknown'),
+        name: file.name,
+        size: file.size,
+        sizeStr: formatSize(file.size),
+        type: isPDFType(file) ? 'pdf' : (isImageType(file) ? 'image' : 'unknown'),
+        source: file._invoiceSource || '',
         _selected: true,
         dataUrl: null,
         blobUrl: null,
@@ -313,22 +330,23 @@ async function processFiles(btn) {
 
       if (entry.type === 'image') {
         // 生成缩略图 dataURL + 保存完整文件 blobUrl
-        const blobUrl = URL.createObjectURL(q.file);
+        const blobUrl = URL.createObjectURL(file);
         entry.blobUrl = blobUrl;
         try {
-          entry.dataUrl = await generateThumbnail(q.file, 112, 152);
+          entry.dataUrl = await generateThumbnail(file, 112, 152);
         } catch (_) {
           entry.dataUrl = null;
         }
       } else {
         // PDF：直接存 blobUrl
-        entry.blobUrl = URL.createObjectURL(q.file);
+        entry.blobUrl = URL.createObjectURL(file);
       }
 
       STATE.files.push(entry);
-      showProgress(Math.round((i + 1) / total * 100), `处理中 ${i + 1}/${total}`);
+      showProgress(Math.round((i + 1) / Math.max(filesToAdd.length, 1) * 100), `加入工作台 ${i + 1}/${filesToAdd.length}`);
     }
 
+    if (STATE.files.length === 0) throw new Error('没有找到可用的 PDF 或图片发票');
     renderResult();
     STATE.queue = [];
     // 隐藏队列面板（不要调 renderQueue，否则 ipEmpty 会与 ipResult 重叠）
@@ -338,9 +356,64 @@ async function processFiles(btn) {
     showToast('处理失败：' + e.message, 'warn');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-check-circle"></i> 确认文件';
+    btn.innerHTML = '<i class="bi bi-check-circle"></i> 提取并加入工作台';
     hideProgress();
   }
+}
+
+function planArchiveBatches(queue) {
+  const batches = [];
+  let current = [];
+  let bytes = 0;
+  for (const item of queue) {
+    if (current.length && (bytes + item.size > 3 * 1024 * 1024 || current.length >= 50)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(item);
+    bytes += item.size;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+async function extractArchives(queue) {
+  const batches = planArchiveBatches(queue);
+  const extracted = [];
+  const warnings = [];
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    try {
+      showProgress(Math.round(batchIndex / batches.length * 45), `提取压缩包 ${batchIndex + 1}/${batches.length}…`);
+      const form = new FormData();
+      batch.forEach(item => form.append('files', item.file, item.name));
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+      const response = await fetch('/tools/invoice-printer/analyze', {
+        method: 'POST', body: form, headers: { 'X-CSRFToken': csrfToken }
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      for (const item of data.files || []) extracted.push(base64PDFToFile(item));
+      if (data.truncated) warnings.push(`第 ${batchIndex + 1} 批有 ${data.truncated_count || 0} 个 PDF 因响应上限未加入`);
+      if (data.skipped_oversize?.length) warnings.push(`${data.skipped_oversize.length} 个压缩包因大小限制被跳过`);
+    } catch (error) {
+      warnings.push(`第 ${batchIndex + 1} 批提取失败：${error.message || '未知错误'}`);
+    }
+  }
+  if (warnings.length) showToast(warnings.join('；'), 'warn');
+  return extracted;
+}
+
+function base64PDFToFile(item) {
+  const binary = atob(item.data_b64 || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const file = new File([bytes], item.filename || 'invoice.pdf', { type: 'application/pdf' });
+  file._invoiceSource = (item.path_chain || []).join(' / ');
+  return file;
 }
 
 function generateThumbnail(file, maxW, maxH) {
@@ -399,6 +472,8 @@ function renderResult() {
   STATE.files.forEach((f, i) => {
     const checked = f._selected ? 'checked' : '';
     const deselected = checked ? '' : ' deselected';
+    const safeName = escapeHTML(f.name);
+    const safeMeta = escapeHTML(f.source ? `${f.sizeStr} · 来源：${f.source}` : f.sizeStr);
     const thumbHTML = f.dataUrl
       ? `<img src="${f.dataUrl}" alt="">`
       : `<i class="bi ${f.type === 'pdf' ? 'bi-file-pdf ip-thumb-icon pdf' : 'bi-file-image ip-thumb-icon img'}"></i>`;
@@ -408,8 +483,8 @@ function renderResult() {
         <input type="checkbox" class="ip-cb" ${checked} onchange="onToggle(${i},this.checked)">
         <div class="ip-thumb">${thumbHTML}</div>
         <div class="ip-info">
-          <div class="ip-name" title="${f.name}">${f.name}</div>
-          <div class="ip-meta">${f.sizeStr}</div>
+          <div class="ip-name" title="${safeName}">${safeName}</div>
+          <div class="ip-meta" title="${safeMeta}">${safeMeta}</div>
           <div class="ip-btns mt-1">
             <button class="btn btn-outline-secondary btn-sm" onclick="printOne(${i})" title="打印">
               <i class="bi bi-printer"></i> 打印
@@ -681,10 +756,11 @@ function openPrintWindow(f) {
   if (!win) { showToast('请允许弹出窗口以打印文件', 'warn'); return null; }
 
   const escapedUrl = f.blobUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const safeTitle = escapeHTML(f.name);
 
   if (f.type === 'pdf') {
     win.document.write(`
-      <!DOCTYPE html><html><head><title>${f.name}</title><meta charset="utf-8"><style>
+      <!DOCTYPE html><html><head><title>${safeTitle}</title><meta charset="utf-8"><style>
         *{margin:0;padding:0;}
         html,body{width:100%;height:100%;overflow:hidden;background:#525659;}
         embed{width:100%;height:100%;border:none;}
@@ -697,7 +773,7 @@ function openPrintWindow(f) {
       </html>`);
   } else {
     win.document.write(`
-      <!DOCTYPE html><html><head><title>${f.name}</title><meta charset="utf-8"><style>
+      <!DOCTYPE html><html><head><title>${safeTitle}</title><meta charset="utf-8"><style>
         *{margin:0;padding:0;}
         body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#f5f5f5;}
         img{max-width:98vw;max-height:98vh;object-fit:contain;box-shadow:0 2px 12px rgba(0,0,0,.15);}

@@ -145,6 +145,10 @@ def _extract_deep(
 @limiter.limit(lambda: "20/minute")
 @require_usage("zip_extractor")
 def analyze():
+    return analyze_uploaded_archives("zip_extractor")
+
+
+def analyze_uploaded_archives(usage_tool_id: str):
     """接收本批 zip 文件，递归解压找出 PDF，按大小上限截断返回。
 
     入参：本批 zip 总大小 ≤ MAX_REQUEST_ZIP_BYTES。
@@ -240,12 +244,12 @@ def analyze():
                 f"{MAX_RESPONSE_B64_BYTES//(1024*1024)}MB 上限）。"
                 f"建议：① 改用更小的压缩包分批；② 减少单包内文件数。"
             )
-        commit_usage("zip_extractor", success=True)
+        commit_usage(usage_tool_id, success=True)
         return jsonify(body)
 
-    except Exception as e:
+    except Exception:
         log.exception("analyze fatal error")
-        return jsonify(success=False, error=f"服务器错误：{type(e).__name__}: {str(e)[:200]}"), 500
+        return jsonify(success=False, error="发票压缩包处理失败，请稍后重试"), 500
 
 
 def _quick_hash(data: bytes) -> str:

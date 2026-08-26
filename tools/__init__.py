@@ -148,6 +148,17 @@ def register_tools(app: Flask) -> None:
             logger.error("Module %s has no `tool_bp` blueprint", module_path)
             continue
         app.register_blueprint(bp, url_prefix=entry.get("route", f"/tools/{tid}"))
+        # A merged/renamed tool may keep historical URLs without creating a
+        # duplicate homepage card or copying its business logic.
+        for alias_index, alias in enumerate(entry.get("route_aliases", []) or []):
+            if not isinstance(alias, str) or not alias.startswith("/tools/"):
+                logger.warning("Tool %s: ignoring invalid route alias %r", tid, alias)
+                continue
+            app.register_blueprint(
+                bp,
+                url_prefix=alias.rstrip("/"),
+                name_prefix=f"legacy_{tid}_{alias_index}",
+            )
         registered.add(tid)
 
     # Sync enabled state: disable tools that failed to import, re-enable those
