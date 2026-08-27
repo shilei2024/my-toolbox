@@ -162,6 +162,7 @@ const STATE = {
   files: [],      // {name, size, sizeStr, type, _selected, dataUrl, blobUrl} — 已确认
   busy: false,
 };
+let queueSerial = 0;
 
 // 支持的图片 MIME → 扩展名映射
 const IMG_MIME = { 'image/jpeg': 1, 'image/png': 1 };
@@ -200,9 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('ipClearQueueBtn').addEventListener('click', clearPendingQueue);
 
   queue.addEventListener('click', event => {
-    const button = event.target.closest('[data-remove-queue-index]');
+    const button = event.target.closest('[data-remove-queue-id]');
     if (!button) return;
-    removeFromQueue(Number(button.dataset.removeQueueIndex));
+    removeFromQueue(button.dataset.removeQueueId);
   });
 
   result.addEventListener('click', event => {
@@ -270,7 +271,13 @@ function addToQueue(files) {
     }
     const identity = fileIdentity(f);
     if (queuedKeys.has(identity) || existingKeys.has(identity)) continue;
-    STATE.queue.push({ file: f, name: f.name, size: f.size, sizeStr: formatSize(f.size) });
+    STATE.queue.push({
+      id: `queue-${Date.now()}-${queueSerial++}`,
+      file: f,
+      name: f.name,
+      size: f.size,
+      sizeStr: formatSize(f.size),
+    });
     queuedKeys.add(identity);
     added++;
   }
@@ -287,19 +294,26 @@ function fileIdentity(file) {
   return `local:${file.name}:${file.size}:${file.lastModified || 0}`;
 }
 
-function removeFromQueue(idx) {
+function removeFromQueue(queueId) {
   if (STATE.busy) return;
-  if (!Number.isInteger(idx) || idx < 0 || idx >= STATE.queue.length) return;
-  STATE.queue.splice(idx, 1);
+  const index = STATE.queue.findIndex(item => item.id === queueId);
+  if (index < 0) return;
+  STATE.queue.splice(index, 1);
   renderQueue();
   showToast('已从待处理清单移除', 'info');
 }
 
 function clearPendingQueue() {
   if (STATE.busy) return;
-  if (STATE.queue.length === 0) return;
   const removed = STATE.queue.length;
+  if (removed === 0) {
+    document.getElementById('ipQueue').innerHTML = '';
+    document.getElementById('ipFileInput').value = '';
+    renderQueue();
+    return;
+  }
   STATE.queue = [];
+  document.getElementById('ipFileInput').value = '';
   renderQueue();
   showToast(`已清空 ${removed} 个待处理文件`, 'info');
 }
@@ -340,6 +354,8 @@ function renderQueue() {
   const resultVisible = !document.getElementById('ipResult').classList.contains('hidden');
 
   if (STATE.queue.length === 0) {
+    el.innerHTML = '';
+    countEl.textContent = '0 个文件';
     el.classList.add('hidden');
     actions.classList.add('hidden');
     // 只在结果面板也没内容时才展示空状态，避免两层重叠
@@ -353,7 +369,7 @@ function renderQueue() {
   const totalSize = STATE.queue.reduce((s, q) => s + q.size, 0);
   countEl.textContent = `${STATE.queue.length} 个文件，共 ${formatSize(totalSize)}`;
 
-  el.innerHTML = STATE.queue.map((q, i) => {
+  el.innerHTML = STATE.queue.map(q => {
     const icon = isZipType(q.file) ? 'bi-file-zip text-primary' : (isPDFType(q.file) ? 'bi-file-pdf text-danger' : 'bi-file-image text-warning');
     const safeName = escapeHTML(q.name);
     return `
@@ -361,7 +377,7 @@ function renderQueue() {
       <span class="ip-q-icon"><i class="bi ${icon}"></i></span>
       <span class="ip-q-name" title="${safeName}">${safeName}</span>
       <span class="ip-q-size">${q.sizeStr}</span>
-      <button type="button" class="ip-q-del" data-remove-queue-index="${i}" title="移除 ${safeName}" aria-label="移除 ${safeName}">&times;</button>
+      <button type="button" class="ip-q-del" data-remove-queue-id="${escapeHTML(q.id)}" title="移除 ${safeName}" aria-label="移除 ${safeName}">&times;</button>
     </div>`;
   }).join('');
 }
@@ -491,7 +507,23 @@ async function extractArchives(queue) {
       if (!response.ok || !data?.success) {
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      for (const item of data.files || []) extracted.push(base64PDFToFile(item));
+      const returnedFiles = Array.isArray(data.files) ? data.files : [];
+      for (const item of returnedFiles) extracted.push(base64PDFToFile(item));
+      const archiveResults = Array.isArray(data.archive_results) ? data.archive_results : null;
+      if (archiveResults) {
+        const emptyArchives = batch.filter((item, index) => {
+          const result = archiveResults[index];
+          return result && (result.skipped || result.error || Number(result.pdf_count || 0) === 0);
+        });
+        if (emptyArchives.length) {
+          failedItems.push(...emptyArchives);
+          warnings.push(`${emptyArchives.length} 个压缩包未提取到 PDF，已保留在待处理清单`);
+        }
+      } else if (returnedFiles.length === 0) {
+        // 兼容旧服务端：成功响应但没有返回文件时不能静默丢弃压缩包。
+        failedItems.push(...batch);
+        warnings.push('压缩包未返回 PDF，已保留在待处理清单');
+      }
       if (data.truncated) warnings.push(`第 ${batchIndex + 1} 批有 ${data.truncated_count || 0} 个 PDF 因响应上限未加入`);
       if (data.skipped_oversize?.length) {
         warnings.push(`${data.skipped_oversize.length} 个压缩包因大小限制被跳过并保留在待处理清单`);
