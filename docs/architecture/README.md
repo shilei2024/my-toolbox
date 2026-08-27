@@ -5,6 +5,8 @@
 - [永久工程原则与 Golden Rule](engineering-principles.md)
 - [Mavis Gallery 品牌规范](brand-spec.md)
 - [发票提取与批量打印工作台](invoice-workspace.md)
+- [客户项目跟进系统 Phase 0 架构冻结](customer-project-tracking.md)
+- [客户项目跟进数据字典](customer-project-tracking-data-dictionary.md)
 
 ## Phase 架构文档
 

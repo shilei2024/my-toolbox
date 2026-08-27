@@ -131,6 +131,19 @@ class Config:
     # cold-start schema probe and db.create_all() reflection entirely.
     AUTO_CREATE_SCHEMA: bool = _bool(os.environ.get("AUTO_CREATE_SCHEMA"), default=True)
 
+    # --- Customer project tracking (default off for safe production rollout) ---
+    CUSTOMER_PROJECTS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECTS_ENABLED"), default=False
+    )
+    CUSTOMER_PROJECTS_DEFAULT_ORG_NAME: str = os.environ.get(
+        "CUSTOMER_PROJECTS_DEFAULT_ORG_NAME", "默认业务组织"
+    ).strip()
+    # Optional comma-separated pilot account emails. Empty means every active
+    # organization member may enter once the feature flag is enabled.
+    CUSTOMER_PROJECTS_PILOT_EMAILS: str = os.environ.get(
+        "CUSTOMER_PROJECTS_PILOT_EMAILS", ""
+    ).strip()
+
     # --- Misc ---
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://localhost:8000")
     APP_VERSION: str = os.environ.get("APP_VERSION", "0.4.3")

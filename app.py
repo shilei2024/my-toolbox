@@ -40,8 +40,9 @@ from flask_login import current_user
 
 from admin import admin_bp
 from auth.routes import auth_bp
+from customer_projects import customer_projects_api_bp, customer_projects_bp
 from config import _auto_db_url, get_config
-from extensions import csrf, db, limiter, login_manager
+from extensions import csrf, db, limiter, login_manager, migrate
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
 from utils.gallery_cors import apply_gallery_cors
@@ -419,6 +420,7 @@ def _init_extensions(app: Flask) -> None:
         app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{target.as_posix()}"
 
     db.init_app(app)
+    migrate.init_app(app, db, directory=str(Path(app.root_path) / "migrations"))
     try:
         with app.app_context():
             if app.config.get("AUTO_CREATE_SCHEMA", True):
@@ -481,44 +483,59 @@ def _init_extensions(app: Flask) -> None:
 def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(customer_projects_bp)
+    app.register_blueprint(customer_projects_api_bp)
 
 
 def _register_error_handlers(app: Flask) -> None:
+    def _wants_json_error() -> bool:
+        return (
+            request.path.startswith("/api/")
+            or request.accept_mimetypes.best == "application/json"
+            or request.is_json
+        )
+
+    @app.errorhandler(401)
+    def unauthorized(err):
+        if _wants_json_error():
+            return jsonify(error={"code": "AUTHENTICATION_REQUIRED", "message": "请先登录。"}), 401
+        return redirect(url_for("auth.login", next=request.path))
+
     @app.errorhandler(400)
     def bad_request(err):
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error="请求格式不正确"), 400
         return render_template("errors/400.html"), 400
 
     @app.errorhandler(403)
     def forbidden(err):
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error="没有权限"), 403
         return render_template("errors/403.html"), 403
 
     @app.errorhandler(404)
     def not_found(err):
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error="页面不存在"), 404
         return render_template("errors/404.html"), 404
 
     @app.errorhandler(413)
     def too_large(err):
         msg = f"文件太大，单文件最大 {app.config['MAX_UPLOAD_MB']} MB"
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error=msg), 413
         return make_response(render_template("errors/413.html", limit_mb=app.config["MAX_UPLOAD_MB"]), 413)
 
     @app.errorhandler(429)
     def too_many(err):
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error="请求过于频繁，请稍后再试"), 429
         return render_template("errors/429.html"), 429
 
     @app.errorhandler(500)
     def server_error(err):
         app.logger.exception("Unhandled error: %s", err)
-        if request.accept_mimetypes.best == "application/json" or request.is_json:
+        if _wants_json_error():
             return jsonify(error="服务器内部错误"), 500
         return render_template("errors/500.html"), 500
 

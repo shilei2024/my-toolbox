@@ -25,6 +25,9 @@
       <a href="{{ url_for('admin.gallery') }}" class="list-group-item list-group-item-action {% if request.endpoint and request.endpoint.startswith('admin.gallery') %}active{% endif %}">
         <i class="bi bi-image"></i> AI 作图
       </a>
+      <a href="{{ url_for('admin.customer_projects_settings') }}" class="list-group-item list-group-item-action {% if request.endpoint and request.endpoint.startswith('admin.customer_projects') %}active{% endif %}">
+        <i class="bi bi-kanban"></i> 客户项目
+      </a>
     </div>
   </div>
   <div class="col-md-9">

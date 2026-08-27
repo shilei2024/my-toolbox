@@ -35,6 +35,9 @@
       <ul class="navbar-nav site-primary-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="/">首页</a></li>
         <li class="nav-item"><a class="nav-link" href="/#tool-library">工具库</a></li>
+        {% if customer_projects_available %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('customer_projects.dashboard') }}">客户项目</a></li>
+        {% endif %}
         {% if config.AI_IMAGE_EXTERNAL_URL %}
           <li class="nav-item"><a class="nav-link" href="/gallery">Gallery</a></li>
         {% endif %}

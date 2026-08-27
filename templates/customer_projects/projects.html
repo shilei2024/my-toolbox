@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}项目 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <div class="cp-page-heading">
+    <div><p class="cp-kicker">PROJECT LEDGER</p><h1>项目台账</h1><p>每个项目只有一个主记录，生命周期变化不搬表。</p></div>
+    <a class="btn btn-primary" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a>
+  </div>
+  <form class="cp-filter-bar" method="get">
+    <label class="visually-hidden" for="cp-search">搜索</label>
+    <div class="input-group"><span class="input-group-text"><i class="bi bi-search"></i></span><input id="cp-search" class="form-control" name="q" value="{{ q }}" placeholder="客户、项目、编号、品牌或型号" maxlength="100"></div>
+    <select class="form-select" name="stage" aria-label="按阶段筛选"><option value="">全部阶段</option>{% for code,label in stages.items() %}<option value="{{ code }}" {% if selected_stage == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <button class="btn btn-outline-primary" type="submit">筛选</button>
+  </form>
+  <section class="cp-panel cp-table-panel">
+    {% if projects %}
+      <div class="cp-project-list">
+        {% for project in projects %}
+          <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
+            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
+            <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
+            <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
+            <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</span>
+            <span class="cp-owner"><small>主业务</small>{{ user_names.get(project.primary_sales_user_id, '待确认') }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}<div class="cp-empty"><i class="bi bi-search"></i><h3>没有符合条件的项目</h3><p>调整筛选条件，或创建一个新项目。</p></div>{% endif %}
+  </section>
+</section>
+{% endblock %}

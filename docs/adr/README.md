@@ -34,3 +34,4 @@
 | [0024](0024-creation-workflow-api-separation-public-defaults.md) | 生图创作目录「工作流 / API」分离与公开默认值 |
 | [0025](0025-gallery-media-generation-and-ark-video.md) | Gallery 复用 Generation 闭环扩展图片与视频 |
 | [0026](0026-local-comfyui-media-provider-boundary.md) | 本机 ComfyUI 通过 Generation Worker 接入 Gallery |
+| [0027](0027-customer-project-tracking-modular-monolith.md) | 客户项目跟进采用主站模块化单体与 PostgreSQL 事实源 |
