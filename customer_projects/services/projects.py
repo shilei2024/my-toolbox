@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -99,6 +99,20 @@ def parse_date(value: str | date | None) -> date | None:
         raise DomainError("INVALID_DATE", "日期格式不正确。") from exc
 
 
+def local_day_bounds(now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
+    """Return the current organization's local-day bounds as UTC datetimes."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    try:
+        local_now = now.astimezone(ZoneInfo(timezone_name))
+    except (KeyError, ValueError) as exc:
+        raise DomainError("INVALID_TIMEZONE", "组织时区配置无效。") from exc
+    local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_start.astimezone(timezone.utc), (local_start + timedelta(days=1)).astimezone(
+        timezone.utc
+    )
+
+
 def seed_default_statuses(organization_id: str) -> None:
     existing = set(
         db.session.scalars(
@@ -169,6 +183,21 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
     name = str(data.get("name", "")).strip()
     if not name:
         raise DomainError("VALIDATION_ERROR", "请填写客户名称。", field_errors={"name": "必填"})
+    try:
+        owner_id = int(data.get("primary_owner_user_id") or membership.user_id)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("INVALID_OWNER", "客户负责人无效。") from exc
+    owner_membership = db.session.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == membership.organization_id,
+            OrganizationMembership.user_id == owner_id,
+            OrganizationMembership.status == "active",
+        )
+    )
+    if owner_membership is None or not owner_membership.roles.intersection(
+        {"organization_admin", "business_manager", "sales"}
+    ):
+        raise DomainError("INVALID_OWNER", "客户负责人不是当前组织的有效业务成员。")
     customer = Customer(
         organization_id=membership.organization_id,
         name=name[:255],
@@ -176,7 +205,7 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         short_name=str(data.get("short_name") or "").strip()[:120] or None,
         industry=str(data.get("industry") or "").strip()[:120] or None,
         region=str(data.get("region") or "").strip()[:120] or None,
-        primary_owner_user_id=int(data.get("primary_owner_user_id") or membership.user_id),
+        primary_owner_user_id=owner_id,
         notes=str(data.get("notes") or "").strip()[:4000] or None,
         created_by_user_id=membership.user_id,
         updated_by_user_id=membership.user_id,
@@ -188,6 +217,8 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
 
 
 def add_contact(customer: Customer, data: dict[str, Any], membership: OrganizationMembership) -> CustomerContact:
+    if customer.organization_id != membership.organization_id or customer.deleted_at is not None:
+        raise DomainError("CUSTOMER_NOT_FOUND", "客户不存在或不可访问。")
     name = str(data.get("name") or "").strip()
     if not name:
         raise DomainError("VALIDATION_ERROR", "联系人姓名必填。", field_errors={"name": "必填"})
@@ -253,7 +284,10 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     )
     if customer is None:
         raise DomainError("CUSTOMER_NOT_FOUND", "客户不存在或不可访问。")
-    owner_id = int(data.get("primary_sales_user_id") or membership.user_id)
+    try:
+        owner_id = int(data.get("primary_sales_user_id") or membership.user_id)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("INVALID_OWNER", "主业务无效。") from exc
     owner_membership = db.session.scalar(
         select(OrganizationMembership).where(
             OrganizationMembership.organization_id == membership.organization_id,
@@ -338,10 +372,32 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
             raise DomainError("VALIDATION_ERROR", "评估等级无效。", field_errors={"assessment_grade": "仅支持 A/B/C/D"})
         values["assessment_grade"] = grade or None
         safe_diff["assessment_grade"] = grade or None
+    if "probability_band" in data:
+        raw_probability = data.get("probability_band")
+        try:
+            probability = int(raw_probability) if raw_probability not in (None, "") else None
+        except (TypeError, ValueError) as exc:
+            raise DomainError(
+                "VALIDATION_ERROR",
+                "成功概率区间无效。",
+                field_errors={"probability_band": "仅支持 10/30/50/70/90"},
+            ) from exc
+        if probability is not None and probability not in {10, 30, 50, 70, 90}:
+            raise DomainError(
+                "VALIDATION_ERROR",
+                "成功概率区间无效。",
+                field_errors={"probability_band": "仅支持 10/30/50/70/90"},
+            )
+        values["probability_band"] = probability
+        safe_diff["probability_band"] = probability
     if "next_follow_up_at" in data:
         org = db.session.get(Organization, membership.organization_id)
         values["next_follow_up_at"] = parse_datetime(data["next_follow_up_at"], org.timezone if org else "Asia/Shanghai")
         safe_diff["next_follow_up_at"] = str(values["next_follow_up_at"])
+    for field in ("expected_design_win_at", "expected_mass_production_at"):
+        if field in data:
+            values[field] = parse_date(data.get(field))
+            safe_diff[field] = str(values[field]) if values[field] else None
     result = db.session.execute(
         update(CustomerProject)
         .where(
@@ -366,6 +422,7 @@ def add_activity(project: CustomerProject, data: dict[str, Any], membership: Org
         raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
     existing = db.session.scalar(
         select(ProjectActivity).where(
+            ProjectActivity.organization_id == membership.organization_id,
             ProjectActivity.project_id == project.id,
             ProjectActivity.idempotency_key == idempotency_key,
         )
@@ -407,7 +464,12 @@ def add_activity(project: CustomerProject, data: dict[str, Any], membership: Org
     )
     result = db.session.execute(
         update(CustomerProject)
-        .where(CustomerProject.id == project.id, CustomerProject.version == expected_version)
+        .where(
+            CustomerProject.id == project.id,
+            CustomerProject.organization_id == membership.organization_id,
+            CustomerProject.version == expected_version,
+            CustomerProject.deleted_at.is_(None),
+        )
         .values(
             next_action=next_action[:500],
             next_follow_up_at=next_follow_up,
@@ -431,6 +493,7 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
         raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
     existing = db.session.scalar(
         select(ProjectStageEvent).where(
+            ProjectStageEvent.organization_id == membership.organization_id,
             ProjectStageEvent.project_id == project.id,
             ProjectStageEvent.idempotency_key == idempotency_key,
         )
@@ -478,7 +541,12 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
     from_stage = project.stage_code
     result = db.session.execute(
         update(CustomerProject)
-        .where(CustomerProject.id == project.id, CustomerProject.version == expected_version)
+        .where(
+            CustomerProject.id == project.id,
+            CustomerProject.organization_id == membership.organization_id,
+            CustomerProject.version == expected_version,
+            CustomerProject.deleted_at.is_(None),
+        )
         .values(**values)
     )
     if result.rowcount != 1:
@@ -510,6 +578,7 @@ def add_material(
         raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
     existing = db.session.scalar(
         select(ProjectMaterial).where(
+            ProjectMaterial.organization_id == membership.organization_id,
             ProjectMaterial.project_id == project.id,
             ProjectMaterial.idempotency_key == idempotency_key,
         )
@@ -558,6 +627,7 @@ def add_competitor(
         raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
     existing = db.session.scalar(
         select(MaterialCompetitor).where(
+            MaterialCompetitor.organization_id == membership.organization_id,
             MaterialCompetitor.project_material_id == material.id,
             MaterialCompetitor.idempotency_key == idempotency_key,
         )
@@ -612,6 +682,7 @@ def add_project_member(project: CustomerProject, user_id: int, role_code: str, m
         raise DomainError("INVALID_MEMBER", "该用户不是当前组织的有效成员。")
     existing = db.session.scalar(
         select(ProjectMember).where(
+            ProjectMember.organization_id == membership.organization_id,
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user_id,
             ProjectMember.role_code == role_code,

@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 
 from extensions import db
 from models import User
-from shared.models import AuditEvent, OrganizationMembership
+from shared.models import AuditEvent, Organization, OrganizationMembership
 
 from . import customer_projects_bp
 from .models import (
@@ -43,9 +43,11 @@ from .services.projects import (
     add_project_member,
     create_customer,
     create_project,
+    local_day_bounds,
     restore_project,
     soft_delete_project,
     transition_stage,
+    update_project,
 )
 
 
@@ -89,6 +91,10 @@ def _handle_domain_error(exc: DomainError, endpoint: str, **values: str):
 def dashboard():
     membership = _membership()
     now = datetime.now(timezone.utc)
+    organization = db.session.get(Organization, membership.organization_id)
+    day_start, day_end = local_day_bounds(
+        now, organization.timezone if organization else "Asia/Shanghai"
+    )
     base = apply_project_scope(
         select(CustomerProject).where(CustomerProject.deleted_at.is_(None)), membership
     )
@@ -122,9 +128,20 @@ def dashboard():
         ]
     ) if stale_rules else (CustomerProject.id.is_(None))
     counts = {
-        "overdue": scoped_count(CustomerProject.stage_code.in_(active_stages), CustomerProject.next_follow_up_at < now),
-        "today": scoped_count(CustomerProject.stage_code.in_(active_stages), CustomerProject.next_follow_up_at >= now.replace(hour=0, minute=0, second=0, microsecond=0), CustomerProject.next_follow_up_at < now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)),
-        "upcoming": scoped_count(CustomerProject.stage_code.in_(active_stages), CustomerProject.next_follow_up_at > now, CustomerProject.next_follow_up_at <= now + timedelta(days=7)),
+        "overdue": scoped_count(
+            CustomerProject.stage_code.in_(active_stages),
+            CustomerProject.next_follow_up_at < day_start,
+        ),
+        "today": scoped_count(
+            CustomerProject.stage_code.in_(active_stages),
+            CustomerProject.next_follow_up_at >= day_start,
+            CustomerProject.next_follow_up_at < day_end,
+        ),
+        "upcoming": scoped_count(
+            CustomerProject.stage_code.in_(active_stages),
+            CustomerProject.next_follow_up_at >= day_end,
+            CustomerProject.next_follow_up_at < day_end + timedelta(days=7),
+        ),
         "stale": scoped_count(stale_condition),
     }
     customer_names = _customer_name_map(projects)
@@ -343,6 +360,14 @@ def project_detail(project_id: str):
         competitors_by_material.setdefault(competitor.project_material_id, []).append(competitor)
     activities = list(db.session.scalars(select(ProjectActivity).where(ProjectActivity.project_id == project.id).order_by(ProjectActivity.occurred_at.desc()).limit(100)))
     stage_events = list(db.session.scalars(select(ProjectStageEvent).where(ProjectStageEvent.project_id == project.id).order_by(ProjectStageEvent.occurred_at.desc()).limit(100)))
+    timeline = [
+        {"kind": "activity", "occurred_at": item.occurred_at, "item": item}
+        for item in activities
+    ] + [
+        {"kind": "stage", "occurred_at": item.occurred_at, "item": item}
+        for item in stage_events
+    ]
+    timeline.sort(key=lambda row: _aware(row["occurred_at"]), reverse=True)
     audits = []
     if membership.roles.intersection(ADMIN_ROLES):
         audits = list(db.session.scalars(select(AuditEvent).where(AuditEvent.organization_id == membership.organization_id, AuditEvent.object_type == "project", AuditEvent.object_id == project.id).order_by(AuditEvent.occurred_at.desc()).limit(50)))
@@ -376,6 +401,7 @@ def project_detail(project_id: str):
         competitors_by_material=competitors_by_material,
         activities=activities,
         stage_events=stage_events,
+        timeline=timeline,
         audits=audits,
         project_members=project_members,
         organization_members=organization_members,
@@ -383,6 +409,31 @@ def project_detail(project_id: str):
         can_manage=bool(membership.roles.intersection(ADMIN_ROLES)),
         form_key=str(uuid.uuid4()),
     )
+
+
+@customer_projects_bp.post("/projects/<string:project_id>/edit")
+@login_required
+@module_required
+def project_edit(project_id: str):
+    membership = _membership()
+    require_write(membership)
+    project = _project_or_404(project_id, membership)
+    try:
+        updated = update_project(
+            project,
+            request.form.to_dict(),
+            membership,
+            int(request.form.get("project_version", "0")),
+        )
+        db.session.commit()
+        flash("项目基础信息已更新。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=updated.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "项目版本或概率区间无效。")
+        return _handle_domain_error(
+            exc, "customer_projects.project_detail", project_id=project.id
+        )
 
 
 @customer_projects_bp.post("/projects/<string:project_id>/activities")

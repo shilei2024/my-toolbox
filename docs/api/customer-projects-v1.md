@@ -1,10 +1,10 @@
-# Customer Projects API v1（Phase 0 契约）
+# Customer Projects API v1（Phase 1 核心契约）
 
 > 状态：Phase 1 核心端点已实现，功能开关默认关闭，尚未部署生产。提醒、报表、重新激活和衍生端点属于后续 Phase。
 
 ## 通用边界
 
-前缀为 `/api/v1/customer-projects`，仅接受主站登录会话；写请求同时要求 CSRF、同源检查、有效组织成员和对象级权限。客户端不得提交可信的 `organization_id` 或操作者 ID，均由服务端会话推导。
+前缀为 `/api/v1/customer-projects`，仅接受主站登录会话；写请求同时要求 CSRF、同源检查、有效组织成员和对象级权限。客户端不得提交可信的 `organization_id` 或操作者 ID，均由服务端会话推导。当前页面端已支持项目基础信息编辑，复用同一版本控制规则。
 
 请求和响应使用 UTF-8 JSON。单页默认 25、最大 100 条；批量请求最大 100 项且限制总请求体。日期时间使用 ISO 8601 UTC。列表游标为服务端签名的不透明字符串。
 
@@ -19,6 +19,8 @@
 | POST | `/projects/{project_id}/materials` | 新增物料 | `Idempotency-Key` |
 | POST | `/materials/{material_id}/competitors` | 新增竞争方案 | `Idempotency-Key` |
 | POST | `/trash/projects/{project_id}/restore` | 管理员恢复软删除项目 | 组织与角色校验 |
+
+项目更新允许修改名称、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。
 
 客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD，以及物料/竞品编辑与软删除、项目重新激活/衍生、报表和通知 API 在后续切片补齐。未实现端点不返回伪成功。
 
