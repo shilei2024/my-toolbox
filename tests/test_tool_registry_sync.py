@@ -81,6 +81,8 @@ class ToolRegistrySyncTest(unittest.TestCase):
         self.assertIn('data-remove-queue-id=', body)
         self.assertIn('id="ipArchiveErrors"', body)
         self.assertIn('requestArchiveBatch', body)
+        self.assertIn('IP_ARCHIVES_PER_REQUEST = 2', body)
+        self.assertIn('error?.status === 524', body)
         self.assertIn('当前网站入口的上传限制', body)
         self.assertIn("'Accept': 'application/json'", body)
         self.assertNotIn("onclick=", body)

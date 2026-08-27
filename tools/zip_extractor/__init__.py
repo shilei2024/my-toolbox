@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import logging
+import time
 import zipfile
 from pathlib import PurePosixPath
 
@@ -27,6 +29,7 @@ MAX_DEPTH = 8                                 # 递归层数上限
 MAX_ENTRY_UNCOMPRESSED_BYTES = 32 * MB
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 64 * MB
 MAX_COMPRESSION_RATIO = 100
+MAX_ARCHIVE_WORKERS = 2
 ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 
 
@@ -160,6 +163,13 @@ def _extract_deep(
                 # 部分发票平台生成的内层压缩包或 PDF 没有可靠扩展名，
                 # 读取最少量文件头识别真实格式，避免递归链路静默中断。
                 if not member_kind:
+                    # Known non-PDF files (XML/OFD/images/signatures, etc.) are
+                    # irrelevant to this tool. Opening every one merely to read
+                    # five bytes is disproportionately expensive for invoice
+                    # bundles containing thousands of auxiliary files. Only
+                    # extensionless members need signature-based discovery.
+                    if PurePosixPath(lower_name).suffix:
+                        continue
                     if not _member_within_limits(info):
                         continue
                     signature = _member_signature(zf, info)
@@ -216,6 +226,26 @@ def _extract_deep(
     return results
 
 
+def _extract_archive_payload(zip_bytes: bytes, source_name: str) -> tuple[list[dict], dict]:
+    """Extract and hash one archive without depending on Flask context."""
+    started_at = time.perf_counter()
+    diagnostics = {"issues": [], "nested_archives": 0, "archives_opened": 0}
+    pdfs = _extract_deep(zip_bytes, source_name, diagnostics=diagnostics)
+    encoded: list[dict] = []
+    for pdf in pdfs:
+        data = pdf["data"]
+        pdf["content_hash"] = _quick_hash(data)
+        encoded.append(pdf)
+    log.info(
+        "analyze complete: %s (%d PDFs, %d nested archives, %.3fs)",
+        source_name,
+        len(encoded),
+        diagnostics["nested_archives"],
+        time.perf_counter() - started_at,
+    )
+    return encoded, diagnostics
+
+
 # ---------------------------------------------------------------------------
 # API：上传并分析
 # ---------------------------------------------------------------------------
@@ -253,6 +283,7 @@ def analyze_uploaded_archives(usage_tool_id: str):
         received_bytes = 0
         skipped_oversize: list[str] = []
         archive_results: list[dict] = []
+        accepted_archives: list[tuple[int, str, bytes]] = []
 
         for f in files:
             if not f.filename:
@@ -285,16 +316,42 @@ def analyze_uploaded_archives(usage_tool_id: str):
                 zip_bytes = f.read()
                 received_bytes += len(zip_bytes)
                 log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
-                diagnostics = {"issues": [], "nested_archives": 0, "archives_opened": 0}
-                pdfs = _extract_deep(zip_bytes, f.filename, diagnostics=diagnostics)
-                archive_result["pdf_count"] = len(pdfs)
-                archive_result["nested_archives"] = diagnostics["nested_archives"]
-                if diagnostics["issues"]:
-                    archive_result["issues"] = diagnostics["issues"][:5]
-                all_pdfs.extend(pdfs)
+                accepted_archives.append((len(archive_results) - 1, f.filename, zip_bytes))
             except Exception as e:
                 archive_result["error"] = True
                 log.warning("Failed to read %s: %s", f.filename, e)
+
+        # A multi-ZIP request previously decompressed each archive serially.
+        # Two individually valid archives could therefore exceed the edge
+        # gateway deadline when uploaded together. Keep one HTTP request and
+        # one usage charge, but process at most two independent archives in
+        # parallel so total latency approaches the slowest archive, not their
+        # sum. Iterating futures in input order preserves response ordering.
+        if accepted_archives:
+            with ThreadPoolExecutor(
+                max_workers=min(MAX_ARCHIVE_WORKERS, len(accepted_archives)),
+                thread_name_prefix="invoice-zip",
+            ) as executor:
+                jobs = [
+                    (
+                        result_index,
+                        source_name,
+                        executor.submit(_extract_archive_payload, zip_bytes, source_name),
+                    )
+                    for result_index, source_name, zip_bytes in accepted_archives
+                ]
+                for result_index, source_name, future in jobs:
+                    archive_result = archive_results[result_index]
+                    try:
+                        pdfs, diagnostics = future.result()
+                        archive_result["pdf_count"] = len(pdfs)
+                        archive_result["nested_archives"] = diagnostics["nested_archives"]
+                        if diagnostics["issues"]:
+                            archive_result["issues"] = diagnostics["issues"][:5]
+                        all_pdfs.extend(pdfs)
+                    except Exception as exc:
+                        archive_result["error"] = True
+                        log.warning("Failed to extract %s: %s", source_name, exc)
 
         if not all_pdfs and skipped_oversize:
             return jsonify(
@@ -317,26 +374,28 @@ def analyze_uploaded_archives(usage_tool_id: str):
         seen: set[str] = set()
         unique: list[dict] = []
         for p in all_pdfs:
-            data = p.pop("data")
-            h = _quick_hash(data)
+            h = p["content_hash"]
             if h in seen:
                 continue
             seen.add(h)
-            p["content_hash"] = h
-            p["data_b64"] = base64.b64encode(data).decode("ascii")
-            p["size_kb"] = round(len(data) / 1024, 1)
             unique.append(p)
 
-        # ---- 响应体大小门禁：按 base64 累计截断 ----
+        # ---- 响应体大小门禁：先判断预算，再做昂贵的 base64 编码 ----
+        # The previous implementation encoded every extracted PDF and only
+        # then discarded overflow. Large archives therefore spent CPU and
+        # memory on data that could never be returned, increasing 524 risk.
         kept: list[dict] = []
-        truncated: list[dict] = []
+        truncated_count = 0
         acc = 0
         for p in unique:
-            sz = len(p["data_b64"])
-            if acc + sz > max_response_b64_bytes:
-                truncated.append(p)
+            data = p.pop("data")
+            encoded_size = 4 * ((len(data) + 2) // 3)
+            if acc + encoded_size > max_response_b64_bytes:
+                truncated_count += 1
                 continue
-            acc += sz
+            p["data_b64"] = base64.b64encode(data).decode("ascii")
+            p["size_kb"] = round(len(data) / 1024, 1)
+            acc += encoded_size
             kept.append(p)
 
         body: dict = {
@@ -346,11 +405,11 @@ def analyze_uploaded_archives(usage_tool_id: str):
             "skipped_oversize": skipped_oversize,
             "archive_results": archive_results,
         }
-        if truncated:
+        if truncated_count:
             body["truncated"] = True
-            body["truncated_count"] = len(truncated)
+            body["truncated_count"] = truncated_count
             body["truncated_msg"] = (
-                f"本批还剩 {len(truncated)} 个 PDF 未返回（响应体超 "
+                f"本批还剩 {truncated_count} 个 PDF 未返回（响应体超 "
                 f"{max_response_b64_bytes//MB}MB 上限）。"
                 f"建议：① 改用更小的压缩包分批；② 减少单包内文件数。"
             )

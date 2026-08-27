@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -228,6 +229,95 @@ class PhaseASecurityTests(unittest.TestCase):
         self.assertEqual(payload["archive_results"][0]["name"], "broken.zip")
         self.assertIn("不是有效 ZIP", payload["archive_results"][0]["issues"][0])
         commit.assert_not_called()
+
+    def test_two_invoice_archives_are_extracted_concurrently(self):
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY="invoice-concurrency-test")
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("placeholder.txt", b"ok")
+        archive_bytes = archive.getvalue()
+        rendezvous = threading.Barrier(2)
+
+        def coordinated_extract(_zip_bytes, source_name, **_kwargs):
+            rendezvous.wait(timeout=1)
+            return [{
+                "filename": f"{source_name}.pdf",
+                "size": 14,
+                "path_chain": [source_name, "invoice.pdf"],
+                "data": b"%PDF-1.4\n%%EOF",
+            }]
+
+        with (
+            patch("tools.zip_extractor._extract_deep", side_effect=coordinated_extract),
+            patch("tools.zip_extractor.commit_usage") as commit,
+        ):
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [
+                    (io.BytesIO(archive_bytes), "first.zip"),
+                    (io.BytesIO(archive_bytes), "second.zip"),
+                ]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual([item["name"] for item in payload["archive_results"]], ["first.zip", "second.zip"])
+        self.assertEqual([item["pdf_count"] for item in payload["archive_results"]], [1, 1])
+        commit.assert_called_once_with("invoice_printer", success=True)
+
+    def test_known_non_invoice_members_are_not_signature_scanned(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+            for index in range(50):
+                zf.writestr(f"metadata/{index}.xml", b"<invoice />" * 100)
+            zf.writestr("invoice.pdf", b"%PDF-1.4\n%%EOF")
+
+        with patch("tools.zip_extractor._member_signature") as signature:
+            pdfs = _extract_deep(archive.getvalue(), "with-metadata.zip")
+
+        self.assertEqual(len(pdfs), 1)
+        signature.assert_not_called()
+
+    def test_invoice_response_encodes_only_pdfs_within_response_budget(self):
+        app = Flask(__name__)
+        app.config.update(
+            TESTING=True,
+            SECRET_KEY="invoice-response-budget-test",
+            INVOICE_ZIP_RESPONSE_MB=1,
+        )
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("first.pdf", b"%PDF-1.4\n" + b"A" * (700 * 1024))
+            zf.writestr("second.pdf", b"%PDF-1.4\n" + b"B" * (700 * 1024))
+
+        with (
+            patch("tools.zip_extractor.base64.b64encode", wraps=base64.b64encode) as encode,
+            patch("tools.zip_extractor.commit_usage"),
+        ):
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(archive.getvalue()), "large-response.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["total"], 1)
+        self.assertTrue(payload["truncated"])
+        self.assertEqual(payload["truncated_count"], 1)
+        self.assertEqual(encode.call_count, 1)
 
     def test_invoice_zip_larger_than_legacy_four_mb_limit_is_accepted(self):
         app = Flask(__name__)
