@@ -37,10 +37,17 @@ class GalleryExternalRedirectTest(unittest.TestCase):
     def test_homepage_exposes_responsive_main_and_gallery_navigation(self) -> None:
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b'class="navbar navbar-expand-lg site-navbar', response.data)
-        self.assertIn(b'id="tool-library"', response.data)
-        self.assertIn(b'class="tool-grid"', response.data)
-        self.assertIn(b'href="/gallery"', response.data)
+        body = response.get_data(as_text=True)
+        self.assertIn('class="navbar navbar-expand-lg site-navbar', body)
+        self.assertIn('id="tool-library"', body)
+        self.assertIn('class="tool-grid"', body)
+        self.assertIn('href="/gallery"', body)
+        self.assertIn("常用工具，", body)
+        self.assertIn('class="home-gallery-entry"', body)
+        self.assertNotIn('class="home-hero-panel"', body)
+        self.assertNotIn('class="ai-spotlight"', body)
+        self.assertNotIn("从一句描述", body)
+        self.assertNotIn("一个账户，两种工作方式", body)
 
     def test_fails_closed_when_gallery_url_unconfigured(self) -> None:
         previous = self.app.config.get("AI_IMAGE_EXTERNAL_URL")
