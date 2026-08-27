@@ -1,30 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ site_name }} — 首页{% endblock %}
 {% block content %}
-<section class="home-hero" aria-labelledby="home-title">
-  <div class="home-hero-copy">
-    <h1 id="home-title">常用工具，<br /><em>打开就能用。</em></h1>
-    <p class="home-hero-lead">处理 PDF、图片、表格和报销资料，选择工具即可开始。</p>
-    <div class="home-hero-actions">
-      <a class="btn btn-primary btn-lg" href="#tool-library">浏览工具 <i class="bi bi-arrow-down-short"></i></a>
-      {% if not current_user.is_authenticated %}
-        <a class="btn btn-outline-dark btn-lg" href="{{ url_for('auth.register') }}">免费注册</a>
-      {% endif %}
-    </div>
-  </div>
-</section>
-
-{% if config.AI_IMAGE_EXTERNAL_URL %}
-<a class="home-gallery-entry" href="/create" aria-label="打开 AI Gallery">
-  <span class="home-gallery-icon" aria-hidden="true"><i class="bi bi-stars"></i></span>
-  <span class="home-gallery-copy">
-    <strong>AI Gallery</strong>
-    <small>图片与视频创作</small>
-  </span>
-  <span class="home-gallery-action">前往创作 <i class="bi bi-arrow-up-right"></i></span>
-</a>
-{% endif %}
-
 {# 实时汇率 - 双向切换 #}
 <section class="utility-strip" aria-label="实时汇率">
   <div class="utility-strip-label"><i class="bi bi-globe2"></i><span>实时汇率</span></div>
