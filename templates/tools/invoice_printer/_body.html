@@ -109,7 +109,7 @@
 <div class="mb-3">
   <h5><i class="bi bi-receipt"></i> 发票提取与批量打印</h5>
   <p class="text-muted small mb-0">
-    ZIP 会在服务器内存中安全提取 PDF（不落盘、不保存）；PDF 和图片直接在浏览器本地预览、打印或导出。
+    ZIP、PDF 和图片均只在当前浏览器本地处理，不上传、不落盘、不保存。
   </p>
 </div>
 
@@ -163,15 +163,25 @@
 <script>
 // ============== 状态 ==============
 const IP_LIMITS = {{ invoice_limits | tojson }};
-const IP_ARCHIVES_PER_REQUEST = 2;
 const IP_LOCAL_FILE_MAX_MB = 30;
 const IP_MAX_QUEUE_FILES = 200;
+const IP_LOCAL_ZIP_MAX_DEPTH = 8;
+const IP_LOCAL_ZIP_MAX_ENTRY_BYTES = 32 * 1024 * 1024;
+const IP_LOCAL_ZIP_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const IP_LOCAL_ZIP_MAX_RATIO = 100;
+const IP_LOCAL_ZIP_CONCURRENCY = 2;
+const IP_JSZIP_URLS = [
+  '/static/vendor/jszip/jszip-3.10.1.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+  'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+];
 const STATE = {
   queue: [],      // {file, name, size, sizeStr} — 待确认
   files: [],      // {name, size, sizeStr, type, _selected, dataUrl, blobUrl} — 已确认
   busy: false,
 };
 let queueSerial = 0;
+let jsZipLoadPromise = null;
 
 // 支持的图片 MIME → 扩展名映射
 const IMG_MIME = { 'image/jpeg': 1, 'image/png': 1 };
@@ -289,7 +299,7 @@ function addToQueue(files) {
     if (!f || !f.name || f.size === 0) continue;
     if (!isZipType(f) && !isPDFType(f) && !isImageType(f)) { unsupported++; continue; }
     if (STATE.queue.length >= IP_MAX_QUEUE_FILES) break;
-    // ZIP 受服务端安全门限约束；本地 PDF/图片只受浏览器内存门限约束。
+    // ZIP 沿用安全解压门限；所有文件均只在浏览器内存中处理。
     const maxMB = isZipType(f) ? IP_LIMITS.single_mb : IP_LOCAL_FILE_MAX_MB;
     if (f.size > maxMB * 1024 * 1024) {
       oversize++;
@@ -506,168 +516,218 @@ async function processFiles(btn) {
   }
 }
 
-function planArchiveBatches(queue) {
-  const batches = [];
-  let current = [];
-  let bytes = 0;
-  for (const item of queue) {
-    if (current.length && (
-      bytes + item.size > IP_LIMITS.batch_bytes ||
-      current.length >= IP_ARCHIVES_PER_REQUEST
-    )) {
-      batches.push(current);
-      current = [];
-      bytes = 0;
-    }
-    current.push(item);
-    bytes += item.size;
-  }
-  if (current.length) batches.push(current);
-  return batches;
-}
-
 async function extractArchives(queue) {
-  const batches = planArchiveBatches(queue);
-  const extracted = [];
-  const failedById = new Map();
-  const warnings = [];
+  await ensureJSZip();
+  const results = new Array(queue.length);
+  let nextIndex = 0;
+  let completed = 0;
 
-  const keepFailed = (item, message) => {
-    failedById.set(item.id, { ...item, error: message });
-  };
-
-  const acceptResponse = (batch, data, label) => {
-    const returnedFiles = Array.isArray(data.files) ? data.files : [];
-    for (const item of returnedFiles) extracted.push(base64PDFToFile(item));
-
-    const archiveResults = Array.isArray(data.archive_results) ? data.archive_results : null;
-    if (archiveResults) {
-      batch.forEach((item, index) => {
-        const result = archiveResults[index];
-        if (!result || result.skipped || result.error || Number(result.pdf_count || 0) === 0) {
-          const issueText = Array.isArray(result?.issues) ? result.issues.join('；') : '';
-          const reason = issueText || (result?.skipped
-            ? '服务器因大小限制跳过，请检查上传门限'
-            : (result?.error ? '压缩包读取失败或格式不受支持' : '压缩包内未找到 PDF'));
-          keepFailed(item, reason);
-        }
-      });
-    } else if (returnedFiles.length === 0) {
-      batch.forEach(item => keepFailed(item, '服务器未返回 PDF'));
-    }
-
-    if (data.truncated) warnings.push(`${label}有 ${data.truncated_count || 0} 个 PDF 因响应上限未加入`);
-    if (data.skipped_oversize?.length) {
-      const skippedNames = data.skipped_oversize.map(message => String(message).split('（', 1)[0]);
-      batch.filter(item => skippedNames.includes(item.name)).forEach(item => {
-        keepFailed(item, '压缩包超过服务器上传门限');
-      });
-    }
-  };
-
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batch = batches[batchIndex];
-    try {
-      showProgress(Math.round(batchIndex / batches.length * 45), `提取压缩包 ${batchIndex + 1}/${batches.length}…`);
-      const data = await requestArchiveBatch(batch);
-      acceptResponse(batch, data, `第 ${batchIndex + 1} 批`);
-    } catch (error) {
-      // 网关可能仍使用旧的请求体门限。整批失败时逐包重试，至少不让
-      // 小压缩包被同批的大压缩包连带阻断。
-      if (batch.length > 1 && (!error.status || [413, 502, 504].includes(error.status))) {
-        warnings.push(`第 ${batchIndex + 1} 批被上传网关拒绝，已自动逐包重试`);
-        for (let itemIndex = 0; itemIndex < batch.length; itemIndex++) {
-          const item = batch[itemIndex];
-          try {
-            showProgress(
-              Math.round((batchIndex + (itemIndex + 1) / batch.length) / batches.length * 45),
-              `逐包重试 ${itemIndex + 1}/${batch.length}：${item.name}`
-            );
-            const data = await requestArchiveBatch([item]);
-            acceptResponse([item], data, item.name);
-          } catch (singleError) {
-            const reason = archiveRequestErrorMessage(singleError, item);
-            keepFailed(item, reason);
-            warnings.push(`${item.name}：${reason}`);
-          }
-        }
-      } else {
-        const diagnosticResults = Array.isArray(error?.data?.archive_results)
-          ? error.data.archive_results
-          : null;
-        if (diagnosticResults?.length === batch.length) {
-          batch.forEach((item, index) => {
-            const issues = diagnosticResults[index]?.issues || [];
-            const reason = issues.length ? issues.join('；') : archiveRequestErrorMessage(error, item);
-            keepFailed(item, reason);
-            warnings.push(`${item.name}：${reason}`);
-          });
-        } else {
-          const reason = archiveRequestErrorMessage(error, batch[0]);
-          batch.forEach(item => keepFailed(item, reason));
-          warnings.push(`第 ${batchIndex + 1} 批提取失败：${reason}`);
-        }
+  async function worker() {
+    while (nextIndex < queue.length) {
+      const index = nextIndex++;
+      const item = queue[index];
+      showProgress(Math.round(completed / queue.length * 45), `本地提取 ${index + 1}/${queue.length}：${item.name}`);
+      try {
+        results[index] = await extractArchiveLocally(item);
+      } catch (error) {
+        results[index] = { files: [], issues: [], error: localArchiveErrorMessage(error) };
+      } finally {
+        completed++;
+        showProgress(Math.round(completed / queue.length * 45), `已提取 ${completed}/${queue.length} 个压缩包`);
       }
     }
   }
-  for (const item of failedById.values()) {
-    if (!warnings.some(message => message.includes(item.name))) {
-      warnings.push(`${item.name}：${item.error}`);
-    }
-  }
-  return { files: extracted, failedItems: [...failedById.values()], warnings };
-}
 
-async function requestArchiveBatch(batch) {
-  const form = new FormData();
-  batch.forEach(item => form.append('files', item.file, item.name));
-  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-  const response = await fetch('/tools/invoice-printer/analyze', {
-    method: 'POST', body: form, headers: {
-      'X-CSRFToken': csrfToken,
-      'Accept': 'application/json',
+  const workerCount = Math.min(IP_LOCAL_ZIP_CONCURRENCY, queue.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  const files = [];
+  const failedItems = [];
+  const warnings = [];
+  results.forEach((result, index) => {
+    const item = queue[index];
+    if (result.files.length === 0) {
+      const reason = result.error || result.issues.join('；') || '压缩包内未找到 PDF';
+      failedItems.push({ ...item, error: reason });
+      warnings.push(`${item.name}：${reason}`);
+      return;
     }
+    files.push(...result.files);
+    result.issues.forEach(issue => warnings.push(`${item.name}：${issue}`));
   });
-  const data = await response.json().catch(() => null);
-  if (!response.ok || !data?.success) {
-    const error = new Error(data?.error || `HTTP ${response.status}`);
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-  return data;
+  return { files, failedItems, warnings };
 }
 
-function archiveRequestErrorMessage(error, item) {
-  if (error?.status === 413) {
-    return `${item?.sizeStr || '该文件'} 超过当前网站入口的上传限制，请检查实际使用的 Cloudflare、Caddy 或 Nginx 请求体门限`;
-  }
-  if (error?.data?.error) {
-    const details = Array.isArray(error.data.archive_results)
-      ? error.data.archive_results.flatMap(result => result.issues || []).join('；')
-      : '';
-    return details ? `${error.data.error}（${details}）` : error.data.error;
-  }
-  if (error?.status === 403 || error?.status === 400) {
-    return `请求校验失败（HTTP ${error.status}），请刷新页面后重试`;
-  }
-  if (error?.status === 502 || error?.status === 504) {
-    return `解压服务暂时不可用（HTTP ${error.status}），请稍后重试`;
-  }
-  if (error?.status === 524) {
-    return '网站入口等待解压结果超时（HTTP 524）；服务器可能仍在处理，已停止自动重试以避免重复解压，请稍后再次处理保留的文件';
-  }
-  return error?.message || '未知错误';
+async function extractArchiveLocally(item) {
+  const context = {
+    remaining: IP_LOCAL_ZIP_MAX_TOTAL_BYTES,
+    files: [],
+    issues: [],
+  };
+  await extractZipLevel(await item.file.arrayBuffer(), [item.name], 0, context);
+  return { files: context.files, issues: context.issues, error: '' };
 }
 
-function base64PDFToFile(item) {
-  const binary = atob(item.data_b64 || '');
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const file = new File([bytes], item.filename || 'invoice.pdf', { type: 'application/pdf' });
-  file._invoiceKey = item.content_hash ? `sha256:${item.content_hash}` : `extracted:${item.filename}:${item.size || bytes.length}`;
-  file._invoiceSource = (item.path_chain || []).join(' / ');
-  return file;
+async function extractZipLevel(source, sourceChain, depth, context) {
+  const label = sourceChain.join(' → ');
+  if (depth > IP_LOCAL_ZIP_MAX_DEPTH) {
+    context.issues.push(`${label}：嵌套层数超过 ${IP_LOCAL_ZIP_MAX_DEPTH} 层`);
+    return;
+  }
+
+  let archive;
+  try {
+    archive = await JSZip.loadAsync(source);
+  } catch (error) {
+    throw new Error(`${label}：${localArchiveErrorMessage(error)}`);
+  }
+
+  for (const entry of Object.values(archive.files)) {
+    const normalizedName = String(entry.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalizedName || entry.dir || normalizedName.startsWith('__MACOSX/')) continue;
+    const parts = normalizedName.split('/').filter(Boolean);
+    const basename = parts[parts.length - 1] || '';
+    if (!basename || basename.startsWith('.')) continue;
+
+    const lowerName = basename.toLowerCase();
+    let kind = lowerName.endsWith('.pdf') ? 'pdf' : (
+      lowerName.endsWith('.zip') || lowerName.endsWith('.zipx') ? 'zip' : ''
+    );
+    if (!kind && basename.includes('.')) continue;
+
+    const sizes = localZipEntrySizes(entry);
+    const pathLabel = [...sourceChain, ...parts].join(' → ');
+    const unsafeReason = localZipSafetyReason(sizes, context.remaining);
+    if (unsafeReason) {
+      context.issues.push(`${pathLabel}：${unsafeReason}`);
+      continue;
+    }
+
+    context.remaining -= sizes.uncompressed;
+    let bytes;
+    try {
+      bytes = await entry.async('uint8array');
+    } catch (error) {
+      context.issues.push(`${pathLabel}：${localArchiveErrorMessage(error)}`);
+      continue;
+    }
+
+    if (!kind) {
+      if (hasPDFSignature(bytes)) kind = 'pdf';
+      else if (hasZIPSignature(bytes)) kind = 'zip';
+      else continue;
+    }
+
+    if (kind === 'zip') {
+      try {
+        await extractZipLevel(bytes, [...sourceChain, ...parts], depth + 1, context);
+      } catch (error) {
+        context.issues.push(localArchiveErrorMessage(error));
+      }
+      continue;
+    }
+
+    const filename = lowerName.endsWith('.pdf') ? basename : `${basename}.pdf`;
+    const file = new File([bytes], filename, { type: 'application/pdf' });
+    file._invoiceKey = `sha256:${await invoiceContentHash(bytes)}`;
+    file._invoiceSource = [...sourceChain, ...parts].join(' / ');
+    context.files.push(file);
+  }
+}
+
+function localZipEntrySizes(entry) {
+  const compressed = Number(entry?._data?.compressedSize);
+  const uncompressed = Number(entry?._data?.uncompressedSize);
+  return {
+    compressed: Number.isFinite(compressed) && compressed >= 0 ? compressed : -1,
+    uncompressed: Number.isFinite(uncompressed) && uncompressed >= 0 ? uncompressed : -1,
+  };
+}
+
+function localZipSafetyReason(sizes, remaining) {
+  if (sizes.uncompressed < 0 || sizes.compressed < 0) return '无法验证文件大小，已安全跳过';
+  if (sizes.uncompressed > IP_LOCAL_ZIP_MAX_ENTRY_BYTES) return '文件解压后超过 32MB，已跳过';
+  if (sizes.uncompressed > remaining) return '压缩包累计解压内容超过 64MB，后续文件已跳过';
+  if (sizes.uncompressed > 0 && (
+    sizes.compressed === 0 || sizes.uncompressed / sizes.compressed > IP_LOCAL_ZIP_MAX_RATIO
+  )) return '压缩比超过安全上限，已跳过';
+  return '';
+}
+
+function hasPDFSignature(bytes) {
+  return bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 &&
+    bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+}
+
+function hasZIPSignature(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b &&
+    ((bytes[2] === 0x03 && bytes[3] === 0x04) ||
+     (bytes[2] === 0x05 && bytes[3] === 0x06) ||
+     (bytes[2] === 0x07 && bytes[3] === 0x08));
+}
+
+async function invoiceContentHash(bytes) {
+  if (globalThis.crypto?.subtle) {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  }
+  let hash = 2166136261;
+  for (const value of bytes) hash = Math.imul(hash ^ value, 16777619) >>> 0;
+  return `fallback-${hash.toString(16).padStart(8, '0')}-${bytes.length}`;
+}
+
+function localArchiveErrorMessage(error) {
+  const message = String(error?.message || error || '压缩包读取失败');
+  if (/encrypted|password|加密/i.test(message)) return '压缩包已加密，无法读取';
+  if (/not a zip|corrupt|central directory|signature/i.test(message)) return '不是有效 ZIP 或文件已损坏';
+  return message;
+}
+
+async function ensureJSZip() {
+  if (globalThis.JSZip) return globalThis.JSZip;
+  if (!jsZipLoadPromise) {
+    jsZipLoadPromise = (async () => {
+      for (const url of IP_JSZIP_URLS) {
+        try {
+          await loadExternalScript(url);
+          if (globalThis.JSZip) return globalThis.JSZip;
+        } catch (_) {
+          // Try the next trusted CDN.
+        }
+      }
+      throw new Error('本地解压组件加载失败，请检查网络后重试');
+    })().catch(error => {
+      jsZipLoadPromise = null;
+      throw error;
+    });
+  }
+  return jsZipLoadPromise;
+}
+
+function loadExternalScript(url) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-ip-src="${url}"]`);
+    if (existing) {
+      if (globalThis.JSZip || existing.dataset.ipState === 'loaded') resolve();
+      else {
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+      }
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = url;
+    script.dataset.ipSrc = url;
+    script.onload = () => {
+      script.dataset.ipState = 'loaded';
+      resolve();
+    };
+    script.onerror = () => {
+      script.remove();
+      reject(new Error(`组件加载失败：${url}`));
+    };
+    document.head.appendChild(script);
+  });
 }
 
 function generateThumbnail(file, maxW, maxH) {
@@ -1060,17 +1120,8 @@ async function exportZip() {
   const selected = STATE.files.filter(f => !!f._selected);
   if (selected.length === 0) { showToast('没有选中的文件', 'warn'); return; }
 
-  // 懒加载 JSZip；加载失败后给出可重试的明确提示。
   try {
-    if (typeof JSZip === 'undefined') {
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-        s.onload = resolve;
-        s.onerror = () => reject(new Error('JSZip 加载失败，请检查网络后重试'));
-        document.head.appendChild(s);
-      });
-    }
+    await ensureJSZip();
   } catch (error) {
     showToast(error.message, 'warn');
     return;
