@@ -11,8 +11,9 @@
 1. 浏览器将不超过安全门限的 ZIP 按批发送到 `/tools/invoice-printer/analyze`。腾讯云主站
    默认允许单个 ZIP 20MB、单批 ZIP 合计 20MB，并始终在 Flask 全局上传门限下预留
    1MB multipart 开销；不再沿用旧 Vercel 4MB 限制。
-2. 服务端沿用 `tools.zip_extractor` 的深度、单条目、累计解压体积和压缩比限制，提取并
-   按内容哈希去重 PDF。
+2. 服务端沿用 `tools.zip_extractor` 的深度、单条目、累计解压体积和压缩比限制，循环
+   解开内层 ZIP，直到提取 PDF 后按内容哈希去重。除 `.zip`、`.zipx` 和 `.pdf` 扩展名外，
+   还会检查文件签名，兼容发票平台生成的无扩展名内层压缩包和 PDF。
 3. 浏览器把返回的 PDF 转为本地 `File`，与直接选择的 PDF/图片加入同一工作台。
 4. 预览、删除、单份打印、批量合并打印及 ZIP 导出均在浏览器完成，不产生持久文件。
 
@@ -43,6 +44,11 @@
 `/tools/invoice-printer/analyze` 在成功响应中返回 `archive_results`，其顺序与上传的 ZIP 顺序一致。每项包含 `name` 和 `pdf_count`；被大小限制跳过或处理异常的压缩包还会标记 `skipped` 或 `error`。前端据此只将确实提取到 PDF 的压缩包移出待处理清单，空包、损坏包和未返回文件的压缩包继续保留，避免与同批直接上传的 PDF 混合处理时静默丢失。
 
 ## 验证与回滚
+
+腾讯云主站 Flask 由宿主机 `mytoolbox.service` 运行，不属于
+`deploy/docker-compose.production.yml` 的 AI Generation 容器。代码更新后必须执行
+`sudo systemctl restart mytoolbox`，再用 `sudo systemctl status mytoolbox --no-pager`
+确认服务为 `active (running)`。
 
 发布后分别访问新旧网址，确认均显示统一工作台；上传一个 4–20MB、包含嵌套 ZIP 的样例
 以及直接 PDF/图片，确认逐项删除、清空待处理、删除勾选、清空全部、继续追加、批量打印

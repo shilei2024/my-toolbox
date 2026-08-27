@@ -167,6 +167,45 @@ class PhaseASecurityTests(unittest.TestCase):
         )
         commit.assert_called_once_with("invoice_printer", success=True)
 
+    def test_invoice_endpoint_recurses_through_extensionless_nested_archives(self):
+        app = Flask(__name__)
+        app.config.update(
+            TESTING=True,
+            SECRET_KEY="invoice-recursive-test",
+            MAX_CONTENT_LENGTH=25 * MB,
+        )
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        leaf = io.BytesIO()
+        with zipfile.ZipFile(leaf, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("发票目录\\电子发票", b"%PDF-1.4\nrecursive\n%%EOF\n")
+
+        middle = io.BytesIO()
+        with zipfile.ZipFile(middle, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("无扩展名内层包", leaf.getvalue())
+
+        outer = io.BytesIO()
+        with zipfile.ZipFile(outer, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("批次目录\\第二层.ZIP", middle.getvalue())
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(outer.getvalue()), "outer.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["files"][0]["filename"], "电子发票.pdf")
+        self.assertEqual(payload["archive_results"][0]["pdf_count"], 1)
+        self.assertIn("无扩展名内层包", payload["files"][0]["path_chain"][0])
+        commit.assert_called_once_with("invoice_printer", success=True)
+
     def test_invoice_zip_larger_than_legacy_four_mb_limit_is_accepted(self):
         app = Flask(__name__)
         app.config.update(
