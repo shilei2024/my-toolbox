@@ -8,7 +8,7 @@ Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认
 
 1. 检查 `/healthz`、登录、统一后台和现有工具无异常。
 2. 功能开放后检查客户项目 API 的请求量、4xx/5xx、P95 延迟和 409 冲突数量。
-3. 检查项目列表中逾期和 14 天未更新数量；Phase 1 仅展示，不自动通知。
+3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量；日期按组织时区计算，Phase 1 仅展示，不自动通知。
 4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表和 `audit_events`。
 
 ## 账号或权限异常

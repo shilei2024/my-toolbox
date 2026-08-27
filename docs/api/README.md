@@ -2,7 +2,7 @@
 
 ## 业务模块契约
 
-- [Customer Projects API v1](customer-projects-v1.md)：Phase 0 已冻结、尚未部署的客户项目页面/API 契约；实现前保持“设计状态”标记。
+- [Customer Projects API v1](customer-projects-v1.md)：Phase 1 核心 API 契约；功能开关默认关闭，真实 PostgreSQL staging 与生产审批通过后才可开放。
 
 ## 边界
 

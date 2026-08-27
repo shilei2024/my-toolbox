@@ -85,6 +85,29 @@ docker compose -f compose.yaml -f compose.staging.yaml ps
 
 生产命令与 staging 相同，只将 env/override 文件替换为 production。命令模板中的文件在仓库实际补齐前不可执行。
 
+## 客户项目 Phase 1 首次启用
+
+客户项目是主站 Flask 模块，必须与现有站点使用同一应用发布包。腾讯云服务器完成应用发布后，在应用目录执行一次受控迁移；不要让 Web 进程自动建表：
+
+```bash
+cd /opt/mindfulpenpal
+export FLASK_APP='app:create_app'
+export AUTO_CREATE_SCHEMA=false
+flask db current
+flask db upgrade
+flask db current
+```
+
+预期最后显示 revision `8904db6a3fa5` 且退出码为 `0`。迁移前必须完成 PostgreSQL 备份并保存备份 ID。然后确认环境文件中：
+
+```dotenv
+CUSTOMER_PROJECTS_ENABLED=false
+CUSTOMER_PROJECTS_PILOT_EMAILS=
+AUTO_CREATE_SCHEMA=false
+```
+
+先以关闭开关启动并验证主站、登录、健康检查和现有工具；完成 staging 的组织隔离、权限、409、备份恢复、性能和人工页面验收后，再由审批人将试点邮箱写入 `CUSTOMER_PROJECTS_PILOT_EMAILS` 并滚动重启。回滚时先将 `CUSTOMER_PROJECTS_ENABLED=false`，再回退应用镜像；保留新增表和业务记录，事故处理中不要执行 `flask db downgrade`。
+
 ## 常见失败
 
 - `manifest unknown`：digest/tag 不存在；停止，不要改用 `latest`。

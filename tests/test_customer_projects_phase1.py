@@ -23,6 +23,7 @@ from customer_projects.services.projects import (  # noqa: E402
     bootstrap_organization,
     create_customer,
     create_project,
+    local_day_bounds,
 )
 from extensions import db  # noqa: E402
 from models import User  # noqa: E402
@@ -250,6 +251,54 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         html = detail.get_data(as_text=True)
         self.assertIn("新增跟进", html)
         self.assertIn("尚未添加推广物料", html)
+        self.assertIn("编辑项目基础信息", html)
+        self.assertNotIn("cp-form-panel cp-sticky", html)
+
+    def test_local_day_bounds_use_organization_timezone(self) -> None:
+        start, end = local_day_bounds(
+            datetime(2026, 8, 27, 18, 30, tzinfo=timezone.utc), "Asia/Shanghai"
+        )
+        self.assertEqual(start, datetime(2026, 8, 27, 16, 0, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 8, 28, 16, 0, tzinfo=timezone.utc))
+
+    def test_project_edit_page_updates_core_fields_with_optimistic_lock(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        response = self.client.post(
+            f"/customer-projects/projects/{project_id}/edit",
+            data={
+                "project_version": "1",
+                "name": "车载控制器二期",
+                "assessment_grade": "A",
+                "probability_band": "70",
+                "next_action": "确认量产排期",
+                "next_follow_up_at": "2026-09-10T09:30",
+                "expected_design_win_at": "2026-10-01",
+                "expected_mass_production_at": "2027-01-15",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            self.assertEqual(project.name, "车载控制器二期")
+            self.assertEqual(project.assessment_grade, "A")
+            self.assertEqual(project.probability_band, 70)
+            self.assertEqual(project.next_action, "确认量产排期")
+            self.assertEqual(project.next_follow_up_at.replace(tzinfo=timezone.utc).hour, 1)
+            self.assertEqual(project.expected_design_win_at.isoformat(), "2026-10-01")
+            self.assertEqual(project.expected_mass_production_at.isoformat(), "2027-01-15")
+            self.assertEqual(project.version, 2)
+
+    def test_project_edit_rejects_invalid_probability_without_server_error(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        response = self.client.patch(
+            f"/api/v1/customer-projects/projects/{project_id}",
+            json={"probability_band": "invalid"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["error"]["code"], "VALIDATION_ERROR")
 
 
 if __name__ == "__main__":
