@@ -125,18 +125,23 @@ def _extract_deep(
     source_name: str,
     depth: int = 0,
     budget: _ExtractionBudget | None = None,
+    diagnostics: dict | None = None,
 ) -> list[dict]:
     """
     递归解压 zip 字节流，最深 8 层。
     返回找到的所有 PDF 文件列表 [{filename, size, path_chain, data}].
     """
     if depth > MAX_DEPTH:
+        if diagnostics is not None:
+            diagnostics.setdefault("issues", []).append(f"嵌套层数超过 {MAX_DEPTH} 层")
         return []
     budget = budget or _ExtractionBudget()
+    diagnostics = diagnostics if diagnostics is not None else {"issues": [], "nested_archives": 0}
 
     results = []
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            diagnostics["archives_opened"] = diagnostics.get("archives_opened", 0) + 1
             for info in zf.infolist():
                 name = info.filename.rstrip("/\\")
                 normalized_name = name.replace("\\", "/")
@@ -178,19 +183,34 @@ def _extract_deep(
                             "data": data,
                         })
                     except Exception as e:
+                        reason = "PDF 所在压缩包已加密" if "password" in str(e).lower() else "PDF 读取失败"
+                        diagnostics.setdefault("issues", []).append(f"{basename}：{reason}")
                         log.warning("read PDF failed %s: %s", info.filename, e)
 
                 elif member_kind == "zip":
                     try:
+                        diagnostics["nested_archives"] = diagnostics.get("nested_archives", 0) + 1
                         inner_data = zf.read(info)
                         inner_source = f"{source_name} → {basename}"
-                        results.extend(_extract_deep(inner_data, inner_source, depth + 1, budget))
+                        results.extend(
+                            _extract_deep(
+                                inner_data,
+                                inner_source,
+                                depth + 1,
+                                budget,
+                                diagnostics,
+                            )
+                        )
                     except Exception as e:
+                        reason = "内层压缩包已加密" if "password" in str(e).lower() else "内层压缩包读取失败"
+                        diagnostics.setdefault("issues", []).append(f"{basename}：{reason}")
                         log.warning("read inner zip failed %s: %s", info.filename, e)
 
     except zipfile.BadZipFile:
+        diagnostics.setdefault("issues", []).append(f"{source_name}：不是有效 ZIP 或文件已损坏")
         log.warning("BadZipFile from %s", source_name)
     except Exception as e:
+        diagnostics.setdefault("issues", []).append(f"{source_name}：解压异常")
         log.warning("extract exception %s: %s", source_name, e)
 
     return results
@@ -265,8 +285,12 @@ def analyze_uploaded_archives(usage_tool_id: str):
                 zip_bytes = f.read()
                 received_bytes += len(zip_bytes)
                 log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
-                pdfs = _extract_deep(zip_bytes, f.filename)
+                diagnostics = {"issues": [], "nested_archives": 0, "archives_opened": 0}
+                pdfs = _extract_deep(zip_bytes, f.filename, diagnostics=diagnostics)
                 archive_result["pdf_count"] = len(pdfs)
+                archive_result["nested_archives"] = diagnostics["nested_archives"]
+                if diagnostics["issues"]:
+                    archive_result["issues"] = diagnostics["issues"][:5]
                 all_pdfs.extend(pdfs)
             except Exception as e:
                 archive_result["error"] = True
@@ -283,7 +307,11 @@ def analyze_uploaded_archives(usage_tool_id: str):
             ), 413
 
         if not all_pdfs:
-            return jsonify(success=False, error="本批没有可解压的 zip 或未提取到 PDF"), 400
+            return jsonify(
+                success=False,
+                error="本批压缩包未提取到 PDF，请查看每个文件的具体原因",
+                archive_results=archive_results,
+            ), 400
 
         # 按内容哈希去重
         seen: set[str] = set()

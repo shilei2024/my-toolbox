@@ -161,8 +161,8 @@ class PhaseASecurityTests(unittest.TestCase):
         self.assertEqual(
             payload["archive_results"],
             [
-                {"name": "mixed.zip", "pdf_count": 2},
-                {"name": "empty.zip", "pdf_count": 0},
+                {"name": "mixed.zip", "pdf_count": 2, "nested_archives": 0},
+                {"name": "empty.zip", "pdf_count": 0, "nested_archives": 0},
             ],
         )
         commit.assert_called_once_with("invoice_printer", success=True)
@@ -203,8 +203,31 @@ class PhaseASecurityTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["files"][0]["filename"], "电子发票.pdf")
         self.assertEqual(payload["archive_results"][0]["pdf_count"], 1)
+        self.assertEqual(payload["archive_results"][0]["nested_archives"], 2)
         self.assertIn("无扩展名内层包", payload["files"][0]["path_chain"][0])
         commit.assert_called_once_with("invoice_printer", success=True)
+
+    def test_invalid_invoice_zip_returns_per_archive_diagnostics(self):
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY="invoice-diagnostics-test")
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={"files": [(io.BytesIO(b"not-a-zip"), "broken.zip")]},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["archive_results"][0]["name"], "broken.zip")
+        self.assertIn("不是有效 ZIP", payload["archive_results"][0]["issues"][0])
+        commit.assert_not_called()
 
     def test_invoice_zip_larger_than_legacy_four_mb_limit_is_accepted(self):
         app = Flask(__name__)
