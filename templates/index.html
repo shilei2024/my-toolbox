@@ -3,54 +3,26 @@
 {% block content %}
 <section class="home-hero" aria-labelledby="home-title">
   <div class="home-hero-copy">
-    <p class="section-eyebrow"><span></span>Mindful tools for focused work</p>
-    <h1 id="home-title">把日常文件，<br /><em>处理得更轻一点。</em></h1>
-    <p class="home-hero-lead">{{ site_tagline }}</p>
+    <h1 id="home-title">常用工具，<br /><em>打开就能用。</em></h1>
+    <p class="home-hero-lead">处理 PDF、图片、表格和报销资料，选择工具即可开始。</p>
     <div class="home-hero-actions">
-      <a class="btn btn-primary btn-lg" href="#tool-library">浏览全部工具 <i class="bi bi-arrow-down-short"></i></a>
-      {% if config.AI_IMAGE_EXTERNAL_URL %}
-        <a class="btn btn-outline-dark btn-lg" href="/gallery">探索 AI Gallery <i class="bi bi-arrow-up-right"></i></a>
-      {% elif not current_user.is_authenticated %}
+      <a class="btn btn-primary btn-lg" href="#tool-library">浏览工具 <i class="bi bi-arrow-down-short"></i></a>
+      {% if not current_user.is_authenticated %}
         <a class="btn btn-outline-dark btn-lg" href="{{ url_for('auth.register') }}">免费注册</a>
       {% endif %}
     </div>
-    {% if current_user.is_authenticated %}
-      <p class="home-welcome"><span></span>欢迎回来，{{ current_user.display_name }}{% if is_admin %} · 管理员{% endif %}</p>
-    {% else %}
-      <p class="home-account-hint">无需安装即可试用；<a href="{{ url_for('auth.login') }}">登录</a>后保留更完整的使用额度。</p>
-    {% endif %}
   </div>
-  <aside class="home-hero-panel" aria-label="平台能力概览">
-    <div class="hero-panel-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
-    <div class="hero-panel-content">
-      <p>一个账户，两种工作方式</p>
-      <strong>工具处理</strong>
-      <span>PDF · 图片 · 文本 · 数据</span>
-      <div class="hero-panel-divider"><i class="bi bi-plus"></i></div>
-      <strong>AI 创作</strong>
-      <span>生成 · 任务 · 作品 · 收藏</span>
-    </div>
-  </aside>
 </section>
 
-{% set ai_tool = tools | selectattr("id", "equalto", "ai_image") | first %}
-{% if ai_tool and ai_tool.external_url %}
-<section class="ai-spotlight" aria-labelledby="ai-spotlight-title">
-  <div class="ai-spotlight-copy">
-    <p class="section-eyebrow light"><span></span>AI creative studio</p>
-    <h2 id="ai-spotlight-title">从一句描述，到一件可以收藏的作品。</h2>
-    <p>在独立 Gallery 中完成图片或视频创作，查看任务进度，并管理公开作品与收藏。</p>
-    <div class="ai-spotlight-actions">
-      <a class="btn btn-light" href="{{ ai_tool.external_url }}"><i class="bi bi-magic"></i> 开始创作</a>
-      <a class="btn btn-outline-light" href="{{ ai_tool.external_url.replace('/create', '/gallery') }}"><i class="bi bi-images"></i> 浏览 Gallery</a>
-    </div>
-  </div>
-  <ul class="ai-spotlight-meta" aria-label="AI Gallery 特性">
-    <li><i class="bi bi-aspect-ratio"></i><span><strong>多种画幅</strong>适配不同创作场景</span></li>
-    <li><i class="bi bi-list-check"></i><span><strong>任务可追踪</strong>生成状态集中管理</span></li>
-    <li><i class="bi bi-shield-check"></i><span><strong>作品可控</strong>隐私与审核边界清晰</span></li>
-  </ul>
-</section>
+{% if config.AI_IMAGE_EXTERNAL_URL %}
+<a class="home-gallery-entry" href="/create" aria-label="打开 AI Gallery">
+  <span class="home-gallery-icon" aria-hidden="true"><i class="bi bi-stars"></i></span>
+  <span class="home-gallery-copy">
+    <strong>AI Gallery</strong>
+    <small>图片与视频创作</small>
+  </span>
+  <span class="home-gallery-action">前往创作 <i class="bi bi-arrow-up-right"></i></span>
+</a>
 {% endif %}
 
 {# 实时汇率 - 双向切换 #}
