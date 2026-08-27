@@ -1,5 +1,7 @@
 # 运维文档
 
+- [客户项目跟进 Phase 1 运维手册](customer-project-tracking-runbook.md)
+
 - [生产部署与真实验证 Runbook](production-deployment-verification.md)
 - [Git 策略总览](git-strategy.md)
 - [分支策略与分支图](branch-strategy.md)

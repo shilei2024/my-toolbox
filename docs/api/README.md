@@ -1,5 +1,9 @@
 # API 文档
 
+## 业务模块契约
+
+- [Customer Projects API v1](customer-projects-v1.md)：Phase 0 已冻结、尚未部署的客户项目页面/API 契约；实现前保持“设计状态”标记。
+
 ## 边界
 
 浏览器只访问 Next.js BFF。Generation Service 的 `/v1/*`、Flask 的 `/internal/*`、ComfyUI 和 Provider 凭据不得直接暴露给浏览器。内部请求使用已签名 Viewer Context；写操作必须携带明确的同源 `Origin`，并同时检查登录态与角色。BFF 对管理、兑换和创建生成请求提供额外的本地节流；Generation Service 的共享限流仍是权威控制。

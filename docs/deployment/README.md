@@ -17,6 +17,8 @@
 
 ## 配置与部署文档
 
+- [客户项目跟进 Phase 1 迁移、发布与回滚计划](customer-project-tracking-phase-1-rollout.md)（Phase 0 计划，尚不可用于生产发布）
+
 | Phase | 配置 | 部署与回滚 |
 | --- | --- | --- |
 | 4 | [ComfyUI/COS 配置](phase-4-configuration.md) | [Phase 4 部署](phase-4-deployment.md) |

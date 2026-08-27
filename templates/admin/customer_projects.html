@@ -1,0 +1,14 @@
+{% extends "admin/_base.html" %}
+{% block title %}客户项目设置 — 后台{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-4">
+  <div><h1 class="h3 mb-1">客户项目设置</h1><p class="text-muted mb-0">在统一后台维护首发组织、成员角色和启用前准备。</p></div>
+  <span class="badge {{ 'text-bg-success' if config.CUSTOMER_PROJECTS_ENABLED else 'text-bg-secondary' }}">功能开关：{{ '已开启' if config.CUSTOMER_PROJECTS_ENABLED else '已关闭' }}</span>
+</div>
+{% if not organization %}
+  <div class="card border-0 shadow-sm"><div class="card-body p-4"><h2 class="h5">初始化首发组织</h2><p class="text-muted">该操作只创建组织、当前管理员成员关系和默认阶段字典，不会开启生产入口。</p><form method="post" action="{{ url_for('admin.customer_projects_bootstrap') }}" class="row g-2"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="col-md"><input class="form-control" name="name" value="{{ config.CUSTOMER_PROJECTS_DEFAULT_ORG_NAME }}" maxlength="160" required></div><div class="col-md-auto"><button class="btn btn-primary">初始化</button></div></form></div></div>
+{% else %}
+  <div class="alert alert-light border"><strong>{{ organization.name }}</strong><span class="text-muted ms-2">{{ organization.timezone }} · {{ organization.status }}</span></div>
+  <div class="card border-0 shadow-sm"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>用户</th><th>角色</th><th>状态</th><th class="text-end">操作</th></tr></thead><tbody>{% for user,membership in membership_rows %}<tr><td><strong>{{ user.display_name }}</strong><div class="text-muted small">{{ user.email }}</div><form id="membership-{{ user.id }}" method="post" action="{{ url_for('admin.customer_projects_member_update', user_id=user.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form></td><td><div class="d-flex flex-wrap gap-2">{% for role in role_codes %}<label class="small"><input form="membership-{{ user.id }}" type="checkbox" name="roles" value="{{ role }}" {% if membership and role in membership.roles %}checked{% endif %}> {{ role }}</label>{% endfor %}</div></td><td><select form="membership-{{ user.id }}" class="form-select form-select-sm" name="status"><option value="active" {% if membership and membership.status == 'active' %}selected{% endif %}>启用</option><option value="inactive" {% if not membership or membership.status != 'active' %}selected{% endif %}>停用</option></select></td><td class="text-end"><button form="membership-{{ user.id }}" class="btn btn-sm btn-outline-primary">保存</button></td></tr>{% endfor %}</tbody></table></div></div>
+{% endif %}
+{% endblock %}

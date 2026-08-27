@@ -1,0 +1,84 @@
+# 客户项目跟进数据字典（Phase 0）
+
+## 通用约定
+
+- 领域对象使用 UUID；现有 `users.id` 保持整数并通过外键引用。
+- 所有业务表含 `organization_id`、`created_at`、`updated_at`、`created_by_user_id`、`updated_by_user_id`。
+- 可编辑聚合含非空 `version`，初值 1；可删除对象含 `deleted_at`、`deleted_by_user_id`、`delete_reason`。
+- 时间为 PostgreSQL `timestamptz`，金额为 `numeric`，枚举在应用层用稳定代码并受数据库检查约束。
+- 名称规范化值仅用于匹配，不覆盖用户原始显示值。
+
+## 共享表
+
+| 表 | 关键字段 | 约束与索引 |
+| --- | --- | --- |
+| `organizations` | `id`, `name`, `status`, `timezone` | `timezone` 默认 `Asia/Shanghai`；名称非空 |
+| `organization_memberships` | `organization_id`, `user_id`, `roles`, `status` | 组织 + 用户唯一；停用成员不接收提醒 |
+| `audit_events` | `organization_id`, `object_type`, `object_id`, `action`, `actor_user_id`, `safe_diff`, `occurred_at` | 对象 + 时间索引；差异必须脱敏且不可覆盖 |
+| `notification_outbox` | `kind`, `idempotency_key`, `status`, `scheduled_at`, `attempt_count`, `next_attempt_at`, `safe_error_code` | 幂等键唯一；状态 + 计划时间索引 |
+| `notification_deliveries` | `outbox_id`, `recipient_user_id`, `status`, `provider_message_id` | 发件箱 + 收件人唯一；不保存正文副本 |
+
+`roles` 首发可使用 PostgreSQL 文本数组或 JSON；领域权限层必须将其解析为受控稳定代码，禁止任意角色字符串直接授权。
+
+## 客户与联系人
+
+| 表 | 必填字段 | 可选字段/说明 |
+| --- | --- | --- |
+| `customers` | `id`, `organization_id`, `name`, `normalized_name`, `status`, `primary_owner_user_id`, `version` | `short_name`, `customer_code`, `group_name`, `industry`, `region`, `grade`, `address`, `notes` |
+| `customer_contacts` | `id`, `customer_id`, `name`, `version` | `department`, `title`, `email`, `phone`, `is_primary`, `notes`；审计不保存敏感值明文差异 |
+
+组织 + `normalized_name` 使用非唯一索引做重复提示，不硬阻断同名客户。软删除记录不出现在普通查询中。
+
+## 项目聚合
+
+| 字段 | 类型/允许值 | 规则 |
+| --- | --- | --- |
+| `id` | UUID | 主键 |
+| `project_code` | varchar(32) | 组织内唯一，服务端生成 |
+| `customer_id` | UUID | 同组织有效客户 |
+| `name` / `normalized_name` | varchar(255) | 名称必填，规范名用于重复提示 |
+| `stage_code` | 稳定代码 | 引用启用的阶段字典 |
+| `assessment_grade` | A/B/C/D | 可空 |
+| `probability_band` | 10/30/50/70/90 | 可配置显示，不做自动预测 |
+| `primary_sales_user_id` | users.id | 必须是有效组织成员 |
+| `next_action` | varchar(500) | 与 `next_follow_up_at` 成对必填 |
+| `next_follow_up_at` | timestamptz | UTC 保存 |
+| `last_meaningful_update_at` | timestamptz | 仅有效活动更新 |
+| `expected_design_win_at` | date | 可空 |
+| `expected_mass_production_at` | date | 量产时与实际日期至少一个存在 |
+| `actual_mass_production_at` | date | 可空 |
+| `close_reason_code` / `close_notes` | code/text | 失败时必填 |
+| `paused_until` / `pause_reason` | date/text | 暂停原因必填 |
+| `derived_from_project_id` | UUID | 可空，不复制活动历史 |
+| `version` | integer | 非空且大于 0 |
+
+推荐索引：`(organization_id, stage_code)`、`(organization_id, primary_sales_user_id, next_follow_up_at)`、`(organization_id, last_meaningful_update_at)`、`(organization_id, project_code)` 唯一，以及未删除项目上的规范名查询索引。
+
+## 项目子对象
+
+| 表 | 核心字段 | 关键规则 |
+| --- | --- | --- |
+| `project_members` | `project_id`, `user_id`, `role_code`, `is_primary`, `joined_at`, `left_at`, `notification_preferences` | 项目 + 用户 + 职责唯一；至少一名主业务 |
+| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；物料允许没有竞品；项目 + 幂等键唯一 |
+| `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；物料 + 幂等键唯一 |
+| `project_activities` | `project_id`, `activity_type`, `occurred_at`, `summary`, `details`, `customer_feedback`, `risk`, `decision`, `next_action`, `next_follow_up_at`, `is_meaningful`, `created_by_user_id` | 追加式记录；业务活动不可覆盖 |
+| `project_stage_events` | `project_id`, `from_stage_code`, `to_stage_code`, `reason`, `idempotency_key`, `actor_user_id`, `approved_by_user_id`, `occurred_at` | 项目 + 幂等键唯一；追加式记录 |
+| `project_status_catalog` | `organization_id`, `code`, `display_name`, `sort_order`, `stale_after_days`, `is_active`, `version` | 组织 + 稳定代码唯一；历史引用后不可删除代码 |
+| `project_tags` / `tag_links` | 标签名、颜色、对象类型/ID | 组织内规范标签名唯一 |
+
+## 默认字典
+
+| 代码 | 显示名 | 停滞天数 | 类型 |
+| --- | --- | ---: | --- |
+| `evaluation` | 评估 | 14 | 活跃 |
+| `initiated` | 立项 | 14 | 活跃 |
+| `sampling` | 送样/验证 | 10 | 活跃 |
+| `pilot_batch` | 小批 | 14 | 活跃 |
+| `trial_production` | 试产 | 14 | 活跃 |
+| `design_win` | 定点 | 30 | 活跃 |
+| `mass_production` | 量产 | — | 终态视图 |
+| `paused` | 暂停 | — | 辅助状态 |
+| `lost` | 失败 | — | 终态视图 |
+| `archived` | 归档 | — | 终态视图 |
+
+默认失败原因：客户取消、客户延期、技术不通过、价格、交期/产能、认证、竞争对手胜出、原厂策略、内部资源不足、信息重复、其他。

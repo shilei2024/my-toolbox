@@ -1,9 +1,9 @@
 """
-SQLAlchemy ORM models.
+Legacy/shared SQLAlchemy ORM models.
 
-We use SQLite locally but keep code ORM-only so a future swap to PostgreSQL is
-just a `DATABASE_URL` change. The schema is created on first run via
-`db.create_all()` inside the app factory — no Alembic needed at this scale.
+Local development may still use SQLite and ``db.create_all()`` for convenience.
+Production schema changes are migration-managed; new business-domain models
+belong in their domain package rather than this legacy root module.
 """
 from __future__ import annotations
 

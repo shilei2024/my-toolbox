@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}我的工作台 — 客户项目跟进{% endblock %}
+{% block description %}集中查看到期、逾期、停滞和最近更新的客户项目。{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <header class="cp-hero">
+    <div>
+      <p class="cp-kicker">CUSTOMER PROJECTS</p>
+      <h1>今天先推进什么？</h1>
+      <p>把到期动作、停滞风险和最近变化放在同一张工作台上。</p>
+    </div>
+    <a class="btn btn-light cp-primary-action" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a>
+  </header>
+
+  <div class="cp-metric-grid" aria-label="项目提醒摘要">
+    <article class="cp-metric is-danger"><span>已逾期</span><strong>{{ counts.overdue }}</strong><small>需要立即确认下一步</small></article>
+    <article class="cp-metric is-today"><span>今日到期</span><strong>{{ counts.today }}</strong><small>今天计划完成</small></article>
+    <article class="cp-metric"><span>7 天内到期</span><strong>{{ counts.upcoming }}</strong><small>提前准备资源</small></article>
+    <article class="cp-metric is-warning"><span>14 天未更新</span><strong>{{ counts.stale }}</strong><small>检查是否停滞</small></article>
+  </div>
+
+  <section class="cp-panel">
+    <div class="cp-panel-heading">
+      <div><p class="cp-kicker">PRIORITIES</p><h2>我的优先事项</h2></div>
+      <a href="{{ url_for('customer_projects.projects') }}">查看全部 <i class="bi bi-arrow-right"></i></a>
+    </div>
+    {% if projects %}
+      <div class="cp-project-list">
+        {% for project in projects %}
+          <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
+            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
+            <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
+            <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
+            <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%m-%d %H:%M') }}</span>
+            <span class="cp-owner"><small>主业务</small>{{ user_names.get(project.primary_sales_user_id, '待确认') }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="cp-empty"><i class="bi bi-inbox"></i><h3>还没有客户项目</h3><p>先创建客户，再建立第一个项目和下一步计划。</p><a class="btn btn-primary" href="{{ url_for('customer_projects.customers') }}">创建客户</a></div>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}
