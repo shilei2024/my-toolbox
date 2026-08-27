@@ -19,7 +19,9 @@
 
 待处理清单和结果清单使用统一事件委托：可以逐项删除、清空待处理、删除勾选项或清空
 全部结果。处理中会锁定清单，失败或被服务端跳过的 ZIP 会保留在待处理区，避免用户误以为
-处理成功。相同名称和大小但内容不同的压缩包提取结果按内容哈希区分。
+处理成功。多 ZIP 整批被网关拒绝或网络中断时，浏览器会自动改为逐包重试；仍然失败的
+文件会在待处理项和固定错误面板中显示 HTTP 状态、配额/校验信息或服务端递归诊断。
+相同名称和大小但内容不同的压缩包提取结果按内容哈希区分。
 
 可选环境变量为 `INVOICE_ZIP_MAX_MB`、`INVOICE_ZIP_BATCH_MB` 和
 `INVOICE_ZIP_RESPONSE_MB`（默认分别为 20、20、48）。调整前必须同时核对
@@ -49,6 +51,10 @@
 `deploy/docker-compose.production.yml` 的 AI Generation 容器。代码更新后必须执行
 `sudo systemctl restart mytoolbox`，再用 `sudo systemctl status mytoolbox --no-pager`
 确认服务为 `active (running)`。
+
+生产入口可能是 Cloudflare Tunnel、Caddy 或 Nginx，不能只按仓库示例推断。若页面显示
+HTTP 413，先确认实际入口及请求体门限；若 systemd 日志完全没有对应 POST，则请求尚未
+到达 Flask，应检查当前域名的 Cloudflare 路由/入口日志，而不是继续修改解压算法。
 
 发布后分别访问新旧网址，确认均显示统一工作台；上传一个 4–20MB、包含嵌套 ZIP 的样例
 以及直接 PDF/图片，确认逐项删除、清空待处理、删除勾选、清空全部、继续追加、批量打印
