@@ -163,6 +163,7 @@
 <script>
 // ============== 状态 ==============
 const IP_LIMITS = {{ invoice_limits | tojson }};
+const IP_ARCHIVES_PER_REQUEST = 2;
 const IP_LOCAL_FILE_MAX_MB = 30;
 const IP_MAX_QUEUE_FILES = 200;
 const STATE = {
@@ -510,7 +511,10 @@ function planArchiveBatches(queue) {
   let current = [];
   let bytes = 0;
   for (const item of queue) {
-    if (current.length && (bytes + item.size > IP_LIMITS.batch_bytes || current.length >= 50)) {
+    if (current.length && (
+      bytes + item.size > IP_LIMITS.batch_bytes ||
+      current.length >= IP_ARCHIVES_PER_REQUEST
+    )) {
       batches.push(current);
       current = [];
       bytes = 0;
@@ -649,6 +653,9 @@ function archiveRequestErrorMessage(error, item) {
   }
   if (error?.status === 502 || error?.status === 504) {
     return `解压服务暂时不可用（HTTP ${error.status}），请稍后重试`;
+  }
+  if (error?.status === 524) {
+    return '网站入口等待解压结果超时（HTTP 524）；服务器可能仍在处理，已停止自动重试以避免重复解压，请稍后再次处理保留的文件';
   }
   return error?.message || '未知错误';
 }
