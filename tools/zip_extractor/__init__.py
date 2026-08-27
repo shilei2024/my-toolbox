@@ -6,7 +6,7 @@ import hashlib
 import io
 import logging
 import zipfile
-from pathlib import Path
+from pathlib import PurePosixPath
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
@@ -27,6 +27,7 @@ MAX_DEPTH = 8                                 # 递归层数上限
 MAX_ENTRY_UNCOMPRESSED_BYTES = 32 * MB
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 64 * MB
 MAX_COMPRESSION_RATIO = 100
+ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 
 
 def invoice_zip_limits() -> dict[str, int]:
@@ -70,18 +71,35 @@ class _ExtractionBudget:
         return True
 
 
-def _safe_to_extract(info: zipfile.ZipInfo, budget: _ExtractionBudget) -> bool:
-    """Reject dangerous ZIP members without materialising their payload."""
+def _member_within_limits(info: zipfile.ZipInfo) -> bool:
+    """Reject a dangerous member before reading even its signature."""
     if info.file_size > MAX_ENTRY_UNCOMPRESSED_BYTES:
         log.warning("ZIP member exceeds uncompressed limit: %s (%d bytes)", info.filename, info.file_size)
         return False
     if info.file_size and (info.compress_size == 0 or info.file_size / info.compress_size > MAX_COMPRESSION_RATIO):
         log.warning("ZIP member exceeds compression-ratio limit: %s", info.filename)
         return False
+    return True
+
+
+def _safe_to_extract(info: zipfile.ZipInfo, budget: _ExtractionBudget) -> bool:
+    """Reject dangerous ZIP members without materialising their payload."""
+    if not _member_within_limits(info):
+        return False
     if not budget.reserve(info.file_size):
         log.warning("ZIP archive exceeds cumulative extraction limit at: %s", info.filename)
         return False
     return True
+
+
+def _member_signature(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    """Read only enough bytes to identify extensionless PDF/ZIP members."""
+    try:
+        with zf.open(info, "r") as member:
+            return member.read(5)
+    except Exception as exc:
+        log.warning("read ZIP member signature failed %s: %s", info.filename, exc)
+        return b""
 
 
 @tool_bp.route("/")
@@ -120,28 +138,49 @@ def _extract_deep(
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             for info in zf.infolist():
-                name = info.filename.rstrip("/")
+                name = info.filename.rstrip("/\\")
+                normalized_name = name.replace("\\", "/")
                 # 跳过目录、macOS 资源、隐藏文件
-                if info.is_dir() or name.startswith("__MACOSX") or Path(name).name.startswith("."):
+                if info.is_dir() or normalized_name.startswith("__MACOSX"):
                     continue
-                basename = Path(name).name
+                basename = PurePosixPath(normalized_name).name
+                if basename.startswith("."):
+                    continue
+
+                lower_name = basename.lower()
+                member_kind = "pdf" if lower_name.endswith(".pdf") else (
+                    "zip" if lower_name.endswith((".zip", ".zipx")) else ""
+                )
+
+                # 部分发票平台生成的内层压缩包或 PDF 没有可靠扩展名，
+                # 读取最少量文件头识别真实格式，避免递归链路静默中断。
+                if not member_kind:
+                    if not _member_within_limits(info):
+                        continue
+                    signature = _member_signature(zf, info)
+                    if signature.startswith(b"%PDF-"):
+                        member_kind = "pdf"
+                    elif signature[:4] in ZIP_SIGNATURES:
+                        member_kind = "zip"
+                    else:
+                        continue
 
                 if not _safe_to_extract(info, budget):
                     continue
 
-                if basename.lower().endswith(".pdf"):
+                if member_kind == "pdf":
                     try:
                         data = zf.read(info)
                         results.append({
-                            "filename": basename,
+                            "filename": basename if lower_name.endswith(".pdf") else f"{basename}.pdf",
                             "size": len(data),
-                            "path_chain": [source_name, *info.filename.split("/")],
+                            "path_chain": [source_name, *normalized_name.split("/")],
                             "data": data,
                         })
                     except Exception as e:
                         log.warning("read PDF failed %s: %s", info.filename, e)
 
-                elif basename.lower().endswith(".zip"):
+                elif member_kind == "zip":
                     try:
                         inner_data = zf.read(info)
                         inner_source = f"{source_name} → {basename}"
