@@ -78,7 +78,7 @@ class ToolRegistrySyncTest(unittest.TestCase):
         self.assertIn("/tools/invoice-printer/analyze", body)
         self.assertIn("单包最大 20MB", body)
         self.assertIn('data-action="clear-all"', body)
-        self.assertIn('data-remove-queue-index=', body)
+        self.assertIn('data-remove-queue-id=', body)
         self.assertNotIn("onclick=", body)
         self.assertNotIn("confirm(", body)
         self.assertNotIn(".tif", body)

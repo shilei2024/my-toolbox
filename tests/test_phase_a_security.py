@@ -118,6 +118,55 @@ class PhaseASecurityTests(unittest.TestCase):
         self.assertEqual(payload["files"][0]["filename"], "invoice.pdf")
         commit.assert_called_once_with("invoice_printer", success=True)
 
+    def test_invoice_archive_returns_every_pdf_and_per_archive_counts(self):
+        app = Flask(__name__)
+        app.config.update(
+            TESTING=True,
+            SECRET_KEY="invoice-mixed-queue-test",
+            MAX_CONTENT_LENGTH=25 * MB,
+        )
+
+        @app.post("/analyze")
+        def analyze_invoice_zip():
+            return analyze_uploaded_archives("invoice_printer")
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("receipts/first.pdf", b"%PDF-1.4\nfirst\n%%EOF\n")
+            zf.writestr("receipts/second.pdf", b"%PDF-1.4\nsecond\n%%EOF\n")
+
+        empty_archive = io.BytesIO()
+        with zipfile.ZipFile(empty_archive, "w", zipfile.ZIP_STORED) as zf:
+            zf.writestr("README.txt", b"no invoice in this archive")
+
+        with patch("tools.zip_extractor.commit_usage") as commit:
+            response = app.test_client().post(
+                "/analyze",
+                data={
+                    "files": [
+                        (io.BytesIO(archive.getvalue()), "mixed.zip"),
+                        (io.BytesIO(empty_archive.getvalue()), "empty.zip"),
+                    ]
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(
+            {item["filename"] for item in payload["files"]},
+            {"first.pdf", "second.pdf"},
+        )
+        self.assertEqual(
+            payload["archive_results"],
+            [
+                {"name": "mixed.zip", "pdf_count": 2},
+                {"name": "empty.zip", "pdf_count": 0},
+            ],
+        )
+        commit.assert_called_once_with("invoice_printer", success=True)
+
     def test_invoice_zip_larger_than_legacy_four_mb_limit_is_accepted(self):
         app = Flask(__name__)
         app.config.update(
