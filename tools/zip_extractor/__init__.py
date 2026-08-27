@@ -193,26 +193,32 @@ def analyze_uploaded_archives(usage_tool_id: str):
         all_pdfs: list[dict] = []
         received_bytes = 0
         skipped_oversize: list[str] = []
+        archive_results: list[dict] = []
 
         for f in files:
             if not f.filename:
                 continue
             if not f.filename.lower().endswith(".zip"):
                 continue
+            archive_result = {"name": f.filename, "pdf_count": 0}
+            archive_results.append(archive_result)
             try:
                 # 先看 stream 长度，提前拦掉超大单文件
                 f.stream.seek(0, io.SEEK_END)
                 size = f.stream.tell()
                 f.stream.seek(0)
                 if size == 0:
+                    archive_result["skipped"] = True
                     continue
                 if size > max_single_file_bytes:
+                    archive_result["skipped"] = True
                     skipped_oversize.append(
                         f"{f.filename}（{size/MB:.1f}MB，单包上限 {limits['single_mb']}MB）"
                     )
                     continue
                 # 累加本批总大小，提前拦
                 if received_bytes + size > max_request_zip_bytes:
+                    archive_result["skipped"] = True
                     skipped_oversize.append(
                         f"{f.filename}（{size/MB:.1f}MB，超出本批 {limits['batch_mb']}MB 上限）"
                     )
@@ -221,8 +227,10 @@ def analyze_uploaded_archives(usage_tool_id: str):
                 received_bytes += len(zip_bytes)
                 log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
                 pdfs = _extract_deep(zip_bytes, f.filename)
+                archive_result["pdf_count"] = len(pdfs)
                 all_pdfs.extend(pdfs)
             except Exception as e:
+                archive_result["error"] = True
                 log.warning("Failed to read %s: %s", f.filename, e)
 
         if not all_pdfs and skipped_oversize:
@@ -269,6 +277,7 @@ def analyze_uploaded_archives(usage_tool_id: str):
             "total": len(kept),
             "files": kept,
             "skipped_oversize": skipped_oversize,
+            "archive_results": archive_results,
         }
         if truncated:
             body["truncated"] = True
