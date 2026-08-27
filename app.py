@@ -561,9 +561,16 @@ def _register_context(app: Flask) -> None:
     @app.context_processor
     def inject_globals():  # noqa: ANN202
         from auth.decorators import remaining_for
+        from customer_projects.permissions import module_available
 
         def _remaining_for(tool_id: str) -> int:
             return remaining_for(tool_id)
+
+        try:
+            customer_projects_available = module_available()
+        except Exception:  # noqa: BLE001
+            # A database outage must not break the public homepage.
+            customer_projects_available = False
 
         return {
             "site_name": app.config["SITE_NAME"],
@@ -572,6 +579,7 @@ def _register_context(app: Flask) -> None:
             "is_admin": current_user.is_authenticated and getattr(current_user, "is_admin", False),
             "remaining_for": _remaining_for,
             "now": china_now,
+            "customer_projects_available": customer_projects_available,
         }
 
     @app.after_request
