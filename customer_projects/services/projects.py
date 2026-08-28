@@ -26,6 +26,7 @@ from customer_projects.models import (
 from extensions import db
 from shared.exchange_rates import ExchangeRateError, get_exchange_rate
 from shared.models import AuditEvent, Organization, OrganizationMembership
+from shared.notifications import cancel_pending_notifications
 
 ACTIVE_STAGES = (
     "evaluation",
@@ -63,6 +64,12 @@ class DomainError(ValueError):
 class VersionConflict(DomainError):
     def __init__(self, current_version: int):
         super().__init__("PROJECT_VERSION_CONFLICT", "项目已被其他成员更新，请刷新后重试。")
+        self.current_version = current_version
+
+
+class ObjectVersionConflict(DomainError):
+    def __init__(self, code: str, message: str, current_version: int):
+        super().__init__(code, message)
         self.current_version = current_version
 
 
@@ -115,6 +122,12 @@ def parse_nonnegative_decimal(value: Any, field: str, label: str) -> Decimal | N
             "VALIDATION_ERROR", f"{label}不能为负数。", field_errors={field: "不能为负数"}
         )
     return parsed
+
+
+def parse_boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def local_day_bounds(now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -480,6 +493,8 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    if "next_follow_up_at" in data:
+        cancel_pending_notifications("customer_projects", "project", project.id)
     add_audit(project.organization_id, "project", project.id, "updated", membership.user_id, safe_diff)
     db.session.flush()
     return db.session.get(CustomerProject, project.id)
@@ -551,6 +566,7 @@ def add_activity(project: CustomerProject, data: dict[str, Any], membership: Org
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    cancel_pending_notifications("customer_projects", "project", project.id)
     db.session.add(activity)
     add_audit(project.organization_id, "project", project.id, "activity_added", membership.user_id, {"activity_type": activity.activity_type, "is_meaningful": meaningful})
     return activity
@@ -621,6 +637,8 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    if target in TERMINAL_STAGES | {"paused"}:
+        cancel_pending_notifications("customer_projects", "project", project.id)
     event = ProjectStageEvent(
         organization_id=membership.organization_id,
         project_id=project.id,
@@ -740,35 +758,171 @@ def update_material_commercial(
 ) -> ProjectMaterial:
     if material.organization_id != membership.organization_id or material.deleted_at is not None:
         raise DomainError("MATERIAL_NOT_FOUND", "推广物料不存在或不可访问。")
-    if expected_version != material.version:
-        raise DomainError("MATERIAL_VERSION_CONFLICT", "物料已被其他成员更新，请刷新后重试。")
-    has_quantity = "machine_quantity" in data
+    values: dict[str, Any] = {
+        "updated_by_user_id": membership.user_id,
+        "updated_at": datetime.now(timezone.utc),
+        "version": expected_version + 1,
+    }
+    safe_diff: dict[str, Any] = {}
+    supported_fields = {
+        "category_code",
+        "promoted_brand",
+        "promoted_mpn",
+        "mpn_pending",
+        "customer_part_number",
+        "application_position",
+        "machine_quantity",
+        "technical_status",
+        "commercial_status",
+        "expected_mass_production_at",
+        "is_primary",
+        "notes",
+    }
     has_price = data.get("unit_price") not in (None, "")
-    if not has_quantity and not has_price:
-        raise DomainError("VALIDATION_ERROR", "请至少更新单机数量或单价。")
-    if has_quantity:
-        material.machine_quantity = parse_nonnegative_decimal(
+    if not supported_fields.intersection(data) and not has_price:
+        raise DomainError("VALIDATION_ERROR", "请至少更新一项物料信息。")
+
+    brand = str(data.get("promoted_brand", material.promoted_brand) or "").strip()
+    mpn = str(data.get("promoted_mpn", material.promoted_mpn) or "").strip()
+    pending = (
+        parse_boolean(data.get("mpn_pending"))
+        if "mpn_pending" in data
+        else material.mpn_pending
+    )
+    if not brand or (not mpn and not pending):
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
+        )
+    if "promoted_brand" in data:
+        values["promoted_brand"] = brand[:120]
+        safe_diff["promoted_brand"] = "已变更"
+    if "promoted_mpn" in data:
+        values["promoted_mpn"] = mpn[:160] or None
+        values["normalized_mpn"] = normalize_mpn(mpn)
+        safe_diff["promoted_mpn"] = "已变更"
+    if "mpn_pending" in data:
+        values["mpn_pending"] = pending
+        safe_diff["mpn_pending"] = pending
+    for field, limit in (
+        ("category_code", 64),
+        ("customer_part_number", 160),
+        ("application_position", 255),
+        ("technical_status", 64),
+        ("commercial_status", 64),
+        ("notes", 8000),
+    ):
+        if field in data:
+            values[field] = str(data.get(field) or "").strip()[:limit] or None
+            safe_diff[field] = "已变更"
+    if "is_primary" in data:
+        values["is_primary"] = parse_boolean(data.get("is_primary"))
+        safe_diff["is_primary"] = values["is_primary"]
+    if "expected_mass_production_at" in data:
+        values["expected_mass_production_at"] = parse_date(
+            data.get("expected_mass_production_at")
+        )
+        safe_diff["expected_mass_production_at"] = str(
+            values["expected_mass_production_at"] or ""
+        )
+    if "machine_quantity" in data:
+        values["machine_quantity"] = parse_nonnegative_decimal(
             data.get("machine_quantity"), "machine_quantity", "单机数量"
         )
+        safe_diff["machine_quantity"] = str(values["machine_quantity"] or "")
     if has_price:
         apply_material_price(material, data, membership)
-    material.version += 1
-    material.updated_by_user_id = membership.user_id
-    material.updated_at = datetime.now(timezone.utc)
+        for field in (
+            "target_price",
+            "currency",
+            "fx_rate_usd_cny",
+            "unit_price_usd",
+            "unit_price_cny_tax_included",
+            "price_updated_by_user_id",
+            "price_updated_at",
+        ):
+            values[field] = getattr(material, field)
+        safe_diff.update(
+            {
+                "currency": material.currency,
+                "fx_rate_usd_cny": str(material.fx_rate_usd_cny),
+                "price": "已更新",
+            }
+        )
+    result = db.session.execute(
+        update(ProjectMaterial)
+        .where(
+            ProjectMaterial.id == material.id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.version == expected_version,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(ProjectMaterial, material.id)
+        raise ObjectVersionConflict(
+            "MATERIAL_VERSION_CONFLICT",
+            "物料已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
     add_audit(
         material.organization_id,
         "material",
         material.id,
-        "commercial_updated",
+        "updated",
         membership.user_id,
-        {
-            "machine_quantity": str(material.machine_quantity or ""),
-            "currency": material.currency if has_price else None,
-            "fx_rate_usd_cny": str(material.fx_rate_usd_cny) if has_price else None,
-            "price": "已更新" if has_price else "未变更",
-        },
+        safe_diff,
     )
-    return material
+    db.session.flush()
+    return db.session.get(ProjectMaterial, material.id)
+
+
+def soft_delete_material(
+    material: ProjectMaterial,
+    reason: str,
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> None:
+    reason = reason.strip()
+    if not reason:
+        raise DomainError(
+            "VALIDATION_ERROR", "删除原因必填。", field_errors={"reason": "必填"}
+        )
+    result = db.session.execute(
+        update(ProjectMaterial)
+        .where(
+            ProjectMaterial.id == material.id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.version == expected_version,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+        .values(
+            deleted_at=datetime.now(timezone.utc),
+            deleted_by_user_id=membership.user_id,
+            delete_reason=reason[:500],
+            updated_by_user_id=membership.user_id,
+            updated_at=datetime.now(timezone.utc),
+            version=expected_version + 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(ProjectMaterial, material.id)
+        raise ObjectVersionConflict(
+            "MATERIAL_VERSION_CONFLICT",
+            "物料已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        material.organization_id,
+        "material",
+        material.id,
+        "deleted",
+        membership.user_id,
+        {"reason": reason[:500]},
+    )
 
 
 def add_competitor(
@@ -820,6 +974,152 @@ def add_competitor(
     db.session.flush()
     add_audit(membership.organization_id, "competitor", competitor.id, "created", membership.user_id, {"brand": brand or "待确认", "mpn": mpn or "待确认"})
     return competitor
+
+
+def update_competitor(
+    competitor: MaterialCompetitor,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> MaterialCompetitor:
+    if competitor.organization_id != membership.organization_id or competitor.deleted_at is not None:
+        raise DomainError("COMPETITOR_NOT_FOUND", "竞争方案不存在或不可访问。")
+    supported_fields = {
+        "brand",
+        "mpn",
+        "distributor",
+        "model_pending",
+        "incumbent_status",
+        "quoted_price",
+        "strengths",
+        "weaknesses",
+        "confidence_level",
+        "observed_at",
+        "notes",
+    }
+    if not supported_fields.intersection(data):
+        raise DomainError("VALIDATION_ERROR", "请至少更新一项竞争方案信息。")
+    brand = str(data.get("brand", competitor.brand) or "").strip()
+    mpn = str(data.get("mpn", competitor.mpn) or "").strip()
+    distributor = str(data.get("distributor", competitor.distributor) or "").strip()
+    pending = (
+        parse_boolean(data.get("model_pending"))
+        if "model_pending" in data
+        else competitor.model_pending
+    )
+    if not any((brand, mpn, distributor, pending)):
+        raise DomainError("VALIDATION_ERROR", "品牌、型号、代理商至少填写一项，或标记型号待确认。")
+    values: dict[str, Any] = {
+        "updated_by_user_id": membership.user_id,
+        "updated_at": datetime.now(timezone.utc),
+        "version": expected_version + 1,
+    }
+    safe_diff: dict[str, Any] = {}
+    for field, value, limit in (
+        ("brand", brand, 120),
+        ("mpn", mpn, 160),
+        ("distributor", distributor, 160),
+    ):
+        if field in data:
+            values[field] = value[:limit] or None
+            safe_diff[field] = "已变更"
+    if "mpn" in data:
+        values["normalized_mpn"] = normalize_mpn(mpn)
+    if "model_pending" in data:
+        values["model_pending"] = pending
+        safe_diff["model_pending"] = pending
+    for field, limit in (
+        ("incumbent_status", 64),
+        ("strengths", 4000),
+        ("weaknesses", 4000),
+        ("confidence_level", 32),
+        ("notes", 8000),
+    ):
+        if field in data:
+            values[field] = str(data.get(field) or "").strip()[:limit] or None
+            safe_diff[field] = "已变更"
+    if "quoted_price" in data:
+        values["quoted_price"] = parse_nonnegative_decimal(
+            data.get("quoted_price"), "quoted_price", "竞品报价"
+        )
+        safe_diff["quoted_price"] = str(values["quoted_price"] or "")
+    if "observed_at" in data:
+        values["observed_at"] = parse_date(data.get("observed_at"))
+        safe_diff["observed_at"] = str(values["observed_at"] or "")
+    result = db.session.execute(
+        update(MaterialCompetitor)
+        .where(
+            MaterialCompetitor.id == competitor.id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.version == expected_version,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(MaterialCompetitor, competitor.id)
+        raise ObjectVersionConflict(
+            "COMPETITOR_VERSION_CONFLICT",
+            "竞争方案已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        competitor.organization_id,
+        "competitor",
+        competitor.id,
+        "updated",
+        membership.user_id,
+        safe_diff,
+    )
+    db.session.flush()
+    return db.session.get(MaterialCompetitor, competitor.id)
+
+
+def soft_delete_competitor(
+    competitor: MaterialCompetitor,
+    reason: str,
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> None:
+    reason = reason.strip()
+    if not reason:
+        raise DomainError(
+            "VALIDATION_ERROR", "删除原因必填。", field_errors={"reason": "必填"}
+        )
+    result = db.session.execute(
+        update(MaterialCompetitor)
+        .where(
+            MaterialCompetitor.id == competitor.id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.version == expected_version,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+        .values(
+            deleted_at=datetime.now(timezone.utc),
+            deleted_by_user_id=membership.user_id,
+            delete_reason=reason[:500],
+            updated_by_user_id=membership.user_id,
+            updated_at=datetime.now(timezone.utc),
+            version=expected_version + 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(MaterialCompetitor, competitor.id)
+        raise ObjectVersionConflict(
+            "COMPETITOR_VERSION_CONFLICT",
+            "竞争方案已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        competitor.organization_id,
+        "competitor",
+        competitor.id,
+        "deleted",
+        membership.user_id,
+        {"reason": reason[:500]},
+    )
 
 
 def add_project_member(project: CustomerProject, user_id: int, role_code: str, membership: OrganizationMembership) -> ProjectMember:
@@ -883,6 +1183,7 @@ def soft_delete_project(project: CustomerProject, reason: str, membership: Organ
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    cancel_pending_notifications("customer_projects", "project", project.id)
     add_audit(project.organization_id, "project", project.id, "soft_deleted", membership.user_id, {"reason": reason[:500]})
 
 

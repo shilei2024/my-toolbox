@@ -61,11 +61,16 @@
 | 表 | 核心字段 | 关键规则 |
 | --- | --- | --- |
 | `project_members` | `project_id`, `user_id`, `role_code`, `is_primary`, `joined_at`, `left_at`, `notification_preferences` | 项目 + 用户 + 职责唯一；至少一名主业务 |
-| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；`target_price/currency` 保存原始录入，两个标准价格及汇率保存当次快照；含税人民币固定按 13% 增值税口径；项目 + 幂等键唯一 |
-| `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；物料 + 幂等键唯一 |
+| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；`target_price/currency` 保存原始录入，两个标准价格及汇率保存当次快照；含税人民币固定按 13% 增值税口径；编辑/删除使用对象版本，删除带原因并软删除；项目 + 幂等键唯一 |
+| `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；编辑/删除使用对象版本，删除带原因并软删除；物料 + 幂等键唯一 |
 | `project_activities` | `project_id`, `activity_type`, `occurred_at`, `summary`, `details`, `customer_feedback`, `risk`, `decision`, `next_action`, `next_follow_up_at`, `is_meaningful`, `created_by_user_id` | 追加式记录；业务活动不可覆盖 |
 | `project_stage_events` | `project_id`, `from_stage_code`, `to_stage_code`, `reason`, `idempotency_key`, `actor_user_id`, `approved_by_user_id`, `occurred_at` | 项目 + 幂等键唯一；追加式记录 |
 | `project_status_catalog` | `organization_id`, `code`, `display_name`, `sort_order`, `stale_after_days`, `is_active`, `version` | 组织 + 稳定代码唯一；历史引用后不可删除代码 |
+| `project_reminder_policies` | `organization_id`, 本地发送小时、提前/逾期/升级工作日、抄送角色、每日上限、`version` | 首切片为组织级唯一策略；默认停用；业务配置不放环境变量 |
+| `project_reminder_overrides` | `project_id`, 启停、PM/FAE 可空覆盖、`version` | 项目唯一；空值继承组织，版本进入提醒幂等键；修改时取消未发送旧意图 |
+| `notification_outbox` | 模块/事件/对象、幂等键、模板参数、计划/重试/领取/状态字段 | 共享通知事实；幂等键全局唯一；不保存渲染后正文或原始供应商错误 |
+| `notification_deliveries` | 发件箱、用户、投递地址、状态、尝试、安全错误码 | 发件箱 + 用户唯一；停用账号不创建记录 |
+| `notification_worker_heartbeats` | worker 名称、开始/完成时间、处理/失败计数、安全错误码 | 扫描和发送各一个稳定心跳，可供统一后台与告警读取 |
 | `project_tags` / `tag_links` | 标签名、颜色、对象类型/ID | 组织内规范标签名唯一 |
 
 ## 默认字典

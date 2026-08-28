@@ -1,6 +1,7 @@
 """Server-rendered customer project pages."""
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -14,6 +15,7 @@ from sqlalchemy import func, or_, select
 from extensions import db
 from models import User
 from shared.models import AuditEvent, Organization, OrganizationMembership
+from shared.notifications import cancel_pending_notifications
 
 from . import customer_projects_bp
 from .models import (
@@ -24,6 +26,7 @@ from .models import (
     ProjectActivity,
     ProjectMaterial,
     ProjectMember,
+    ProjectReminderOverride,
     ProjectStageEvent,
     ProjectStatusCatalog,
 )
@@ -52,8 +55,11 @@ from .services.projects import (
     create_project,
     local_day_bounds,
     restore_project,
+    soft_delete_competitor,
+    soft_delete_material,
     soft_delete_project,
     transition_stage,
+    update_competitor,
     update_project,
     update_customer_grade,
     update_material_commercial,
@@ -533,6 +539,19 @@ def project_detail(project_id: str):
         )
     )
     organization_members = []
+    reminder_override = db.session.scalar(
+        select(ProjectReminderOverride).where(
+            ProjectReminderOverride.organization_id == membership.organization_id,
+            ProjectReminderOverride.project_id == project.id,
+        )
+    )
+    member_email_preferences = {}
+    for item, _user in project_members:
+        try:
+            value = json.loads(item.notification_preferences_json or "{}")
+        except (TypeError, ValueError):
+            value = {}
+        member_email_preferences[item.id] = not isinstance(value, dict) or value.get("email_enabled", True) is not False
     if membership.roles.intersection(ADMIN_ROLES):
         organization_members = list(
             db.session.execute(
@@ -557,13 +576,16 @@ def project_detail(project_id: str):
         timeline=timeline,
         audits=audits,
         project_members=project_members,
+        member_email_preferences=member_email_preferences,
         organization_members=organization_members,
         stages=_stage_map(membership.organization_id),
         can_manage=bool(membership.roles.intersection(ADMIN_ROLES)),
         can_write=can_write(membership),
         can_edit_price=can_edit_prices(membership),
+        reminder_override=reminder_override,
         form_key=str(uuid.uuid4()),
     )
+
 
 
 @customer_projects_bp.post("/projects/<string:project_id>/edit")
@@ -648,6 +670,8 @@ def material_update_commercial(material_id: str):
     project = _project_or_404(material.project_id, membership)
     try:
         data = request.form.to_dict()
+        data["mpn_pending"] = request.form.get("mpn_pending") == "on"
+        data["is_primary"] = request.form.get("is_primary") == "on"
         if data.get("unit_price") not in (None, ""):
             require_price_edit(membership)
         update_material_commercial(
@@ -658,6 +682,38 @@ def material_update_commercial(material_id: str):
         )
         db.session.commit()
         flash("物料商务信息已更新。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "物料版本无效。")
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/materials/<string:material_id>/delete")
+@login_required
+@module_required
+def material_delete(material_id: str):
+    membership = _membership()
+    require_write(membership)
+    material = db.session.scalar(
+        select(ProjectMaterial).where(
+            ProjectMaterial.id == material_id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+    )
+    if material is None:
+        abort(404)
+    project = _project_or_404(material.project_id, membership)
+    try:
+        soft_delete_material(
+            material,
+            request.form.get("delete_reason", ""),
+            membership,
+            int(request.form.get("material_version", "0")),
+        )
+        db.session.commit()
+        flash("推广物料已移除，历史审计仍保留。", "success")
         return redirect(url_for("customer_projects.project_detail", project_id=project.id))
     except (DomainError, ValueError) as exc:
         if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
@@ -683,6 +739,90 @@ def material_add_competitor(material_id: str):
         flash("竞争方案已添加。", "success")
         return redirect(url_for("customer_projects.project_detail", project_id=project.id))
     except DomainError as exc:
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/competitors/<string:competitor_id>/edit")
+@login_required
+@module_required
+def competitor_edit(competitor_id: str):
+    membership = _membership()
+    require_write(membership)
+    competitor = db.session.scalar(
+        select(MaterialCompetitor).where(
+            MaterialCompetitor.id == competitor_id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+    )
+    if competitor is None:
+        abort(404)
+    material = db.session.scalar(
+        select(ProjectMaterial).where(
+            ProjectMaterial.id == competitor.project_material_id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+    )
+    if material is None:
+        abort(404)
+    project = _project_or_404(material.project_id, membership)
+    try:
+        data = request.form.to_dict()
+        data["model_pending"] = request.form.get("model_pending") == "on"
+        update_competitor(
+            competitor,
+            data,
+            membership,
+            int(request.form.get("competitor_version", "0")),
+        )
+        db.session.commit()
+        flash("竞争方案已更新。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "竞争方案版本无效。")
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/competitors/<string:competitor_id>/delete")
+@login_required
+@module_required
+def competitor_delete(competitor_id: str):
+    membership = _membership()
+    require_write(membership)
+    competitor = db.session.scalar(
+        select(MaterialCompetitor).where(
+            MaterialCompetitor.id == competitor_id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+    )
+    if competitor is None:
+        abort(404)
+    material = db.session.scalar(
+        select(ProjectMaterial).where(
+            ProjectMaterial.id == competitor.project_material_id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+    )
+    if material is None:
+        abort(404)
+    project = _project_or_404(material.project_id, membership)
+    try:
+        soft_delete_competitor(
+            competitor,
+            request.form.get("delete_reason", ""),
+            membership,
+            int(request.form.get("competitor_version", "0")),
+        )
+        db.session.commit()
+        flash("竞争方案已移除，历史审计仍保留。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "竞争方案版本无效。")
         return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
 
 
@@ -726,6 +866,62 @@ def project_add_member(project_id: str):
         if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
             exc = DomainError("VALIDATION_ERROR", "请选择有效成员。")
         return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/projects/<string:project_id>/reminder-settings")
+@login_required
+@module_required
+def project_reminder_settings(project_id: str):
+    membership = _membership()
+    require_manager(membership)
+    project = _project_or_404(project_id, membership)
+    override = db.session.scalar(
+        select(ProjectReminderOverride).where(ProjectReminderOverride.project_id == project.id)
+    )
+    if override is None:
+        override = ProjectReminderOverride(organization_id=membership.organization_id, project_id=project.id)
+        db.session.add(override)
+        db.session.flush()
+
+    def tri_state(name: str):
+        value = request.form.get(name, "inherit")
+        return None if value == "inherit" else value == "yes"
+
+    override.is_enabled = request.form.get("is_enabled", "yes") == "yes"
+    override.include_pm = tri_state("include_pm")
+    override.include_fae = tri_state("include_fae")
+    override.version += 1
+    cancel_pending_notifications("customer_projects", "project", project.id)
+    add_audit(project.organization_id, "project_reminder_override", override.id, "updated", membership.user_id, {"enabled": override.is_enabled, "version": override.version})
+    db.session.commit()
+    flash("项目提醒设置已保存，未发送的旧提醒已取消。", "success")
+    return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+
+
+@customer_projects_bp.post("/projects/<string:project_id>/members/<string:member_id>/notifications")
+@login_required
+@module_required
+def project_member_notifications(project_id: str, member_id: str):
+    membership = _membership()
+    require_manager(membership)
+    project = _project_or_404(project_id, membership)
+    member = db.session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.id == member_id,
+            ProjectMember.organization_id == membership.organization_id,
+            ProjectMember.project_id == project.id,
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    if member is None:
+        abort(404)
+    enabled = request.form.get("email_enabled") == "on"
+    member.notification_preferences_json = json.dumps({"email_enabled": enabled}, ensure_ascii=False, sort_keys=True)
+    cancel_pending_notifications("customer_projects", "project", project.id)
+    add_audit(project.organization_id, "project_member", member.id, "notification_preferences_updated", membership.user_id, {"email_enabled": enabled})
+    db.session.commit()
+    flash("成员通知偏好已更新。", "success")
+    return redirect(url_for("customer_projects.project_detail", project_id=project.id))
 
 
 @customer_projects_bp.post("/projects/<string:project_id>/delete")

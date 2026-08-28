@@ -50,6 +50,46 @@ class ProjectStatusCatalog(db.Model):
     )
 
 
+class ProjectReminderPolicy(db.Model):
+    __tablename__ = "project_reminder_policies"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_project_reminder_policy_org"),
+        CheckConstraint("version > 0", name="ck_reminder_policy_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    due_hour_local: Mapped[int] = mapped_column(Integer, nullable=False, default=9)
+    pre_due_workdays: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    overdue_workdays: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    stale_manager_after_workdays: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    include_pm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    include_fae: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ProjectReminderOverride(db.Model):
+    __tablename__ = "project_reminder_overrides"
+    __table_args__ = (
+        UniqueConstraint("project_id", name="uq_project_reminder_override_project"),
+        CheckConstraint("version > 0", name="ck_reminder_override_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(db.ForeignKey("customer_projects.id", ondelete="CASCADE"), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    include_pm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    include_fae: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class Customer(db.Model):
     __tablename__ = "customers"
     __table_args__ = (

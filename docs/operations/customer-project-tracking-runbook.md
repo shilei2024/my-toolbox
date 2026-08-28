@@ -1,15 +1,15 @@
-# 客户项目跟进 Phase 1 运维手册
+# 客户项目跟进运维手册
 
 ## 当前能力
 
-Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`；未完成 PostgreSQL staging 和发布审批前不得开启。
+Phase 1 提供核心台账；Phase 2 首个切片提供提醒策略、幂等发件箱、dry-run/SMTP 发送、重试和心跳。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
 
 ## 日常检查
 
 1. 检查 `/healthz`、登录、统一后台和现有工具无异常。
 2. 功能开放后检查客户项目 API 的请求量、4xx/5xx、P95 延迟和 409 冲突数量。
-3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量；日期按组织时区计算，Phase 1 仅展示，不自动通知。
-4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表和 `audit_events`。
+3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量，并在统一后台核对扫描/发送心跳、最老待发、失败和死信状态。
+4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表、`audit_events`、提醒策略、通知发件箱、投递和心跳表。
 5. 抽查 Excel 导出审计中的项目数、物料数和筛选标记；导出文件可能含客户与价格信息，只能通过受控业务账号下载和传递。
 
 ## 汇率与价格异常
@@ -32,4 +32,4 @@ Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认
 
 ## 回滚
 
-先设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用，再回退到上一稳定应用包。保留 migrations `8904db6a3fa5` 与 `f1a2b3c4d5e6` 创建的表、列和所有业务记录；事故处理中禁止执行 Alembic downgrade。恢复步骤以[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)为准。
+先关闭提醒扫描和真实发送，再设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用。保留 migrations `8904db6a3fa5`、`f1a2b3c4d5e6`、`a2b3c4d5e6f7` 与 `b3c4d5e6f7a8` 创建的表、列和业务记录；事故处理中禁止执行 Alembic downgrade。基础台账恢复见[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)，提醒见[Phase 2 部署与回滚](../deployment/customer-project-tracking-phase-2-reminders.md)。

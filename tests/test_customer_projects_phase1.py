@@ -33,7 +33,7 @@ from customer_projects.services.projects import (  # noqa: E402
 )
 from extensions import db  # noqa: E402
 from models import User  # noqa: E402
-from shared.models import Organization, OrganizationMembership  # noqa: E402
+from shared.models import AuditEvent, Organization, OrganizationMembership  # noqa: E402
 
 
 class CustomerProjectsPhase1Test(unittest.TestCase):
@@ -231,6 +231,118 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.assertEqual(db.session.query(ProjectMaterial).count(), 1)
             self.assertEqual(db.session.query(MaterialCompetitor).count(), 2)
 
+    def test_material_and_competitor_edit_conflict_and_soft_delete(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        created_material = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "MPX-8100",
+                "category_code": "Power IC",
+            },
+            headers={"Idempotency-Key": "editable-material"},
+        )
+        self.assertEqual(created_material.status_code, 201)
+        material_id = created_material.get_json()["data"]["id"]
+
+        updated_material = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={
+                "promoted_brand": "Mavis Semi",
+                "promoted_mpn": "MPX-8200",
+                "category_code": "电源管理",
+                "application_position": "域控制器电源",
+                "machine_quantity": "4",
+                "is_primary": True,
+            },
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(updated_material.status_code, 200)
+        material_payload = updated_material.get_json()["data"]
+        self.assertEqual(material_payload["promoted_brand"], "Mavis Semi")
+        self.assertEqual(material_payload["machine_quantity"], "4.0000")
+        self.assertTrue(material_payload["is_primary"])
+        self.assertEqual(material_payload["version"], 2)
+
+        stale_material = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"application_position": "不应覆盖"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(stale_material.status_code, 409)
+        self.assertEqual(
+            stale_material.get_json()["error"]["code"], "MATERIAL_VERSION_CONFLICT"
+        )
+        self.assertEqual(
+            stale_material.get_json()["error"]["details"]["current_version"], 2
+        )
+
+        created_competitor = self.client.post(
+            f"/api/v1/customer-projects/materials/{material_id}/competitors",
+            json={"brand": "竞品品牌", "model_pending": True},
+            headers={"Idempotency-Key": "editable-competitor"},
+        )
+        self.assertEqual(created_competitor.status_code, 201)
+        competitor_id = created_competitor.get_json()["data"]["id"]
+        updated_competitor = self.client.patch(
+            f"/api/v1/customer-projects/competitors/{competitor_id}",
+            json={
+                "brand": "竞品品牌二代",
+                "mpn": "ALT-200",
+                "model_pending": False,
+                "distributor": "渠道 A",
+                "quoted_price": "0.85",
+                "observed_at": "2026-08-28",
+            },
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(updated_competitor.status_code, 200)
+        competitor_payload = updated_competitor.get_json()["data"]
+        self.assertEqual(competitor_payload["mpn"], "ALT-200")
+        self.assertEqual(competitor_payload["quoted_price"], "0.850000")
+        self.assertEqual(competitor_payload["version"], 2)
+        detail_before_delete = self.client.get(
+            f"/customer-projects/projects/{project_id}"
+        ).get_data(as_text=True)
+        self.assertIn("编辑推广物料", detail_before_delete)
+        self.assertIn("编辑竞争方案", detail_before_delete)
+
+        stale_delete = self.client.delete(
+            f"/api/v1/customer-projects/competitors/{competitor_id}",
+            json={"reason": "信息已失效"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(stale_delete.status_code, 409)
+        deleted_competitor = self.client.delete(
+            f"/api/v1/customer-projects/competitors/{competitor_id}",
+            json={"reason": "信息已失效"},
+            headers={"If-Match": '"2"'},
+        )
+        self.assertEqual(deleted_competitor.status_code, 204)
+        deleted_material = self.client.delete(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"reason": "客户更换方案"},
+            headers={"If-Match": '"2"'},
+        )
+        self.assertEqual(deleted_material.status_code, 204)
+
+        detail = self.client.get(f"/customer-projects/projects/{project_id}")
+        self.assertNotIn("Mavis Semi", detail.get_data(as_text=True))
+        with app.app_context():
+            self.assertIsNotNone(db.session.get(ProjectMaterial, material_id).deleted_at)
+            self.assertIsNotNone(db.session.get(MaterialCompetitor, competitor_id).deleted_at)
+            actions = {
+                row.action
+                for row in db.session.scalars(
+                    db.select(AuditEvent).where(
+                        AuditEvent.object_id.in_([material_id, competitor_id])
+                    )
+                )
+            }
+            self.assertIn("updated", actions)
+            self.assertIn("deleted", actions)
+
     def test_customer_grade_can_be_created_and_updated(self) -> None:
         self._login()
         created = self.client.post(
@@ -416,7 +528,6 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.get_json()["error"]["code"], "VALIDATION_ERROR")
-
 
 if __name__ == "__main__":
     unittest.main()

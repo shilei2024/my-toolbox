@@ -143,6 +143,20 @@ class Config:
     CUSTOMER_PROJECTS_PILOT_EMAILS: str = os.environ.get(
         "CUSTOMER_PROJECTS_PILOT_EMAILS", ""
     ).strip()
+    CUSTOMER_PROJECT_REMINDERS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECT_REMINDERS_ENABLED"), default=False
+    )
+    CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED"), default=False
+    )
+    NOTIFICATION_ADAPTER: str = os.environ.get("NOTIFICATION_ADAPTER", "dry-run").strip()
+    SMTP_HOST: str = os.environ.get("SMTP_HOST", "").strip()
+    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+    SMTP_SECURITY: str = os.environ.get("SMTP_SECURITY", "starttls").strip()
+    SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "").strip()
+    SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM: str = os.environ.get("SMTP_FROM", "").strip()
+    SMTP_TIMEOUT_SECONDS: int = int(os.environ.get("SMTP_TIMEOUT_SECONDS", "10"))
 
     # --- Misc ---
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://localhost:8000")

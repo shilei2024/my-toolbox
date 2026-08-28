@@ -1,6 +1,6 @@
-# Customer Projects API v1（Phase 1 核心契约）
+# Customer Projects API v1（Phase 1–2 契约）
 
-> 状态：Phase 1 核心端点已实现，功能开关默认关闭，尚未部署生产。提醒、报表、重新激活和衍生端点属于后续 Phase。
+> 状态：Phase 1 核心台账与 Phase 2 提醒闭环首切片已实现，功能开关默认关闭，尚未部署生产。Phase 2 提醒通过统一后台和服务器 CLI 管理，不新增浏览器公开触发端点。重新激活、衍生和报表端点属于后续 Phase。
 
 ## 通用边界
 
@@ -17,13 +17,14 @@
 | POST | `/projects/{project_id}/activities` | 新增不可覆盖的跟进 | `Idempotency-Key` |
 | POST | `/projects/{project_id}/stage-transitions` | 状态变化/审批 | `Idempotency-Key` + 当前版本 |
 | POST | `/projects/{project_id}/materials` | 新增物料，可同时录入单机数量和单价 | `Idempotency-Key` |
-| PATCH | `/materials/{material_id}` | 更新单机数量和单价 | `If-Match`；仅业务/PM 价格角色 |
+| PATCH/DELETE | `/materials/{material_id}` | 更新物料主数据/商务字段，或带原因软删除 | `If-Match`；仅业务/PM 价格角色可改价格 |
 | POST | `/materials/{material_id}/competitors` | 新增竞争方案 | `Idempotency-Key` |
+| PATCH/DELETE | `/competitors/{competitor_id}` | 更新竞争方案，或带原因软删除 | `If-Match` |
 | POST | `/trash/projects/{project_id}/restore` | 管理员恢复软删除项目 | 组织与角色校验 |
 
 项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的 `annual_usage`，兼容迁移前的旧项目记录可暂时返回 `null`。
 
-客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD，以及物料/竞品编辑与软删除、项目重新激活/衍生、报表和通知 API 在后续切片补齐。未实现端点不返回伪成功。
+客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD 和通知查询 API 仍属后续切片。未实现端点不返回伪成功。
 
 ## 乐观锁
 
@@ -75,6 +76,8 @@ If-Match: "7"
 `currency` 仅支持 `USD` 或 `CNY`。USD 输入视为未税美元，服务端按主站 USD/CNY 汇率乘以 `1.13` 得到含税人民币；CNY 输入视为已含 13% 增值税，再反算未税美元。响应同时返回 `unit_price_usd`、`unit_price_cny_tax_included`、`fx_rate_usd_cny` 和原始录入币别。服务端保存折算快照，后续汇率变化不会修改历史单价。
 
 价格写入只允许组织管理员、业务经理、`sales` 和 `pm`；FAE 可以更新 `machine_quantity`，也可以查看折算结果，但提交 `unit_price` 返回 403。汇率服务不可用且无缓存时，价格不保存并返回 422；客户端预览只用于展示，最终结果以服务端计算为准。
+
+物料 PATCH 还可更新 `category_code`、`promoted_brand`、`promoted_mpn`、`mpn_pending`、`customer_part_number`、`application_position`、`technical_status`、`commercial_status`、`expected_mass_production_at`、`is_primary` 和 `notes`。竞争方案 PATCH 可更新创建时的业务字段以及 `quoted_price`、优劣势、置信度和观察日期。两类更新都必须携带当前 ETag；DELETE 必须同时携带 ETag 和非空 `reason`，仅写入软删除状态与审计，不物理清除历史。
 
 页面端提供 `GET /customer-projects/projects/export.xlsx`，按当前用户的数据范围以及 `q`、`stage` 筛选导出项目、客户评级、物料数量和双币单价。该页面导出写入审计事件；当前不作为稳定 JSON API 承诺。
 

@@ -18,6 +18,7 @@
 ## 配置与部署文档
 
 - [客户项目跟进 Phase 1 迁移、发布与回滚计划](customer-project-tracking-phase-1-rollout.md)（核心代码已实现；真实 staging 与生产门禁仍未关闭）
+- [客户项目 Phase 2 提醒闭环部署与回滚](customer-project-tracking-phase-2-reminders.md)（默认 dry-run；真实 SMTP 需独立审批）
 
 | Phase | 配置 | 部署与回滚 |
 | --- | --- | --- |
