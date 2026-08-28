@@ -1075,6 +1075,7 @@ def update_material_commercial(
         if "mpn_pending" in data
         else material.mpn_pending
     )
+    legacy_incomplete = material.promoted_mpn is None and not material.mpn_pending
     # Older records created before the MPN/pending invariant may legitimately
     # have neither value.  Allow those records to be edited and normalize them
     # to the explicit "model pending" state; newly-cleared MPNs still require
@@ -1090,6 +1091,11 @@ def update_material_commercial(
                 "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
             )
         pending = True
+    if not brand or (not mpn and not pending and not legacy_incomplete):
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
+        )
     if "promoted_brand" in data:
         values["promoted_brand"] = brand[:120]
         safe_diff["promoted_brand"] = "已变更"
