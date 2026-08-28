@@ -52,3 +52,4 @@ M1 AI 生图上线测试见 [Vercel Preview 与 Generation Staging 验证](m1-ve
 M1 生产服务器、托管 PostgreSQL/Redis、腾讯 COS 与 Vercel 的人工密钥清单见 [M1 AI 功能生产配置（人工填写版）](m1-production-configuration.md)。该文档只准备配置，不绕过生产 Go/No-Go 门禁。
 
 AI 模块并入生产主线的合并流程与审批门见 [AI 模块并入生产主线 · 合并 Runbook](../operations/ai-merge-runbook.md)。
+- [客户项目提醒功能验证](customer-project-reminder-verification.md)

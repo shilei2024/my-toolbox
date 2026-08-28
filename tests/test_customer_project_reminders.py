@@ -262,6 +262,31 @@ class CustomerProjectReminderTest(unittest.TestCase):
         self.assertEqual(dispatched.exit_code, 0)
         self.assertIn("claimed=0 sent=0 failed=0", dispatched.output)
 
+    def test_scheduler_cli_accepts_deterministic_now_override(self) -> None:
+        runner = app.test_cli_runner()
+        scanned = runner.invoke(
+            args=[
+                "customer-projects",
+                "scan-reminders",
+                "--now",
+                "2026-08-28T02:00:00Z",
+            ]
+        )
+        self.assertEqual(scanned.exit_code, 0)
+        self.assertIn("scanned=0 created=0 limited=0", scanned.output)
+        dispatched = runner.invoke(
+            args=[
+                "customer-projects",
+                "dispatch-notifications",
+                "--now",
+                "2026-08-28T02:00:00Z",
+                "--limit",
+                "10",
+            ]
+        )
+        self.assertEqual(dispatched.exit_code, 0)
+        self.assertIn("claimed=0 sent=0 failed=0", dispatched.output)
+
     def test_project_override_and_member_email_opt_out(self) -> None:
         with app.app_context():
             project_id = self._seed_project(
