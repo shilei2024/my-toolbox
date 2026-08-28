@@ -13,6 +13,7 @@ from shared.models import OrganizationMembership
 
 ADMIN_ROLES = frozenset({"organization_admin", "business_manager"})
 WRITE_ROLES = frozenset({"organization_admin", "business_manager", "sales", "pm", "fae"})
+PRICE_EDIT_ROLES = frozenset({"organization_admin", "business_manager", "sales", "pm"})
 
 
 def _pilot_allows_current_user() -> bool:
@@ -61,12 +62,25 @@ def module_required(view: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def require_write(membership: OrganizationMembership) -> None:
-    if not membership.roles.intersection(WRITE_ROLES):
+    if not can_write(membership):
         abort(403)
+
+
+def can_write(membership: OrganizationMembership) -> bool:
+    return bool(membership.roles.intersection(WRITE_ROLES))
 
 
 def require_manager(membership: OrganizationMembership) -> None:
     if not membership.roles.intersection(ADMIN_ROLES):
+        abort(403)
+
+
+def can_edit_prices(membership: OrganizationMembership) -> bool:
+    return bool(membership.roles.intersection(PRICE_EDIT_ROLES))
+
+
+def require_price_edit(membership: OrganizationMembership) -> None:
+    if not can_edit_prices(membership):
         abort(403)
 
 

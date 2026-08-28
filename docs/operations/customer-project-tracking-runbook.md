@@ -10,6 +10,14 @@ Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认
 2. 功能开放后检查客户项目 API 的请求量、4xx/5xx、P95 延迟和 409 冲突数量。
 3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量；日期按组织时区计算，Phase 1 仅展示，不自动通知。
 4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表和 `audit_events`。
+5. 抽查 Excel 导出审计中的项目数、物料数和筛选标记；导出文件可能含客户与价格信息，只能通过受控业务账号下载和传递。
+
+## 汇率与价格异常
+
+- 页面汇率预览失败但无保存动作：刷新后重试；预览不是最终计算依据。
+- 保存单价提示汇率不可用：不要手工猜测汇率或直接改库。确认服务器可访问主站汇率上游；若已有缓存，系统会标记为过期缓存并继续使用，完全无缓存时整笔价格写入不会落库。
+- 折算结果争议：核对物料记录中的原始录入币别、`fx_rate_usd_cny` 和更新时间。USD 按未税口径，CNY 按含 13% 增值税口径。
+- FAE 无法编辑单价属于预期权限；如需授权，应由统一后台调整为业务或 PM 角色并保留审批记录，不得改前端绕过。
 
 ## 账号或权限异常
 
@@ -24,4 +32,4 @@ Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认
 
 ## 回滚
 
-先设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用，再回退到上一稳定应用包。保留 migration `8904db6a3fa5` 创建的表和所有业务记录；事故处理中禁止执行 Alembic downgrade。恢复步骤以[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)为准。
+先设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用，再回退到上一稳定应用包。保留 migrations `8904db6a3fa5` 与 `f1a2b3c4d5e6` 创建的表、列和所有业务记录；事故处理中禁止执行 Alembic downgrade。恢复步骤以[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)为准。

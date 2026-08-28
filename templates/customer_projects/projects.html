@@ -6,7 +6,7 @@
   {% include "customer_projects/_module_nav.html" %}
   <div class="cp-page-heading">
     <div><p class="cp-kicker">PROJECT LEDGER</p><h1>项目台账</h1><p>每个项目只有一个主记录，生命周期变化不搬表。</p></div>
-    <a class="btn btn-primary" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a>
+    <div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{{ url_for('customer_projects.projects_export', q=q, stage=selected_stage) }}"><i class="bi bi-file-earmark-excel"></i> 导出 Excel</a><a class="btn btn-primary" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a></div>
   </div>
   <form class="cp-filter-bar" method="get">
     <label class="visually-hidden" for="cp-search">搜索</label>
@@ -19,7 +19,7 @@
       <div class="cp-project-list">
         {% for project in projects %}
           <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
-            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
+            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ project.product_name or '产品待补齐' }} · {{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
             <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
             <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
             <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</span>
