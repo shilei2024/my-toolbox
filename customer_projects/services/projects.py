@@ -498,7 +498,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     try:
         owner_id = int(data.get("primary_sales_user_id") or membership.user_id)
     except (TypeError, ValueError) as exc:
-        raise DomainError("INVALID_OWNER", "主业务无效。") from exc
+        raise DomainError("INVALID_OWNER", "主负责人无效。") from exc
     owner_membership = db.session.scalar(
         select(OrganizationMembership).where(
             OrganizationMembership.organization_id == membership.organization_id,
@@ -509,7 +509,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     if owner_membership is None or not owner_membership.roles.intersection(
         {"organization_admin", "business_manager", "sales"}
     ):
-        raise DomainError("INVALID_OWNER", "主业务不是当前组织的有效成员。")
+        raise DomainError("INVALID_OWNER", "主负责人不是当前组织的有效成员。")
     org = db.session.get(Organization, membership.organization_id)
     follow_up = parse_datetime(str(data["next_follow_up_at"]), org.timezone if org else "Asia/Shanghai")
     now = datetime.now(timezone.utc)
@@ -949,7 +949,7 @@ def reactivate_project(
     if owner is None or not owner.roles.intersection(
         {"organization_admin", "business_manager", "sales"}
     ):
-        raise DomainError("INVALID_OWNER", "主业务不是当前组织的有效成员。")
+        raise DomainError("INVALID_OWNER", "主负责人不是当前组织的有效成员。")
     organization = db.session.get(Organization, membership.organization_id)
     follow_up = parse_datetime(
         data["next_follow_up_at"], organization.timezone if organization else "Asia/Shanghai"
