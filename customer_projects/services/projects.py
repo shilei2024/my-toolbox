@@ -5,10 +5,11 @@ import re
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from flask import g
+from flask import current_app, g
 from sqlalchemy import func, select, update
 
 from customer_projects.models import (
@@ -23,6 +24,7 @@ from customer_projects.models import (
     ProjectStatusCatalog,
 )
 from extensions import db
+from shared.exchange_rates import ExchangeRateError, get_exchange_rate
 from shared.models import AuditEvent, Organization, OrganizationMembership
 
 ACTIVE_STAGES = (
@@ -97,6 +99,22 @@ def parse_date(value: str | date | None) -> date | None:
         return date.fromisoformat(str(value))
     except ValueError as exc:
         raise DomainError("INVALID_DATE", "日期格式不正确。") from exc
+
+
+def parse_nonnegative_decimal(value: Any, field: str, label: str) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise DomainError(
+            "VALIDATION_ERROR", f"{label}格式不正确。", field_errors={field: "请输入有效数字"}
+        ) from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise DomainError(
+            "VALIDATION_ERROR", f"{label}不能为负数。", field_errors={field: "不能为负数"}
+        )
+    return parsed
 
 
 def local_day_bounds(now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -198,6 +216,11 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         {"organization_admin", "business_manager", "sales"}
     ):
         raise DomainError("INVALID_OWNER", "客户负责人不是当前组织的有效业务成员。")
+    grade = str(data.get("grade") or "").upper().strip()
+    if grade and grade not in {"A", "B", "C", "D"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+        )
     customer = Customer(
         organization_id=membership.organization_id,
         name=name[:255],
@@ -205,6 +228,7 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         short_name=str(data.get("short_name") or "").strip()[:120] or None,
         industry=str(data.get("industry") or "").strip()[:120] or None,
         region=str(data.get("region") or "").strip()[:120] or None,
+        grade=grade or None,
         primary_owner_user_id=owner_id,
         notes=str(data.get("notes") or "").strip()[:4000] or None,
         created_by_user_id=membership.user_id,
@@ -213,6 +237,31 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
     db.session.add(customer)
     db.session.flush()
     add_audit(customer.organization_id, "customer", customer.id, "created", membership.user_id, {"name": customer.name})
+    return customer
+
+
+def update_customer_grade(
+    customer: Customer, grade_value: Any, membership: OrganizationMembership
+) -> Customer:
+    if customer.organization_id != membership.organization_id or customer.deleted_at is not None:
+        raise DomainError("CUSTOMER_NOT_FOUND", "客户不存在或不可访问。")
+    grade = str(grade_value or "").upper().strip()
+    if grade and grade not in {"A", "B", "C", "D"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+        )
+    customer.grade = grade or None
+    customer.version += 1
+    customer.updated_by_user_id = membership.user_id
+    customer.updated_at = datetime.now(timezone.utc)
+    add_audit(
+        customer.organization_id,
+        "customer",
+        customer.id,
+        "grade_updated",
+        membership.user_id,
+        {"grade": grade or None},
+    )
     return customer
 
 
@@ -253,6 +302,9 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     if existing is not None:
         if (
             existing.name != str(data.get("name", "")).strip()
+            or (existing.product_name or "") != str(data.get("product_name", "")).strip()
+            or existing.annual_usage
+            != parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
             or existing.customer_id != str(data.get("customer_id", "")).strip()
         ):
             raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的项目请求。")
@@ -260,11 +312,17 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
 
     fields: dict[str, str] = {}
     name = str(data.get("name", "")).strip()
+    product_name = str(data.get("product_name", "")).strip()
+    annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
     customer_id = str(data.get("customer_id", "")).strip()
     stage = str(data.get("stage_code") or "evaluation")
     next_action = str(data.get("next_action", "")).strip()
     if not name:
         fields["name"] = "必填"
+    if not product_name:
+        fields["product_name"] = "必填"
+    if annual_usage in (None, Decimal("0")):
+        fields["annual_usage"] = "必须大于 0"
     if not customer_id:
         fields["customer_id"] = "必填"
     if stage not in ACTIVE_STAGES:
@@ -316,6 +374,8 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
         customer_id=customer.id,
         name=name[:255],
         normalized_name=normalize_name(name)[:255],
+        product_name=product_name[:255],
+        annual_usage=annual_usage,
         stage_code=stage,
         assessment_grade=grade or None,
         probability_band=probability,
@@ -357,7 +417,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
 def update_project(project: CustomerProject, data: dict[str, Any], membership: OrganizationMembership, expected_version: int) -> CustomerProject:
     values: dict[str, Any] = {"updated_by_user_id": membership.user_id, "version": expected_version + 1, "updated_at": datetime.now(timezone.utc)}
     safe_diff: dict[str, Any] = {}
-    for field, limit in (("name", 255), ("next_action", 500)):
+    for field, limit in (("name", 255), ("product_name", 255), ("next_action", 500)):
         if field in data:
             value = str(data[field]).strip()
             if not value:
@@ -366,6 +426,14 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
             safe_diff[field] = "已变更"
             if field == "name":
                 values["normalized_name"] = normalize_name(value)[:255]
+    if "annual_usage" in data:
+        annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
+        if annual_usage in (None, Decimal("0")):
+            raise DomainError(
+                "VALIDATION_ERROR", "项目年用量必须大于 0。", field_errors={"annual_usage": "必须大于 0"}
+            )
+        values["annual_usage"] = annual_usage
+        safe_diff["annual_usage"] = str(annual_usage)
     if "assessment_grade" in data:
         grade = str(data.get("assessment_grade") or "").upper()
         if grade and grade not in {"A", "B", "C", "D"}:
@@ -595,6 +663,9 @@ def add_material(
     pending = bool(data.get("mpn_pending"))
     if not brand or (not mpn and not pending):
         raise DomainError("VALIDATION_ERROR", "推广品牌必填；推广型号或“型号待确认”至少填写一项。")
+    machine_quantity = parse_nonnegative_decimal(
+        data.get("machine_quantity"), "machine_quantity", "单机数量"
+    )
     material = ProjectMaterial(
         organization_id=membership.organization_id,
         project_id=project.id,
@@ -604,6 +675,7 @@ def add_material(
         normalized_mpn=normalize_mpn(mpn),
         mpn_pending=pending,
         application_position=str(data.get("application_position") or "").strip()[:255] or None,
+        machine_quantity=machine_quantity,
         technical_status=str(data.get("technical_status") or "").strip()[:64] or None,
         commercial_status=str(data.get("commercial_status") or "").strip()[:64] or None,
         is_primary=bool(data.get("is_primary")),
@@ -611,9 +683,91 @@ def add_material(
         created_by_user_id=membership.user_id,
         updated_by_user_id=membership.user_id,
     )
+    if data.get("unit_price") not in (None, ""):
+        apply_material_price(material, data, membership)
     db.session.add(material)
     db.session.flush()
     add_audit(project.organization_id, "material", material.id, "created", membership.user_id, {"brand": brand, "mpn": mpn or "待确认"})
+    return material
+
+
+def apply_material_price(
+    material: ProjectMaterial, data: dict[str, Any], membership: OrganizationMembership
+) -> None:
+    allowed_roles = {"organization_admin", "business_manager", "sales", "pm"}
+    if not membership.roles.intersection(allowed_roles):
+        raise DomainError("PRICE_EDIT_FORBIDDEN", "只有业务和 PM 可以编辑单价。")
+    amount = parse_nonnegative_decimal(data.get("unit_price"), "unit_price", "单价")
+    if amount in (None, Decimal("0")):
+        raise DomainError(
+            "VALIDATION_ERROR", "单价必须大于 0。", field_errors={"unit_price": "必须大于 0"}
+        )
+    currency = str(data.get("currency") or "").upper().strip()
+    if currency not in {"USD", "CNY"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "单价币别仅支持 USD 或 CNY。", field_errors={"currency": "请选择币别"}
+        )
+    try:
+        fx_rate = Decimal(
+            str(get_exchange_rate(current_app._get_current_object(), "USD", "CNY")["rate"])
+        )
+    except ExchangeRateError as exc:
+        raise DomainError("EXCHANGE_RATE_UNAVAILABLE", "汇率暂不可用，单价未保存，请稍后重试。") from exc
+    tax_multiplier = Decimal("1.13")
+    precision = Decimal("0.000001")
+    if currency == "USD":
+        usd_price = amount
+        cny_tax_price = amount * fx_rate * tax_multiplier
+    else:
+        cny_tax_price = amount
+        usd_price = amount / tax_multiplier / fx_rate
+    material.target_price = amount.quantize(precision, rounding=ROUND_HALF_UP)
+    material.currency = currency
+    material.fx_rate_usd_cny = fx_rate.quantize(precision, rounding=ROUND_HALF_UP)
+    material.unit_price_usd = usd_price.quantize(precision, rounding=ROUND_HALF_UP)
+    material.unit_price_cny_tax_included = cny_tax_price.quantize(
+        precision, rounding=ROUND_HALF_UP
+    )
+    material.price_updated_by_user_id = membership.user_id
+    material.price_updated_at = datetime.now(timezone.utc)
+
+
+def update_material_commercial(
+    material: ProjectMaterial,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> ProjectMaterial:
+    if material.organization_id != membership.organization_id or material.deleted_at is not None:
+        raise DomainError("MATERIAL_NOT_FOUND", "推广物料不存在或不可访问。")
+    if expected_version != material.version:
+        raise DomainError("MATERIAL_VERSION_CONFLICT", "物料已被其他成员更新，请刷新后重试。")
+    has_quantity = "machine_quantity" in data
+    has_price = data.get("unit_price") not in (None, "")
+    if not has_quantity and not has_price:
+        raise DomainError("VALIDATION_ERROR", "请至少更新单机数量或单价。")
+    if has_quantity:
+        material.machine_quantity = parse_nonnegative_decimal(
+            data.get("machine_quantity"), "machine_quantity", "单机数量"
+        )
+    if has_price:
+        apply_material_price(material, data, membership)
+    material.version += 1
+    material.updated_by_user_id = membership.user_id
+    material.updated_at = datetime.now(timezone.utc)
+    add_audit(
+        material.organization_id,
+        "material",
+        material.id,
+        "commercial_updated",
+        membership.user_id,
+        {
+            "machine_quantity": str(material.machine_quantity or ""),
+            "currency": material.currency if has_price else None,
+            "fx_rate_usd_cny": str(material.fx_rate_usd_cny) if has_price else None,
+            "price": "已更新" if has_price else "未变更",
+        },
+    )
     return material
 
 

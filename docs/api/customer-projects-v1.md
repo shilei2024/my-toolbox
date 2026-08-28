@@ -16,11 +16,12 @@
 | GET/PATCH/DELETE | `/projects/{project_id}` | 详情、更新、软删除 | PATCH/DELETE 使用 `If-Match` |
 | POST | `/projects/{project_id}/activities` | 新增不可覆盖的跟进 | `Idempotency-Key` |
 | POST | `/projects/{project_id}/stage-transitions` | 状态变化/审批 | `Idempotency-Key` + 当前版本 |
-| POST | `/projects/{project_id}/materials` | 新增物料 | `Idempotency-Key` |
+| POST | `/projects/{project_id}/materials` | 新增物料，可同时录入单机数量和单价 | `Idempotency-Key` |
+| PATCH | `/materials/{material_id}` | 更新单机数量和单价 | `If-Match`；仅业务/PM 价格角色 |
 | POST | `/materials/{material_id}/competitors` | 新增竞争方案 | `Idempotency-Key` |
 | POST | `/trash/projects/{project_id}/restore` | 管理员恢复软删除项目 | 组织与角色校验 |
 
-项目更新允许修改名称、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。
+项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的 `annual_usage`，兼容迁移前的旧项目记录可暂时返回 `null`。
 
 客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD，以及物料/竞品编辑与软删除、项目重新激活/衍生、报表和通知 API 在后续切片补齐。未实现端点不返回伪成功。
 
@@ -46,6 +47,8 @@ If-Match: "7"
 {
   "customer_id": "f34214b0-e929-47d1-9d2d-7e0a45e78ee7",
   "name": "车载电源控制器",
+  "product_name": "48V 域控制器",
+  "annual_usage": "120000",
   "stage_code": "evaluation",
   "primary_sales_user_id": 42,
   "next_action": "确认原理图和样品数量",
@@ -56,6 +59,24 @@ If-Match: "7"
 ```
 
 成功返回 201、资源 URL、ETag 和服务器生成的 `project_code`。同一幂等键及相同请求摘要重试返回原结果；同键不同摘要返回 409。
+
+## 物料商务信息
+
+`POST /projects/{project_id}/materials` 和 `PATCH /materials/{material_id}` 接受：
+
+```json
+{
+  "machine_quantity": "2",
+  "unit_price": "1.25",
+  "currency": "USD"
+}
+```
+
+`currency` 仅支持 `USD` 或 `CNY`。USD 输入视为未税美元，服务端按主站 USD/CNY 汇率乘以 `1.13` 得到含税人民币；CNY 输入视为已含 13% 增值税，再反算未税美元。响应同时返回 `unit_price_usd`、`unit_price_cny_tax_included`、`fx_rate_usd_cny` 和原始录入币别。服务端保存折算快照，后续汇率变化不会修改历史单价。
+
+价格写入只允许组织管理员、业务经理、`sales` 和 `pm`；FAE 可以更新 `machine_quantity`，也可以查看折算结果，但提交 `unit_price` 返回 403。汇率服务不可用且无缓存时，价格不保存并返回 422；客户端预览只用于展示，最终结果以服务端计算为准。
+
+页面端提供 `GET /customer-projects/projects/export.xlsx`，按当前用户的数据范围以及 `q`、`stage` 筛选导出项目、客户评级、物料数量和双币单价。该页面导出写入审计事件；当前不作为稳定 JSON API 承诺。
 
 ## 新增跟进示例
 

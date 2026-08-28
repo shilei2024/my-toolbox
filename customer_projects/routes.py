@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, redirect, render_template, request, send_file, url_for
 from flask_login import login_required
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 from sqlalchemy import func, or_, select
 
 from extensions import db
@@ -29,14 +32,18 @@ from .permissions import (
     apply_project_scope,
     can_view_project,
     current_membership,
+    can_edit_prices,
+    can_write,
     module_required,
     require_manager,
+    require_price_edit,
     require_write,
 )
 from .services.projects import (
     DomainError,
     VersionConflict,
     add_activity,
+    add_audit,
     add_competitor,
     add_contact,
     add_material,
@@ -48,6 +55,8 @@ from .services.projects import (
     soft_delete_project,
     transition_stage,
     update_project,
+    update_customer_grade,
+    update_material_commercial,
 )
 
 
@@ -185,16 +194,12 @@ def _stage_map(organization_id: str) -> dict[str, str]:
     }
 
 
-@customer_projects_bp.get("/projects")
-@login_required
-@module_required
-def projects():
-    membership = _membership()
+def _filtered_project_statement(
+    membership: OrganizationMembership, q: str, stage: str
+):
     statement = apply_project_scope(
         select(CustomerProject).where(CustomerProject.deleted_at.is_(None)), membership
     )
-    q = request.args.get("q", "").strip()
-    stage = request.args.get("stage", "").strip()
     if q:
         like = f"%{q[:100]}%"
         customer_ids = select(Customer.id).where(
@@ -203,7 +208,10 @@ def projects():
         )
         material_project_ids = select(ProjectMaterial.project_id).where(
             ProjectMaterial.organization_id == membership.organization_id,
-            or_(ProjectMaterial.promoted_mpn.ilike(like), ProjectMaterial.promoted_brand.ilike(like)),
+            or_(
+                ProjectMaterial.promoted_mpn.ilike(like),
+                ProjectMaterial.promoted_brand.ilike(like),
+            ),
         )
         competitor_project_ids = (
             select(ProjectMaterial.project_id)
@@ -217,6 +225,7 @@ def projects():
         statement = statement.where(
             or_(
                 CustomerProject.name.ilike(like),
+                CustomerProject.product_name.ilike(like),
                 CustomerProject.project_code.ilike(like),
                 CustomerProject.customer_id.in_(customer_ids),
                 CustomerProject.id.in_(material_project_ids),
@@ -225,6 +234,17 @@ def projects():
         )
     if stage:
         statement = statement.where(CustomerProject.stage_code == stage)
+    return statement
+
+
+@customer_projects_bp.get("/projects")
+@login_required
+@module_required
+def projects():
+    membership = _membership()
+    q = request.args.get("q", "").strip()
+    stage = request.args.get("stage", "").strip()
+    statement = _filtered_project_statement(membership, q, stage)
     rows = list(db.session.scalars(statement.order_by(CustomerProject.updated_at.desc()).limit(100)))
     return render_template(
         "customer_projects/projects.html",
@@ -234,6 +254,112 @@ def projects():
         stages=_stage_map(membership.organization_id),
         q=q,
         selected_stage=stage,
+    )
+
+
+@customer_projects_bp.get("/projects/export.xlsx")
+@login_required
+@module_required
+def projects_export():
+    membership = _membership()
+    q = request.args.get("q", "").strip()
+    stage = request.args.get("stage", "").strip()
+    projects = list(
+        db.session.scalars(
+            _filtered_project_statement(membership, q, stage).order_by(
+                CustomerProject.updated_at.desc(), CustomerProject.id
+            )
+        )
+    )
+    customer_names = _customer_name_map(projects)
+    user_names = _user_name_map({project.primary_sales_user_id for project in projects})
+    project_ids = [project.id for project in projects]
+    materials = (
+        list(
+            db.session.scalars(
+                select(ProjectMaterial)
+                .where(
+                    ProjectMaterial.organization_id == membership.organization_id,
+                    ProjectMaterial.project_id.in_(project_ids),
+                    ProjectMaterial.deleted_at.is_(None),
+                )
+                .order_by(ProjectMaterial.project_id, ProjectMaterial.is_primary.desc())
+            )
+        )
+        if project_ids
+        else []
+    )
+    materials_by_project: dict[str, list[ProjectMaterial]] = {project_id: [] for project_id in project_ids}
+    for material in materials:
+        materials_by_project.setdefault(material.project_id, []).append(material)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "客户项目台账"
+    headers = [
+        "项目编号", "客户", "客户评级", "项目名称", "产品名称", "项目年用量", "阶段",
+        "主业务", "下一步", "下次跟进", "推广品牌", "推广型号", "应用位置", "单机数量",
+        "录入单价", "录入币别", "美元单价", "含税人民币单价", "USD/CNY汇率", "价格更新时间",
+    ]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="0D6EFD")
+    customer_by_id = {
+        customer.id: customer
+        for customer in db.session.scalars(
+            select(Customer).where(Customer.id.in_({project.customer_id for project in projects}))
+        )
+    } if projects else {}
+    stage_names = _stage_map(membership.organization_id)
+    for project in projects:
+        project_materials = materials_by_project.get(project.id) or [None]
+        customer = customer_by_id.get(project.customer_id)
+        for material in project_materials:
+            sheet.append([
+                project.project_code,
+                customer_names.get(project.customer_id, ""),
+                customer.grade if customer else "",
+                project.name,
+                project.product_name or "",
+                float(project.annual_usage) if project.annual_usage is not None else None,
+                stage_names.get(project.stage_code, project.stage_code),
+                user_names.get(project.primary_sales_user_id, ""),
+                project.next_action,
+                _aware(project.next_follow_up_at).strftime("%Y-%m-%d %H:%M"),
+                material.promoted_brand if material else "",
+                (material.promoted_mpn or "待确认") if material else "",
+                (material.application_position or "") if material else "",
+                float(material.machine_quantity) if material and material.machine_quantity is not None else None,
+                float(material.target_price) if material and material.target_price is not None else None,
+                (material.currency or "") if material else "",
+                float(material.unit_price_usd) if material and material.unit_price_usd is not None else None,
+                float(material.unit_price_cny_tax_included) if material and material.unit_price_cny_tax_included is not None else None,
+                float(material.fx_rate_usd_cny) if material and material.fx_rate_usd_cny is not None else None,
+                _aware(material.price_updated_at).strftime("%Y-%m-%d %H:%M") if material and material.price_updated_at else "",
+            ])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for column in sheet.columns:
+        width = min(max(len(str(cell.value or "")) for cell in column) + 2, 32)
+        sheet.column_dimensions[column[0].column_letter].width = width
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    add_audit(
+        membership.organization_id,
+        "customer_project_export",
+        membership.organization_id,
+        "exported",
+        membership.user_id,
+        {"project_count": len(projects), "material_count": len(materials), "filtered": bool(q or stage)},
+    )
+    db.session.commit()
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"客户项目台账-{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
@@ -273,6 +399,33 @@ def customers():
     for contact in contacts:
         contacts_by_customer.setdefault(contact.customer_id, []).append(contact)
     return render_template("customer_projects/customers.html", customers=rows, contacts_by_customer=contacts_by_customer)
+
+
+@customer_projects_bp.post("/customers/<string:customer_id>/grade")
+@login_required
+@module_required
+def customer_update_grade(customer_id: str):
+    membership = _membership()
+    require_write(membership)
+    customer = db.session.scalar(
+        select(Customer).where(
+            Customer.id == customer_id,
+            Customer.organization_id == membership.organization_id,
+            Customer.deleted_at.is_(None),
+        )
+    )
+    if customer is None or (
+        not membership.roles.intersection(ADMIN_ROLES)
+        and customer.primary_owner_user_id != membership.user_id
+    ):
+        abort(404)
+    try:
+        update_customer_grade(customer, request.form.get("grade"), membership)
+        db.session.commit()
+        flash("客户评级已更新。", "success")
+        return redirect(url_for("customer_projects.customers"))
+    except DomainError as exc:
+        return _handle_domain_error(exc, "customer_projects.customers")
 
 
 @customer_projects_bp.post("/customers/<string:customer_id>/contacts")
@@ -407,6 +560,8 @@ def project_detail(project_id: str):
         organization_members=organization_members,
         stages=_stage_map(membership.organization_id),
         can_manage=bool(membership.roles.intersection(ADMIN_ROLES)),
+        can_write=can_write(membership),
+        can_edit_price=can_edit_prices(membership),
         form_key=str(uuid.uuid4()),
     )
 
@@ -465,11 +620,48 @@ def project_add_material(project_id: str):
         data = request.form.to_dict()
         data["mpn_pending"] = request.form.get("mpn_pending") == "on"
         data["is_primary"] = request.form.get("is_primary") == "on"
+        if data.get("unit_price") not in (None, ""):
+            require_price_edit(membership)
         add_material(project, data, membership, request.form.get("idempotency_key", ""))
         db.session.commit()
         flash("推广物料已添加。", "success")
         return redirect(url_for("customer_projects.project_detail", project_id=project.id))
     except DomainError as exc:
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/materials/<string:material_id>/commercial")
+@login_required
+@module_required
+def material_update_commercial(material_id: str):
+    membership = _membership()
+    require_write(membership)
+    material = db.session.scalar(
+        select(ProjectMaterial).where(
+            ProjectMaterial.id == material_id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+    )
+    if material is None:
+        abort(404)
+    project = _project_or_404(material.project_id, membership)
+    try:
+        data = request.form.to_dict()
+        if data.get("unit_price") not in (None, ""):
+            require_price_edit(membership)
+        update_material_commercial(
+            material,
+            data,
+            membership,
+            int(request.form.get("material_version", "0")),
+        )
+        db.session.commit()
+        flash("物料商务信息已更新。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "物料版本无效。")
         return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
 
 

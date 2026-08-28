@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import os
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
+
+from openpyxl import load_workbook
 
 os.environ["FLASK_ENV"] = "production"
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -13,10 +17,12 @@ os.environ["ADMIN_PASSWORD"] = "SafeBootstrapPassword123!"
 
 from app import app  # noqa: E402
 from customer_projects.models import (  # noqa: E402
+    Customer,
     CustomerProject,
     MaterialCompetitor,
     ProjectActivity,
     ProjectMaterial,
+    ProjectMember,
     ProjectStageEvent,
 )
 from customer_projects.services.projects import (  # noqa: E402
@@ -44,6 +50,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.admin_id = self._add_user("manager@test.com", admin=True)
             self.sales_id = self._add_user("sales@test.com")
             self.other_id = self._add_user("other@test.com")
+            self.fae_id = self._add_user("fae@test.com")
             org = bootstrap_organization("测试组织", self.admin_id)
             self.org_id = org.id
             sales_membership = OrganizationMembership(
@@ -56,6 +63,11 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             )
             other_membership.set_roles(["sales"])
             db.session.add(other_membership)
+            fae_membership = OrganizationMembership(
+                organization_id=org.id, user_id=self.fae_id
+            )
+            fae_membership.set_roles(["fae"])
+            db.session.add(fae_membership)
             db.session.commit()
         self.client = app.test_client()
 
@@ -85,6 +97,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
                 {
                     "customer_id": customer.id,
                     "name": "车载控制器",
+                    "product_name": "车载电源控制器",
+                    "annual_usage": "120000",
                     "stage_code": "evaluation",
                     "primary_sales_user_id": self.sales_id,
                     "next_action": "确认样品数量",
@@ -115,6 +129,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(listing.get_json()["data"][0]["id"], project_id)
         detail = self.client.get(f"/api/v1/customer-projects/projects/{project_id}")
         self.assertEqual(detail.headers["ETag"], '"1"')
+        self.assertEqual(detail.get_json()["data"]["product_name"], "车载电源控制器")
+        self.assertEqual(detail.get_json()["data"]["annual_usage"], "120000.0000")
         with app.app_context():
             self.assertEqual(db.session.query(CustomerProject).count(), 1)
             self.assertEqual(db.session.query(ProjectStageEvent).count(), 1)
@@ -215,6 +231,100 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.assertEqual(db.session.query(ProjectMaterial).count(), 1)
             self.assertEqual(db.session.query(MaterialCompetitor).count(), 2)
 
+    def test_customer_grade_can_be_created_and_updated(self) -> None:
+        self._login()
+        created = self.client.post(
+            "/customer-projects/customers",
+            data={"name": "评级客户", "grade": "B"},
+            follow_redirects=True,
+        )
+        self.assertIn("B", created.get_data(as_text=True))
+        with app.app_context():
+            customer = db.session.scalar(db.select(Customer).where(Customer.name == "评级客户"))
+            customer_id = customer.id
+            self.assertEqual(customer.grade, "B")
+        updated = self.client.post(
+            f"/customer-projects/customers/{customer_id}/grade",
+            data={"grade": "A"},
+        )
+        self.assertEqual(updated.status_code, 302)
+        with app.app_context():
+            self.assertEqual(db.session.get(Customer, customer_id).grade, "A")
+
+    def test_material_price_conversion_permissions_and_excel_export(self) -> None:
+        project_id = self._seed_project()
+        app._fx_cache = {
+            "rates": {"USD": 1.0, "CNY": 7.2},
+            "updated": "test-rate",
+            "ts": time.time(),
+        }
+        self._login()
+        priced = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "MPX-9000",
+                "machine_quantity": "2",
+                "unit_price": "1",
+                "currency": "USD",
+            },
+            headers={"Idempotency-Key": "priced-material"},
+        )
+        self.assertEqual(priced.status_code, 201)
+        payload = priced.get_json()["data"]
+        self.assertEqual(payload["unit_price_usd"], "1.000000")
+        self.assertEqual(payload["unit_price_cny_tax_included"], "8.136000")
+        material_id = payload["id"]
+        cny_priced = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"machine_quantity": "2", "unit_price": "8.136", "currency": "CNY"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(cny_priced.status_code, 200)
+        cny_payload = cny_priced.get_json()["data"]
+        self.assertEqual(cny_payload["unit_price_usd"], "1.000000")
+        self.assertEqual(cny_payload["unit_price_cny_tax_included"], "8.136000")
+        self.assertEqual(cny_payload["version"], 2)
+        export = self.client.get("/customer-projects/projects/export.xlsx")
+        self.assertEqual(export.status_code, 200)
+        self.assertEqual(
+            export.mimetype,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(BytesIO(export.data), data_only=True)
+        rows = list(workbook["客户项目台账"].iter_rows(values_only=True))
+        self.assertIn("产品名称", rows[0])
+        self.assertIn("含税人民币单价", rows[0])
+        self.assertEqual(rows[1][4], "车载电源控制器")
+        self.assertEqual(rows[1][16], 1)
+        self.assertAlmostEqual(rows[1][17], 8.136, places=6)
+
+        self.client.post("/logout")
+        with app.app_context():
+            db.session.add(
+                ProjectMember(
+                    organization_id=self.org_id,
+                    project_id=project_id,
+                    user_id=self.fae_id,
+                    role_code="fae",
+                )
+            )
+            db.session.commit()
+        self._login("fae@test.com")
+        quantity_only = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"machine_quantity": "3"},
+            headers={"If-Match": '"2"'},
+        )
+        self.assertEqual(quantity_only.status_code, 200)
+        self.assertEqual(quantity_only.get_json()["data"]["machine_quantity"], "3.0000")
+        denied = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"machine_quantity": "3", "unit_price": "2", "currency": "USD"},
+            headers={"If-Match": '"3"'},
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def test_stage_history_soft_delete_and_manager_restore(self) -> None:
         project_id = self._seed_project()
         self._login()
@@ -272,6 +382,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             data={
                 "project_version": "1",
                 "name": "车载控制器二期",
+                "product_name": "车规控制器二代",
+                "annual_usage": "250000",
                 "assessment_grade": "A",
                 "probability_band": "70",
                 "next_action": "确认量产排期",
@@ -284,6 +396,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         with app.app_context():
             project = db.session.get(CustomerProject, project_id)
             self.assertEqual(project.name, "车载控制器二期")
+            self.assertEqual(project.product_name, "车规控制器二代")
+            self.assertEqual(str(project.annual_usage), "250000.0000")
             self.assertEqual(project.assessment_grade, "A")
             self.assertEqual(project.probability_band, 70)
             self.assertEqual(project.next_action, "确认量产排期")
