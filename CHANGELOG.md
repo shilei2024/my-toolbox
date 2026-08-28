@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.33 · 物料机会四类分类与 Lost 竞品口径 / 2026-08-28
+
+- 物料机会分类更名为 Design In、Design Win（新增）、Evaluation、Lost，页面按四类分组展示。
+- Lost 仅记录竞品信息：推广品牌/型号非必填，新增竞品时即可填写报价；TAM 按"年用量 × 单机数量 × 竞品最高报价"估算。
+- TAM = 四类合计，SAM = Design In + Design Win + Evaluation，SOM = Design In + Design Win。
+- Lost 转出为其他三类时强制补充推广品牌与型号（或型号待确认），服务端 422 校验。
+- 新增约束迁移 `c2d3e4f5a6b7`（downgrade 自动归并 design_win）、API/页面测试与 ADR 0034。
+
 ## 0.9.32 · 客户项目协作留言与输入精度优化 / 2026-08-28
 
 - 单机数量统一为整数 PCS；物料与竞品单价最多录入、保存和展示 5 位小数，并自动隐藏无意义的末尾 0。

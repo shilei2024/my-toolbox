@@ -30,6 +30,7 @@ from .services.projects import (
     update_project,
     update_material_commercial,
     material_annual_value_usd,
+    competitor_reference_price,
     decimal_display,
 )
 from .services.reports import build_lifecycle_report
@@ -93,10 +94,24 @@ def material_json(
     material: ProjectMaterial, project: CustomerProject | None = None
 ) -> dict:
     project = project or db.session.get(CustomerProject, material.project_id)
+    if material.opportunity_type == "competitive_opportunity":
+        # Lost 物料的年度机会金额按竞品最高报价估算
+        reference_price = competitor_reference_price(
+            list(
+                db.session.scalars(
+                    select(MaterialCompetitor).where(
+                        MaterialCompetitor.project_material_id == material.id,
+                        MaterialCompetitor.deleted_at.is_(None),
+                    )
+                )
+            )
+        )
+    else:
+        reference_price = material.unit_price_usd
     annual_value = material_annual_value_usd(
         project.annual_usage if project else None,
         material.machine_quantity,
-        material.unit_price_usd,
+        reference_price,
     )
     return {
         "id": material.id,

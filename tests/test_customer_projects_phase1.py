@@ -919,6 +919,18 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
                 ProjectMaterial(
                     organization_id=self.org_id,
                     project_id=project_id,
+                    opportunity_type="design_win",
+                    promoted_brand="Mavis",
+                    promoted_mpn="WIN-1",
+                    machine_quantity=Decimal("1"),
+                    unit_price_usd=Decimal("0.5"),
+                    idempotency_key="scope-design-win",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+                ProjectMaterial(
+                    organization_id=self.org_id,
+                    project_id=project_id,
                     opportunity_type="matched_opportunity",
                     promoted_brand="Mavis",
                     promoted_mpn="MATCH-1",
@@ -932,26 +944,105 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
                     organization_id=self.org_id,
                     project_id=project_id,
                     opportunity_type="competitive_opportunity",
-                    promoted_brand="Mavis",
-                    promoted_mpn="REPLACE-1",
+                    promoted_brand="",
                     machine_quantity=Decimal("3"),
-                    unit_price_usd=Decimal("0.25"),
                     idempotency_key="scope-competitive",
                     created_by_user_id=self.sales_id,
                     updated_by_user_id=self.sales_id,
                 ),
             ]
             db.session.add_all(materials)
+            db.session.flush()
+            competitors = [
+                MaterialCompetitor(
+                    organization_id=self.org_id,
+                    project_material_id=materials[3].id,
+                    brand="Rival",
+                    mpn="RIV-1",
+                    quoted_price=Decimal("0.1"),
+                    idempotency_key="scope-competitor-low",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+                MaterialCompetitor(
+                    organization_id=self.org_id,
+                    project_material_id=materials[3].id,
+                    brand="Rival",
+                    mpn="RIV-2",
+                    quoted_price=Decimal("0.25"),
+                    idempotency_key="scope-competitor-high",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+            ]
+            db.session.add_all(competitors)
             db.session.commit()
-            scope = build_market_scope(project, materials)
-            self.assertEqual(scope["tam_usd"], Decimal("390000.00"))
-            self.assertEqual(scope["sam_usd"], Decimal("300000.00"))
-            self.assertEqual(scope["som_usd"], Decimal("240000.00"))
+            competitors_by_material = {materials[3].id: competitors}
+            scope = build_market_scope(project, materials, competitors_by_material)
+            self.assertEqual(scope["tam_usd"], Decimal("450000.00"))
+            self.assertEqual(scope["sam_usd"], Decimal("360000.00"))
+            self.assertEqual(scope["som_usd"], Decimal("300000.00"))
         self._login()
         page = self.client.get(f"/customer-projects/projects/{project_id}")
         html = page.get_data(as_text=True)
-        self.assertIn("USD 390,000.00", html)
+        self.assertIn("USD 450,000.00", html)
         self.assertIn('data-opportunity-type="competitive_opportunity"', html)
+        self.assertIn('data-opportunity-type="design_win"', html)
+
+    def test_lost_material_records_competitor_info_only(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        created = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "opportunity_type": "competitive_opportunity",
+                "machine_quantity": "3",
+                "category_code": "Power IC",
+            },
+            headers={"Idempotency-Key": "lost-material"},
+        )
+        self.assertEqual(created.status_code, 201)
+        material_id = created.get_json()["data"]["id"]
+        self.assertEqual(created.get_json()["data"]["promoted_brand"], "")
+        competitor = self.client.post(
+            f"/api/v1/customer-projects/materials/{material_id}/competitors",
+            json={"brand": "Rival", "mpn": "RIV-9", "quoted_price": "0.4"},
+            headers={"Idempotency-Key": "lost-competitor"},
+        )
+        self.assertEqual(competitor.status_code, 201)
+        # Lost 物料的年度机会金额按竞品报价估算：120000 × 3 × 0.4
+        page = self.client.get(f"/customer-projects/projects/{project_id}")
+        html = page.get_data(as_text=True)
+        self.assertIn('data-annual-value="144000.00"', html)
+
+    def test_lost_transition_requires_promoted_material_info(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        created = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={"opportunity_type": "competitive_opportunity"},
+            headers={"Idempotency-Key": "lost-to-design-in"},
+        )
+        self.assertEqual(created.status_code, 201)
+        material_id = created.get_json()["data"]["id"]
+        missing_info = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={"opportunity_type": "design_in"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(missing_info.status_code, 422)
+        self.assertIn("Lost", missing_info.get_json()["error"]["message"])
+        completed = self.client.patch(
+            f"/api/v1/customer-projects/materials/{material_id}",
+            json={
+                "opportunity_type": "design_in",
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "MPX-9000",
+            },
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.get_json()["data"]["opportunity_type"], "design_in")
 
     def test_manager_reactivates_terminal_project_without_losing_history(self) -> None:
         project_id = self._seed_project()

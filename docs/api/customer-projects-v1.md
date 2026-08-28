@@ -83,7 +83,7 @@ If-Match: "7"
 }
 ```
 
-`opportunity_type` 仅支持 `design_in`（设计中物料）、`matched_opportunity`（已匹配料号机会）和 `competitive_opportunity`（竞品替代机会）。物料响应增加 `annual_value_usd`，按项目年用量 × 单机数量 × `unit_price_usd` 计算；缺少任一因子时返回 `null`。项目页面的 TAM 为三类总和，SAM 为设计中与已匹配机会总和，SOM 为设计中物料总和，均为实时派生值而非持久化字段。
+`opportunity_type` 支持 `design_in`（Design In）、`design_win`（Design Win）、`matched_opportunity`（Evaluation）和 `competitive_opportunity`（Lost）。四类可互转；Lost 仅记录竞品信息，创建/转入时不要求推广品牌与型号，转出为其他三类时必须补充推广品牌与型号（或勾选型号待确认）。物料响应增加 `annual_value_usd`：普通物料按项目年用量 × 单机数量 × `unit_price_usd` 计算，Lost 物料按竞品最高报价计算；缺少任一因子时返回 `null`。项目页面的 TAM 为四类总和（Lost 按竞品报价），SAM 为 Design In + Design Win + Evaluation，SOM 为 Design In + Design Win，均为实时派生值而非持久化字段。`POST /materials/{material_id}/competitors` 的 `quoted_price` 在创建时即可填写。
 
 `machine_quantity` 为空或非负整数，单位固定为 PCS。`unit_price` 与竞争方案 `quoted_price` 最多接受 5 位有效小数；多余末尾 0 不计入位数。API 的数量返回整数字符串，价格返回最多 5 位且不带末尾 0 的字符串。
 
