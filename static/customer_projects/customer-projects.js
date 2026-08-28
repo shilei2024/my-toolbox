@@ -261,12 +261,20 @@
     pendingLabel.append(pendingInput, " 型号待确认");
     supplement.append(brandInput, mpnInput, pendingLabel);
 
+    /**
+     * 仅 Lost 转出为其他三类时要求补充推广物料信息。
+     * 注意：隐藏容器内的输入仍会随表单提交，必须同时 disabled，
+     * 否则空品牌/型号会覆盖物料现有值并触发服务端必填校验。
+     */
     const toggleSupplement = (selected) => {
-      // 仅 Lost 转出为其他三类时要求补充推广物料信息
       const leaving = currentType === lostType && selected !== lostType;
       supplement.hidden = !leaving;
       brandInput.required = leaving;
+      brandInput.disabled = !leaving;
+      mpnInput.disabled = !leaving;
+      pendingInput.disabled = !leaving;
     };
+    toggleSupplement(currentType);
 
     opportunityTypes.forEach(([value, label]) => {
       const option = document.createElement("label");
