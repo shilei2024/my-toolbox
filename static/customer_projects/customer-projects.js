@@ -7,6 +7,153 @@
   const alert = root.querySelector("[data-cp-update-alert]");
   if (!projectId || !Number.isFinite(initialVersion) || !alert) return;
 
+  const opportunityTypes = [
+    ["design_in", "设计中物料", "当前正在设计、验证或推进定点的物料"],
+    ["matched_opportunity", "已匹配料号机会", "已找到可推广型号的新增机会"],
+    ["competitive_opportunity", "竞品替代机会", "客户正在使用其他品牌、尚未匹配推广型号的机会"],
+  ];
+
+  root.querySelectorAll('input[name="annual_usage"]').forEach((input) => {
+    input.min = "1";
+    input.step = "1";
+    input.inputMode = "numeric";
+    const value = Number(input.value);
+    if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    input.placeholder = "项目年用量（PCS，整数）";
+    const fieldLabel = input.closest(".mb-3")?.querySelector("label");
+    if (fieldLabel) fieldLabel.textContent = "项目年用量（PCS） *";
+  });
+
+  const opportunitySelect = (selected = "design_in") => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "cp-dialog-field cp-field-span";
+    wrapper.textContent = "物料机会分类";
+    const select = document.createElement("select");
+    select.className = "form-select";
+    select.name = "opportunity_type";
+    opportunityTypes.forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === selected;
+      select.append(option);
+    });
+    wrapper.append(select);
+    return wrapper;
+  };
+
+  const openDialog = (dialog) => {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  };
+
+  const upgradeDetails = (details, trigger, title) => {
+    if (!details || !trigger) return;
+    const summary = details.querySelector(":scope > summary");
+    const dialog = document.createElement("dialog");
+    dialog.className = "cp-edit-dialog";
+    const header = document.createElement("header");
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "cp-dialog-close";
+    close.setAttribute("aria-label", "关闭弹窗");
+    close.textContent = "×";
+    close.addEventListener("click", () => dialog.close());
+    header.append(heading, close);
+    dialog.append(header);
+    Array.from(details.children).forEach((child) => {
+      if (child !== summary) dialog.append(child);
+    });
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    details.replaceWith(dialog);
+    trigger.classList.add("cp-model-trigger");
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("tabindex", "0");
+    trigger.setAttribute("aria-label", `${title}，点击打开编辑弹窗`);
+    trigger.addEventListener("click", () => openDialog(dialog));
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDialog(dialog);
+      }
+    });
+  };
+
+  const materials = Array.from(root.querySelectorAll(".cp-material[data-opportunity-type]"));
+  materials.forEach((material) => {
+    const type = material.dataset.opportunityType || "design_in";
+    const main = material.querySelector(".cp-material-main");
+    const title = main?.querySelector("strong");
+    const editDetails = Array.from(material.querySelectorAll(":scope > details")).find(
+      (item) => item.querySelector(":scope > summary")?.textContent.trim() === "编辑推广物料"
+    );
+    const editForm = editDetails?.querySelector("form");
+    if (editForm) editForm.prepend(opportunitySelect(type));
+    upgradeDetails(editDetails, title, "编辑推广物料");
+
+    if (main) {
+      const badge = document.createElement("span");
+      badge.className = `cp-opportunity-badge is-${type}`;
+      badge.textContent = material.dataset.opportunityLabel || type;
+      main.append(badge);
+      const annualValue = material.dataset.annualValue;
+      const value = document.createElement("small");
+      value.className = "cp-material-value";
+      value.textContent = annualValue
+        ? `年度机会金额：USD ${Number(annualValue).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : "年度机会金额：待补齐年用量、单机数量或美金单价";
+      main.querySelector(":scope > div")?.append(value);
+    }
+
+    material.querySelectorAll(".cp-competitors .mb-2").forEach((row) => {
+      const competitorTrigger = row.querySelector(":scope > p");
+      const competitorDetails = Array.from(row.querySelectorAll(":scope > details")).find(
+        (item) => item.querySelector(":scope > summary")?.textContent.trim() === "编辑竞争方案"
+      );
+      upgradeDetails(competitorDetails, competitorTrigger, "编辑竞争方案");
+    });
+    const addCompetitor = Array.from(material.querySelectorAll(":scope > details")).find(
+      (item) => item.querySelector(":scope > summary")?.textContent.trim() === "添加竞争方案"
+    );
+    if (addCompetitor) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-sm btn-outline-secondary cp-add-competitor";
+      button.textContent = "+ 添加竞争方案";
+      material.append(button);
+      upgradeDetails(addCompetitor, button, "添加竞争方案");
+    }
+  });
+
+  const addBlock = root.querySelector(".cp-add-block");
+  const materialPanel = addBlock?.closest(".cp-panel");
+  if (materialPanel && addBlock) {
+    const addForm = addBlock.querySelector("form");
+    if (addForm) addForm.prepend(opportunitySelect());
+    const groups = document.createElement("div");
+    groups.className = "cp-material-groups";
+    opportunityTypes.forEach(([type, label, description]) => {
+      const group = document.createElement("section");
+      group.className = "cp-material-group";
+      group.dataset.opportunityGroup = type;
+      const rows = materials.filter((item) => item.dataset.opportunityType === type);
+      group.innerHTML = `<header><div><h3>${label}</h3><p>${description}</p></div><span>${rows.length} 条</span></header>`;
+      if (rows.length) rows.forEach((item) => group.append(item));
+      else {
+        const empty = document.createElement("p");
+        empty.className = "cp-group-empty";
+        empty.textContent = "暂无此类物料";
+        group.append(empty);
+      }
+      groups.append(group);
+    });
+    materialPanel.insertBefore(groups, addBlock);
+  }
+
   const priceForms = Array.from(root.querySelectorAll("[data-price-form]"));
   if (priceForms.length) {
     fetch("/api/exchange-rate?from=USD&to=CNY", {

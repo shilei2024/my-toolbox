@@ -2,13 +2,13 @@
 
 ## 实施状态
 
-Phase 1 核心台账、Phase 2 提醒闭环和 Phase 3 生命周期首切片已在 Flask 主站中实现，所有生产开关默认关闭。除核心台账外，当前代码包含组织级提醒策略、到期/逾期/停滞扫描、共享通知发件箱、dry-run/SMTP 适配器、重试/死信、心跳、统一后台通知日志与生命周期报表。真实 PostgreSQL staging、邮件域认证和生产审批尚未完成，不得将本文理解为真实提醒已经上线。
+Phase 1 核心台账、Phase 2 提醒闭环、Phase 3 生命周期和 Phase 4 运营能力已在 Flask 主站中实现，所有生产开关默认关闭。推广物料进一步按设计中、已匹配料号机会和竞品替代机会分类；项目详情实时派生 TAM/SAM/SOM，计算结果不落库。真实 PostgreSQL staging、邮件域认证和生产审批尚未完成，不得将本文理解为相关能力已经上线。
 
 ## 目标与边界
 
 本模块把电子元器件代理业务中的客户项目变成唯一、可追溯的业务事实，覆盖客户、成员、推广物料、竞争方案、跟进和生命周期。V1 不承担 ERP、库存、报价、订单、合同、群发营销或原生移动客户端职责。
 
-本文件记录 Phase 1 已实现边界；产品验收仍以[PRD](../product/customer-project-tracking-prd.md)为准，关键取舍见 [ADR 0027](../adr/0027-customer-project-tracking-modular-monolith.md)。
+本文件记录当前已实现边界；产品验收仍以[PRD](../product/customer-project-tracking-prd.md)为准，模块边界见 [ADR 0027](../adr/0027-customer-project-tracking-modular-monolith.md)，物料机会与市场规模口径见 [ADR 0032](../adr/0032-customer-project-material-opportunity-and-market-scope.md)。
 
 ## 运行边界
 

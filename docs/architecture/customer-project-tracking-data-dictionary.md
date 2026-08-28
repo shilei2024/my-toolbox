@@ -39,7 +39,7 @@
 | `customer_id` | UUID | 同组织有效客户 |
 | `name` / `normalized_name` | varchar(255) | 名称必填，规范名用于重复提示 |
 | `product_name` | varchar(255) | 新建项目必填；旧项目迁移后可空，首次编辑时补齐 |
-| `annual_usage` | numeric(18,4) | 新建/编辑时必须大于 0；不隐含单位换算 |
+| `annual_usage` | numeric(18,4) | 兼容保留既有列类型；新建/编辑/导入时必须是大于 0 的整数，单位固定为 PCS |
 | `stage_code` | 稳定代码 | 引用启用的阶段字典 |
 | `assessment_grade` | A/B/C/D | 可空 |
 | `probability_band` | 10/30/50/70/90 | 可配置显示，不做自动预测 |
@@ -62,7 +62,7 @@
 | 表 | 核心字段 | 关键规则 |
 | --- | --- | --- |
 | `project_members` | `project_id`, `user_id`, `role_code`, `is_primary`, `joined_at`, `left_at`, `notification_preferences` | 项目 + 用户 + 职责唯一；至少一名主业务 |
-| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；`target_price/currency` 保存原始录入，两个标准价格及汇率保存当次快照；含税人民币固定按 13% 增值税口径；编辑/删除使用对象版本，删除带原因并软删除；项目 + 幂等键唯一 |
+| `project_materials` | `project_id`, `opportunity_type`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | `opportunity_type` 仅支持设计中、已匹配料号机会、竞品替代机会；型号或“待确认”至少一项；价格与汇率保存快照；TAM/SAM/SOM 由年用量、单机数量和美金单价实时派生，不落库；编辑/删除使用对象版本和软删除；项目 + 幂等键唯一 |
 | `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；编辑/删除使用对象版本，删除带原因并软删除；物料 + 幂等键唯一 |
 | `project_activities` | `project_id`, `activity_type`, `occurred_at`, `summary`, `details`, `customer_feedback`, `risk`, `decision`, `next_action`, `next_follow_up_at`, `is_meaningful`, `created_by_user_id` | 追加式记录；业务活动不可覆盖 |
 | `project_stage_events` | `project_id`, `from_stage_code`, `to_stage_code`, `reason`, `idempotency_key`, `actor_user_id`, `approved_by_user_id`, `occurred_at` | 项目 + 幂等键唯一；追加式记录 |

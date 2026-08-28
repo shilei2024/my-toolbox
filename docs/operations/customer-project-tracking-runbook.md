@@ -2,7 +2,7 @@
 
 ## 当前能力
 
-Phase 1 提供核心台账；Phase 2 提供提醒闭环；Phase 3 提供生命周期汇总、重新激活与衍生项目；Phase 4 提供组织工作日日历、受控 Excel 导入、受控导出及个人/组织筛选视图。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
+Phase 1 提供核心台账；Phase 2 提供提醒闭环；Phase 3 提供生命周期汇总、重新激活与衍生项目；Phase 4 提供组织工作日日历、受控 Excel 导入、受控导出及个人/组织筛选视图。推广物料按三类机会管理，并实时显示 TAM/SAM/SOM。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
 
 ## 日常检查
 
@@ -13,6 +13,7 @@ Phase 1 提供核心台账；Phase 2 提供提醒闭环；Phase 3 提供生命�
 5. 抽查 Excel 导出审计中的项目数、物料数和筛选标记；导出文件可能含客户与价格信息，只能通过受控业务账号下载和传递。
 6. 节假日前检查统一后台日历是否包含休息日及调休工作日；修改后确认旧 pending/failed 提醒已取消，下一次扫描按新策略版本生成。
 7. 导入后检查批次有效/错误行数和审计。撤销出现 `not_revertible` 表示项目已经被后续修改，应由业务人工处理，禁止直接改版本或删除历史。
+8. 抽查 TAM/SAM/SOM 的项目年用量、单机数量和美金单价是否齐全；缺失因子应显示待补齐，不得手工填写派生金额或直接改库。
 
 ## 汇率与价格异常
 

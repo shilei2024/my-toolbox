@@ -51,6 +51,11 @@ DEFAULT_STATUSES = (
     ("archived", "归档", 100, None, "terminal"),
 )
 ROLE_CODES = frozenset({"organization_admin", "business_manager", "sales", "pm", "fae", "readonly"})
+MATERIAL_OPPORTUNITY_TYPES = {
+    "design_in": "设计中物料",
+    "matched_opportunity": "已匹配料号机会",
+    "competitive_opportunity": "竞品替代机会",
+}
 
 
 class DomainError(ValueError):
@@ -122,6 +127,71 @@ def parse_nonnegative_decimal(value: Any, field: str, label: str) -> Decimal | N
             "VALIDATION_ERROR", f"{label}不能为负数。", field_errors={field: "不能为负数"}
         )
     return parsed
+
+
+def parse_positive_integer(value: Any, field: str, label: str) -> Decimal | None:
+    parsed = parse_nonnegative_decimal(value, field, label)
+    if parsed is None:
+        return None
+    if parsed <= 0 or parsed != parsed.to_integral_value():
+        raise DomainError(
+            "VALIDATION_ERROR",
+            f"{label}必须是大于 0 的整数。",
+            field_errors={field: "请输入大于 0 的整数"},
+        )
+    return parsed.to_integral_value()
+
+
+def parse_opportunity_type(value: Any) -> str:
+    opportunity_type = str(value or "design_in").strip()
+    if opportunity_type not in MATERIAL_OPPORTUNITY_TYPES:
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "物料机会分类无效。",
+            field_errors={"opportunity_type": "请选择有效分类"},
+        )
+    return opportunity_type
+
+
+def material_annual_value_usd(
+    annual_usage: Decimal | None,
+    machine_quantity: Decimal | None,
+    unit_price_usd: Decimal | None,
+) -> Decimal | None:
+    if annual_usage is None or machine_quantity is None or unit_price_usd is None:
+        return None
+    return (annual_usage * machine_quantity * unit_price_usd).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+def build_market_scope(
+    project: CustomerProject, materials: list[ProjectMaterial]
+) -> dict[str, Any]:
+    """Build a non-overlapping TAM/SAM/SOM funnel from material opportunity classes."""
+    category_totals = {key: Decimal("0.00") for key in MATERIAL_OPPORTUNITY_TYPES}
+    material_values: dict[str, Decimal | None] = {}
+    incomplete_material_ids: list[str] = []
+    for material in materials:
+        value = material_annual_value_usd(
+            project.annual_usage, material.machine_quantity, material.unit_price_usd
+        )
+        material_values[material.id] = value
+        if value is None:
+            incomplete_material_ids.append(material.id)
+            continue
+        category_totals[material.opportunity_type] += value
+    design_in = category_totals["design_in"]
+    matched = category_totals["matched_opportunity"]
+    competitive = category_totals["competitive_opportunity"]
+    return {
+        "tam_usd": design_in + matched + competitive,
+        "sam_usd": design_in + matched,
+        "som_usd": design_in,
+        "category_totals": category_totals,
+        "material_values": material_values,
+        "incomplete_material_ids": incomplete_material_ids,
+    }
 
 
 def parse_boolean(value: Any) -> bool:
@@ -317,7 +387,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
             existing.name != str(data.get("name", "")).strip()
             or (existing.product_name or "") != str(data.get("product_name", "")).strip()
             or existing.annual_usage
-            != parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
+            != parse_positive_integer(data.get("annual_usage"), "annual_usage", "项目年用量")
             or existing.customer_id != str(data.get("customer_id", "")).strip()
         ):
             raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的项目请求。")
@@ -326,7 +396,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     fields: dict[str, str] = {}
     name = str(data.get("name", "")).strip()
     product_name = str(data.get("product_name", "")).strip()
-    annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
+    annual_usage = parse_positive_integer(data.get("annual_usage"), "annual_usage", "项目年用量")
     customer_id = str(data.get("customer_id", "")).strip()
     stage = str(data.get("stage_code") or "evaluation")
     next_action = str(data.get("next_action", "")).strip()
@@ -440,7 +510,7 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
             if field == "name":
                 values["normalized_name"] = normalize_name(value)[:255]
     if "annual_usage" in data:
-        annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
+        annual_usage = parse_positive_integer(data.get("annual_usage"), "annual_usage", "项目年用量")
         if annual_usage in (None, Decimal("0")):
             raise DomainError(
                 "VALIDATION_ERROR", "项目年用量必须大于 0。", field_errors={"annual_usage": "必须大于 0"}
@@ -864,6 +934,7 @@ def derive_project(
             clone = ProjectMaterial(
                 organization_id=membership.organization_id,
                 project_id=derived.id,
+                opportunity_type=material.opportunity_type,
                 category_code=material.category_code,
                 promoted_brand=material.promoted_brand,
                 promoted_mpn=material.promoted_mpn,
@@ -973,6 +1044,7 @@ def add_material(
     material = ProjectMaterial(
         organization_id=membership.organization_id,
         project_id=project.id,
+        opportunity_type=parse_opportunity_type(data.get("opportunity_type")),
         category_code=str(data.get("category_code") or "").strip()[:64] or None,
         promoted_brand=brand[:120],
         promoted_mpn=mpn[:160] or None,
@@ -1052,6 +1124,7 @@ def update_material_commercial(
     safe_diff: dict[str, Any] = {}
     supported_fields = {
         "category_code",
+        "opportunity_type",
         "promoted_brand",
         "promoted_mpn",
         "mpn_pending",
@@ -1099,6 +1172,9 @@ def update_material_commercial(
     if "promoted_brand" in data:
         values["promoted_brand"] = brand[:120]
         safe_diff["promoted_brand"] = "已变更"
+    if "opportunity_type" in data:
+        values["opportunity_type"] = parse_opportunity_type(data.get("opportunity_type"))
+        safe_diff["opportunity_type"] = values["opportunity_type"]
     if "promoted_mpn" in data:
         values["promoted_mpn"] = mpn[:160] or None
         values["normalized_mpn"] = normalize_mpn(mpn)

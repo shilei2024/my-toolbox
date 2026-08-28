@@ -129,7 +129,7 @@ class CustomerProjectImportTest(unittest.TestCase):
 
         detail = self.client.get(f"/customer-projects/imports?batch={batch_id}")
         self.assertEqual(detail.status_code, 200)
-        self.assertIn("项目年用量必须大于 0", detail.get_data(as_text=True))
+        self.assertIn("项目年用量必须是大于 0 的整数", detail.get_data(as_text=True))
         committed = self.client.post(f"/customer-projects/imports/{batch_id}/commit")
         self.assertEqual(committed.status_code, 302)
         retry = self.client.post(f"/customer-projects/imports/{batch_id}/commit")
