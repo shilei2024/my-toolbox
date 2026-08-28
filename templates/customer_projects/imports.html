@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}历史 Excel 导入 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <header class="cp-page-header"><div><p class="cp-kicker">CONTROLLED MIGRATION</p><h1>历史 Excel 导入</h1><p>文件只用于内存解析和预览；确认前不会创建客户或项目。</p></div><a class="btn btn-outline-primary" href="{{ url_for('customer_projects.project_import_template') }}"><i class="bi bi-download"></i> 下载模板</a></header>
+  <div class="alert alert-warning"><strong>安全边界：</strong>仅支持 XLSX，单文件不超过 5MB、1000 行；错误行不会写入。撤销只处理导入后未被修改的项目，已发生后续协作的数据会保留并标记。</div>
+  <section class="cp-panel cp-form-panel mb-4"><div class="cp-panel-heading"><div><h2>1. 上传并预览</h2><p>系统识别固定模板列，逐行检查客户、负责人、阶段、日期、用量和重复项目。</p></div></div><form method="post" action="{{ url_for('customer_projects.project_import_preview') }}" enctype="multipart/form-data" class="row g-3 align-items-end"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="col-md-9"><label class="form-label">历史项目 XLSX</label><input class="form-control" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div><div class="col-md-3"><button class="btn btn-primary w-100">生成预览</button></div></form></section>
+
+  {% if selected %}
+  <section class="cp-panel mb-4">
+    <div class="cp-panel-heading"><div><h2>2. 批次预览</h2><p>{{ selected.original_filename }} · SHA-256 {{ selected.file_sha256[:12] }}…</p></div><span class="cp-stage">{{ selected.status }}</span></div>
+    <div class="cp-summary-grid mb-3"><article><small>总行数</small><strong>{{ selected.total_rows }}</strong></article><article><small>可导入</small><strong>{{ selected.valid_rows }}</strong></article><article><small>错误</small><strong>{{ selected.error_rows }}</strong></article><article><small>创建时间</small><strong>{{ selected.created_at|china_time('%Y-%m-%d %H:%M') }}</strong></article></div>
+    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>行</th><th>客户 / 项目</th><th>产品 / 阶段</th><th>负责人</th><th>结果</th></tr></thead><tbody>{% for item in preview_rows %}<tr><td>{{ item.row.row_number }}</td><td><strong>{{ item.payload.customer_name or '—' }}</strong><div class="small">{{ item.payload.project_name or '—' }}</div></td><td>{{ item.payload.product_name or '—' }}<div class="small text-muted">{{ item.payload.stage_code or '—' }}</div></td><td>{{ item.payload.owner_email or '—' }}</td><td>{% if item.errors %}<span class="badge text-bg-danger">不可导入</span><ul class="small text-danger mb-0 mt-1">{% for error in item.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% else %}<span class="badge text-bg-success">校验通过</span>{% if item.row.status not in ['valid'] %}<div class="small text-muted mt-1">{{ item.row.status }}</div>{% endif %}{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+    <div class="d-flex flex-wrap gap-2 mt-3">
+      {% if selected.status == 'preview' and selected.valid_rows > 0 %}<form method="post" action="{{ url_for('customer_projects.project_import_commit', batch_id=selected.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary">确认导入 {{ selected.valid_rows }} 行</button></form>{% endif %}
+      {% if selected.status in ['committed', 'partially_reverted'] %}<form method="post" action="{{ url_for('customer_projects.project_import_revert', batch_id=selected.id) }}" onsubmit="return confirm('只会撤销导入后未被修改的项目，确认继续？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger">撤销未修改记录</button></form>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="cp-panel"><div class="cp-panel-heading"><div><h2>最近批次</h2><p>批次和逐行结果长期保留用于审计；原始 Excel 不落盘。</p></div></div><div class="table-responsive"><table class="table align-middle"><thead><tr><th>时间</th><th>文件</th><th>状态</th><th>有效 / 错误</th><th></th></tr></thead><tbody>{% for batch in batches %}<tr><td>{{ batch.created_at|china_time('%Y-%m-%d %H:%M') }}</td><td>{{ batch.original_filename }}</td><td>{{ batch.status }}</td><td>{{ batch.valid_rows }} / {{ batch.error_rows }}</td><td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('customer_projects.project_imports', batch=batch.id) }}">查看</a></td></tr>{% else %}<tr><td colspan="5" class="text-muted">尚无导入批次。</td></tr>{% endfor %}</tbody></table></div></section>
+</section>
+{% endblock %}

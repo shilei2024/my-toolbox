@@ -9,7 +9,7 @@ from io import BytesIO
 from flask import abort, flash, redirect, render_template, request, send_file, url_for
 from flask_login import login_required
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font
 from sqlalchemy import func, or_, select
 
 from extensions import db
@@ -26,6 +26,10 @@ from .models import (
     ProjectActivity,
     ProjectMaterial,
     ProjectMember,
+    ProjectImportBatch,
+    ProjectImportRow,
+    ProjectExportPolicy,
+    ProjectSavedView,
     ProjectReminderOverride,
     ProjectStageEvent,
     ProjectStatusCatalog,
@@ -53,8 +57,10 @@ from .services.projects import (
     add_project_member,
     create_customer,
     create_project,
+    derive_project,
     local_day_bounds,
     restore_project,
+    reactivate_project,
     soft_delete_competitor,
     soft_delete_material,
     soft_delete_project,
@@ -63,6 +69,28 @@ from .services.projects import (
     update_project,
     update_customer_grade,
     update_material_commercial,
+)
+from .services.reports import REPORT_STAGES, build_lifecycle_report
+from .services.imports import (
+    MAX_IMPORT_BYTES,
+    ProjectImportError,
+    commit_project_import,
+    preview_project_import,
+    revert_project_import,
+)
+from .services.exports import (
+    ControlledExportError,
+    build_project_export,
+    ensure_default_export_policy,
+    export_allowed,
+)
+from .services.views import (
+    SavedViewError,
+    can_delete_view,
+    create_saved_view,
+    delete_saved_view,
+    get_accessible_view,
+    list_accessible_views,
 )
 
 
@@ -248,10 +276,24 @@ def _filtered_project_statement(
 @module_required
 def projects():
     membership = _membership()
-    q = request.args.get("q", "").strip()
-    stage = request.args.get("stage", "").strip()
+    active_view = None
+    view_id = request.args.get("view", "").strip()
+    if view_id:
+        active_view = get_accessible_view(view_id, membership)
+        if active_view is None:
+            abort(404)
+        q = active_view.filters.get("q", "")
+        stage = active_view.filters.get("stage", "")
+    else:
+        q = request.args.get("q", "").strip()
+        stage = request.args.get("stage", "").strip()
     statement = _filtered_project_statement(membership, q, stage)
     rows = list(db.session.scalars(statement.order_by(CustomerProject.updated_at.desc()).limit(100)))
+    export_policy = db.session.scalar(
+        select(ProjectExportPolicy).where(
+            ProjectExportPolicy.organization_id == membership.organization_id
+        )
+    )
     return render_template(
         "customer_projects/projects.html",
         projects=rows,
@@ -260,7 +302,53 @@ def projects():
         stages=_stage_map(membership.organization_id),
         q=q,
         selected_stage=stage,
+        can_export=export_allowed(membership, export_policy),
+        saved_views=list_accessible_views(membership),
+        active_view=active_view,
+        can_publish_shared_view="organization_admin" in membership.roles,
+        can_delete_active_view=bool(active_view and can_delete_view(active_view, membership)),
     )
+
+
+@customer_projects_bp.post("/views")
+@login_required
+@module_required
+def project_view_create():
+    membership = _membership()
+    try:
+        view = create_saved_view(request.form.to_dict(), membership)
+        db.session.commit()
+        flash("筛选视图已保存。", "success")
+        return redirect(url_for("customer_projects.projects", view=view.id))
+    except SavedViewError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(
+            url_for(
+                "customer_projects.projects",
+                q=request.form.get("q", "")[:100],
+                stage=request.form.get("stage", "")[:32],
+            )
+        )
+
+
+@customer_projects_bp.post("/views/<string:view_id>/delete")
+@login_required
+@module_required
+def project_view_delete(view_id: str):
+    membership = _membership()
+    view = db.session.get(ProjectSavedView, view_id)
+    if view is None or view.organization_id != membership.organization_id:
+        abort(404)
+    try:
+        expected_version = int(request.form.get("version", "0"))
+        delete_saved_view(view, membership, expected_version)
+        db.session.commit()
+        flash("筛选视图已删除。", "success")
+    except (SavedViewError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc) if isinstance(exc, SavedViewError) else "视图版本无效。", "danger")
+    return redirect(url_for("customer_projects.projects"))
 
 
 @customer_projects_bp.get("/projects/export.xlsx")
@@ -270,102 +358,27 @@ def projects_export():
     membership = _membership()
     q = request.args.get("q", "").strip()
     stage = request.args.get("stage", "").strip()
-    projects = list(
-        db.session.scalars(
-            _filtered_project_statement(membership, q, stage).order_by(
-                CustomerProject.updated_at.desc(), CustomerProject.id
-            )
+    policy = ensure_default_export_policy(membership.organization_id)
+    if not export_allowed(membership, policy):
+        abort(403)
+    try:
+        artifact = build_project_export(
+            _filtered_project_statement(membership, q, stage),
+            membership,
+            policy,
+            {"q": q, "stage": stage},
         )
-    )
-    customer_names = _customer_name_map(projects)
-    user_names = _user_name_map({project.primary_sales_user_id for project in projects})
-    project_ids = [project.id for project in projects]
-    materials = (
-        list(
-            db.session.scalars(
-                select(ProjectMaterial)
-                .where(
-                    ProjectMaterial.organization_id == membership.organization_id,
-                    ProjectMaterial.project_id.in_(project_ids),
-                    ProjectMaterial.deleted_at.is_(None),
-                )
-                .order_by(ProjectMaterial.project_id, ProjectMaterial.is_primary.desc())
-            )
-        )
-        if project_ids
-        else []
-    )
-    materials_by_project: dict[str, list[ProjectMaterial]] = {project_id: [] for project_id in project_ids}
-    for material in materials:
-        materials_by_project.setdefault(material.project_id, []).append(material)
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "客户项目台账"
-    headers = [
-        "项目编号", "客户", "客户评级", "项目名称", "产品名称", "项目年用量", "阶段",
-        "主业务", "下一步", "下次跟进", "推广品牌", "推广型号", "应用位置", "单机数量",
-        "录入单价", "录入币别", "美元单价", "含税人民币单价", "USD/CNY汇率", "价格更新时间",
-    ]
-    sheet.append(headers)
-    for cell in sheet[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="0D6EFD")
-    customer_by_id = {
-        customer.id: customer
-        for customer in db.session.scalars(
-            select(Customer).where(Customer.id.in_({project.customer_id for project in projects}))
-        )
-    } if projects else {}
-    stage_names = _stage_map(membership.organization_id)
-    for project in projects:
-        project_materials = materials_by_project.get(project.id) or [None]
-        customer = customer_by_id.get(project.customer_id)
-        for material in project_materials:
-            sheet.append([
-                project.project_code,
-                customer_names.get(project.customer_id, ""),
-                customer.grade if customer else "",
-                project.name,
-                project.product_name or "",
-                float(project.annual_usage) if project.annual_usage is not None else None,
-                stage_names.get(project.stage_code, project.stage_code),
-                user_names.get(project.primary_sales_user_id, ""),
-                project.next_action,
-                _aware(project.next_follow_up_at).strftime("%Y-%m-%d %H:%M"),
-                material.promoted_brand if material else "",
-                (material.promoted_mpn or "待确认") if material else "",
-                (material.application_position or "") if material else "",
-                float(material.machine_quantity) if material and material.machine_quantity is not None else None,
-                float(material.target_price) if material and material.target_price is not None else None,
-                (material.currency or "") if material else "",
-                float(material.unit_price_usd) if material and material.unit_price_usd is not None else None,
-                float(material.unit_price_cny_tax_included) if material and material.unit_price_cny_tax_included is not None else None,
-                float(material.fx_rate_usd_cny) if material and material.fx_rate_usd_cny is not None else None,
-                _aware(material.price_updated_at).strftime("%Y-%m-%d %H:%M") if material and material.price_updated_at else "",
-            ])
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-    for column in sheet.columns:
-        width = min(max(len(str(cell.value or "")) for cell in column) + 2, 32)
-        sheet.column_dimensions[column[0].column_letter].width = width
-    output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
-    add_audit(
-        membership.organization_id,
-        "customer_project_export",
-        membership.organization_id,
-        "exported",
-        membership.user_id,
-        {"project_count": len(projects), "material_count": len(materials), "filtered": bool(q or stage)},
-    )
-    db.session.commit()
+        db.session.commit()
+    except ControlledExportError as exc:
+        db.session.commit()
+        flash(str(exc), "warning")
+        return redirect(url_for("customer_projects.projects", q=q, stage=stage))
     return send_file(
-        output,
+        BytesIO(artifact.content),
         as_attachment=True,
-        download_name=f"客户项目台账-{datetime.now().strftime('%Y%m%d')}.xlsx",
+        download_name=artifact.filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        max_age=0,
     )
 
 
@@ -511,6 +524,11 @@ def project_detail(project_id: str):
     membership = _membership()
     project = _project_or_404(project_id, membership)
     customer = db.session.get(Customer, project.customer_id)
+    source_project = (
+        db.session.get(CustomerProject, project.derived_from_project_id)
+        if project.derived_from_project_id
+        else None
+    )
     materials = list(db.session.scalars(select(ProjectMaterial).where(ProjectMaterial.project_id == project.id, ProjectMaterial.deleted_at.is_(None)).order_by(ProjectMaterial.is_primary.desc(), ProjectMaterial.created_at)))
     material_ids = [m.id for m in materials]
     competitors = list(db.session.scalars(select(MaterialCompetitor).where(MaterialCompetitor.project_material_id.in_(material_ids), MaterialCompetitor.deleted_at.is_(None)))) if material_ids else []
@@ -568,6 +586,7 @@ def project_detail(project_id: str):
     return render_template(
         "customer_projects/project_detail.html",
         project=project,
+        source_project=source_project,
         customer=customer,
         materials=materials,
         competitors_by_material=competitors_by_material,
@@ -586,6 +605,273 @@ def project_detail(project_id: str):
         form_key=str(uuid.uuid4()),
     )
 
+
+@customer_projects_bp.post("/projects/<string:project_id>/reactivate")
+@login_required
+@module_required
+def project_reactivate(project_id: str):
+    membership = _membership()
+    require_manager(membership)
+    project = _project_or_404(project_id, membership)
+    try:
+        reactivate_project(
+            project,
+            request.form.to_dict(),
+            membership,
+            request.form.get("idempotency_key", ""),
+        )
+        db.session.commit()
+        flash("项目已重新激活，原生命周期记录已保留。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except (DomainError, ValueError) as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, DomainError):
+            exc = DomainError("VALIDATION_ERROR", "项目版本无效。")
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/projects/<string:project_id>/derive")
+@login_required
+@module_required
+def project_derive(project_id: str):
+    membership = _membership()
+    require_write(membership)
+    source = _project_or_404(project_id, membership)
+    try:
+        payload = request.form.to_dict()
+        for field in ("copy_members", "copy_materials", "copy_competitors"):
+            payload[field] = request.form.get(field) == "on"
+        derived = derive_project(
+            source, payload, membership, request.form.get("idempotency_key", "")
+        )
+        db.session.commit()
+        flash(f"已衍生新项目 {derived.project_code}，跟进历史保持独立。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=derived.id))
+    except DomainError as exc:
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=source.id)
+
+
+@customer_projects_bp.get("/lifecycle")
+@login_required
+@module_required
+def lifecycle_report():
+    membership = _membership()
+    try:
+        report = build_lifecycle_report(membership, request.args)
+    except DomainError as exc:
+        flash(exc.message, "danger")
+        report = build_lifecycle_report(membership, {})
+    visible_projects = apply_project_scope(
+        select(
+            CustomerProject.id.label("project_id"),
+            CustomerProject.customer_id.label("customer_id"),
+            CustomerProject.primary_sales_user_id.label("owner_user_id"),
+        ).where(CustomerProject.deleted_at.is_(None)),
+        membership,
+    ).subquery()
+    filter_customers = list(
+        db.session.scalars(
+            select(Customer)
+            .join(visible_projects, visible_projects.c.customer_id == Customer.id)
+            .distinct()
+            .order_by(Customer.name)
+        )
+    )
+    filter_owners = list(
+        db.session.scalars(
+            select(User)
+            .join(visible_projects, visible_projects.c.owner_user_id == User.id)
+            .distinct()
+            .order_by(User.email)
+        )
+    )
+    filter_categories = list(
+        db.session.scalars(
+            select(ProjectMaterial.category_code)
+            .join(visible_projects, visible_projects.c.project_id == ProjectMaterial.project_id)
+            .where(
+                ProjectMaterial.deleted_at.is_(None),
+                ProjectMaterial.category_code.is_not(None),
+            )
+            .distinct()
+            .order_by(ProjectMaterial.category_code)
+        )
+    )
+    return render_template(
+        "customer_projects/lifecycle.html",
+        report=report,
+        report_stages=REPORT_STAGES,
+        stages=_stage_map(membership.organization_id),
+        filter_customers=filter_customers,
+        filter_owners=filter_owners,
+        filter_categories=filter_categories,
+    )
+
+
+def _import_batch_or_404(batch_id: str, membership: OrganizationMembership) -> ProjectImportBatch:
+    batch = db.session.scalar(
+        select(ProjectImportBatch).where(
+            ProjectImportBatch.id == batch_id,
+            ProjectImportBatch.organization_id == membership.organization_id,
+        )
+    )
+    if batch is None:
+        abort(404)
+    return batch
+
+
+@customer_projects_bp.get("/imports")
+@login_required
+@module_required
+def project_imports():
+    membership = _membership()
+    require_manager(membership)
+    batches = list(
+        db.session.scalars(
+            select(ProjectImportBatch)
+            .where(ProjectImportBatch.organization_id == membership.organization_id)
+            .order_by(ProjectImportBatch.created_at.desc())
+            .limit(50)
+        )
+    )
+    selected = None
+    preview_rows = []
+    selected_id = request.args.get("batch", "").strip()
+    if selected_id:
+        selected = _import_batch_or_404(selected_id, membership)
+        rows = list(
+            db.session.scalars(
+                select(ProjectImportRow)
+                .where(ProjectImportRow.batch_id == selected.id)
+                .order_by(ProjectImportRow.row_number)
+                .limit(1000)
+            )
+        )
+        preview_rows = [
+            {
+                "row": row,
+                "payload": json.loads(row.payload_json or "{}"),
+                "errors": json.loads(row.errors_json or "[]"),
+            }
+            for row in rows
+        ]
+    return render_template(
+        "customer_projects/imports.html",
+        batches=batches,
+        selected=selected,
+        preview_rows=preview_rows,
+    )
+
+
+@customer_projects_bp.post("/imports/preview")
+@login_required
+@module_required
+def project_import_preview():
+    membership = _membership()
+    require_manager(membership)
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        flash("请选择 XLSX 文件。", "danger")
+        return redirect(url_for("customer_projects.project_imports"))
+    content = upload.stream.read(MAX_IMPORT_BYTES + 1)
+    try:
+        batch = preview_project_import(content, upload.filename, membership)
+        db.session.commit()
+        flash(
+            f"预览完成：{batch.valid_rows} 行可导入，{batch.error_rows} 行需修正。",
+            "success" if batch.valid_rows else "warning",
+        )
+        return redirect(url_for("customer_projects.project_imports", batch=batch.id))
+    except ProjectImportError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("customer_projects.project_imports"))
+
+
+@customer_projects_bp.post("/imports/<string:batch_id>/commit")
+@login_required
+@module_required
+def project_import_commit(batch_id: str):
+    membership = _membership()
+    require_manager(membership)
+    batch = _import_batch_or_404(batch_id, membership)
+    try:
+        commit_project_import(batch, membership)
+        db.session.commit()
+        flash(f"已导入 {batch.valid_rows} 个项目，错误行未写入。", "success")
+    except (ProjectImportError, DomainError) as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("customer_projects.project_imports", batch=batch.id))
+
+
+@customer_projects_bp.post("/imports/<string:batch_id>/revert")
+@login_required
+@module_required
+def project_import_revert(batch_id: str):
+    membership = _membership()
+    require_manager(membership)
+    batch = _import_batch_or_404(batch_id, membership)
+    try:
+        result = revert_project_import(batch, membership)
+        db.session.commit()
+        category = "warning" if result["blocked"] else "success"
+        flash(
+            f"撤销完成：{result['reverted']} 个项目已移入回收站，{result['blocked']} 个因后续修改而保留。",
+            category,
+        )
+    except (ProjectImportError, DomainError) as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    return redirect(url_for("customer_projects.project_imports", batch=batch.id))
+
+
+@customer_projects_bp.get("/imports/template.xlsx")
+@login_required
+@module_required
+def project_import_template():
+    membership = _membership()
+    require_manager(membership)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "客户项目导入"
+    headers = [
+        "客户名称",
+        "项目名称",
+        "产品名称",
+        "项目年用量",
+        "阶段",
+        "主业务邮箱",
+        "下一步",
+        "下次跟进时间",
+        "评估等级",
+        "成功概率",
+    ]
+    sheet.append(headers)
+    sheet.append(
+        [
+            "示例客户（提交前删除）",
+            "示例车载控制器",
+            "域控制器",
+            120000,
+            "评估",
+            "sales@example.com",
+            "确认样品数量",
+            "2026-09-01 09:00",
+            "B",
+            30,
+        ]
+    )
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="customer-project-import-template.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @customer_projects_bp.post("/projects/<string:project_id>/edit")

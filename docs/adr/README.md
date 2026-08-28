@@ -35,3 +35,7 @@
 | [0025](0025-gallery-media-generation-and-ark-video.md) | Gallery 复用 Generation 闭环扩展图片与视频 |
 | [0026](0026-local-comfyui-media-provider-boundary.md) | 本机 ComfyUI 通过 Generation Worker 接入 Gallery |
 | [0027](0027-customer-project-tracking-modular-monolith.md) | 客户项目跟进采用主站模块化单体与 PostgreSQL 事实源 |
+| [0028](0028-customer-project-lifecycle-reuse-and-derivation.md) | 客户项目重新激活、衍生与快照报表边界 |
+| [0029](0029-customer-project-calendar-and-controlled-import.md) | 共享工作日日历与受控 Excel 导入边界 |
+| [0030](0030-customer-project-controlled-export.md) | 客户项目受控导出策略与文件安全边界 |
+| [0031](0031-customer-project-saved-views.md) | 客户项目个人与组织筛选视图边界 |

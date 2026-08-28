@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -20,6 +22,8 @@ from customer_projects.models import (  # noqa: E402
     Customer,
     CustomerProject,
     MaterialCompetitor,
+    ProjectExportPolicy,
+    ProjectSavedView,
     ProjectActivity,
     ProjectMaterial,
     ProjectMember,
@@ -397,6 +401,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(cny_payload["unit_price_usd"], "1.000000")
         self.assertEqual(cny_payload["unit_price_cny_tax_included"], "8.136000")
         self.assertEqual(cny_payload["version"], 2)
+        self.client.post("/logout")
+        self._login("manager@test.com")
         export = self.client.get("/customer-projects/projects/export.xlsx")
         self.assertEqual(export.status_code, 200)
         self.assertEqual(
@@ -410,6 +416,20 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(rows[1][4], "车载电源控制器")
         self.assertEqual(rows[1][16], 1)
         self.assertAlmostEqual(rows[1][17], 8.136, places=6)
+
+        with app.app_context():
+            event = db.session.scalar(
+                db.select(AuditEvent)
+                .where(
+                    AuditEvent.object_type == "customer_project_export",
+                    AuditEvent.action == "exported",
+                )
+                .order_by(AuditEvent.occurred_at.desc())
+            )
+            diff = json.loads(event.safe_diff_json)
+            self.assertEqual(diff["file_sha256"], hashlib.sha256(export.data).hexdigest())
+            self.assertEqual(diff["project_count"], 1)
+            self.assertTrue(diff["includes_prices"])
 
         self.client.post("/logout")
         with app.app_context():
@@ -436,6 +456,194 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             headers={"If-Match": '"3"'},
         )
         self.assertEqual(denied.status_code, 403)
+
+    def test_controlled_export_policy_scopes_roles_prices_and_formula_text(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            project.name = '=HYPERLINK("https://invalid.example","click")'
+            db.session.commit()
+
+        self._login("sales@test.com")
+        listing = self.client.get("/customer-projects/projects")
+        self.assertNotIn("/customer-projects/projects/export.xlsx", listing.get_data(as_text=True))
+        self.assertEqual(
+            self.client.get("/customer-projects/projects/export.xlsx").status_code,
+            403,
+        )
+
+        self.client.post("/logout")
+        self._login("manager@test.com")
+        updated = self.client.post(
+            "/admin/customer-projects/export-policy",
+            data={
+                "allowed_roles": "sales",
+                "max_projects": "2000",
+                "max_rows": "20000",
+            },
+        )
+        self.assertEqual(updated.status_code, 302)
+        self.client.post("/logout")
+        self._login("sales@test.com")
+        export = self.client.get("/customer-projects/projects/export.xlsx")
+        self.assertEqual(export.status_code, 200)
+        workbook = load_workbook(BytesIO(export.data), data_only=False)
+        rows = list(workbook["客户项目台账"].iter_rows(values_only=True))
+        self.assertNotIn("含税人民币单价", rows[0])
+        self.assertTrue(rows[1][3].startswith("'="))
+        with app.app_context():
+            policy = db.session.scalar(db.select(ProjectExportPolicy))
+            self.assertEqual(policy.allowed_roles, frozenset({"sales"}))
+            self.assertFalse(policy.include_prices)
+
+    def test_controlled_export_rejects_unbounded_result_and_audits_reason(self) -> None:
+        self._seed_project()
+        with app.app_context():
+            membership = db.session.scalar(
+                db.select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == self.sales_id
+                )
+            )
+            customer = create_customer({"name": "第二客户"}, membership)
+            db.session.flush()
+            create_project(
+                {
+                    "customer_id": customer.id,
+                    "name": "第二项目",
+                    "product_name": "第二产品",
+                    "annual_usage": "10",
+                    "stage_code": "evaluation",
+                    "primary_sales_user_id": self.sales_id,
+                    "next_action": "继续跟进",
+                    "next_follow_up_at": (
+                        datetime.now(timezone.utc) + timedelta(days=2)
+                    ).isoformat(),
+                },
+                membership,
+                "second-project",
+            )
+            db.session.commit()
+
+        self._login("manager@test.com")
+        updated = self.client.post(
+            "/admin/customer-projects/export-policy",
+            data={
+                "allowed_roles": ["organization_admin", "business_manager"],
+                "include_prices": "on",
+                "max_projects": "1",
+                "max_rows": "1",
+            },
+        )
+        self.assertEqual(updated.status_code, 302)
+        blocked = self.client.get("/customer-projects/projects/export.xlsx")
+        self.assertEqual(blocked.status_code, 302)
+        with app.app_context():
+            event = db.session.scalar(
+                db.select(AuditEvent)
+                .where(
+                    AuditEvent.object_type == "customer_project_export",
+                    AuditEvent.action == "blocked",
+                )
+                .order_by(AuditEvent.occurred_at.desc())
+            )
+            self.assertIsNotNone(event)
+            diff = json.loads(event.safe_diff_json)
+            self.assertEqual(diff["reason"], "project_limit_exceeded")
+            self.assertEqual(diff["max_projects"], 1)
+
+    def test_personal_and_organization_saved_views_are_scoped_and_audited(self) -> None:
+        self._seed_project()
+        self._login("sales@test.com")
+        created = self.client.post(
+            "/customer-projects/views",
+            data={
+                "name": "我的评估项目",
+                "visibility": "personal",
+                "q": "示例",
+                "stage": "evaluation",
+            },
+        )
+        self.assertEqual(created.status_code, 302)
+        with app.app_context():
+            personal = db.session.scalar(
+                db.select(ProjectSavedView).where(ProjectSavedView.visibility == "personal")
+            )
+            personal_id = personal.id
+            self.assertEqual(personal.filters, {"q": "示例", "stage": "evaluation"})
+        active = self.client.get(f"/customer-projects/projects?view={personal_id}")
+        self.assertEqual(active.status_code, 200)
+        self.assertIn("我的评估项目", active.get_data(as_text=True))
+
+        denied_publish = self.client.post(
+            "/customer-projects/views",
+            data={
+                "name": "越权共享",
+                "visibility": "organization",
+                "q": "",
+                "stage": "evaluation",
+            },
+        )
+        self.assertEqual(denied_publish.status_code, 302)
+        self.client.post("/logout")
+        self._login("other@test.com")
+        self.assertEqual(
+            self.client.get(f"/customer-projects/projects?view={personal_id}").status_code,
+            404,
+        )
+
+        self.client.post("/logout")
+        self._login("manager@test.com")
+        shared_response = self.client.post(
+            "/customer-projects/views",
+            data={
+                "name": "组织重点项目",
+                "visibility": "organization",
+                "q": "",
+                "stage": "evaluation",
+            },
+        )
+        self.assertEqual(shared_response.status_code, 302)
+        with app.app_context():
+            shared = db.session.scalar(
+                db.select(ProjectSavedView).where(
+                    ProjectSavedView.visibility == "organization"
+                )
+            )
+            shared_id = shared.id
+            shared_version = shared.version
+
+        self.client.post("/logout")
+        self._login("other@test.com")
+        self.assertEqual(
+            self.client.get(f"/customer-projects/projects?view={shared_id}").status_code,
+            200,
+        )
+        denied_delete = self.client.post(
+            f"/customer-projects/views/{shared_id}/delete",
+            data={"version": str(shared_version)},
+        )
+        self.assertEqual(denied_delete.status_code, 302)
+        with app.app_context():
+            self.assertIsNotNone(db.session.get(ProjectSavedView, shared_id))
+
+        self.client.post("/logout")
+        self._login("manager@test.com")
+        deleted = self.client.post(
+            f"/customer-projects/views/{shared_id}/delete",
+            data={"version": str(shared_version)},
+        )
+        self.assertEqual(deleted.status_code, 302)
+        with app.app_context():
+            self.assertIsNone(db.session.get(ProjectSavedView, shared_id))
+            actions = {
+                row.action
+                for row in db.session.scalars(
+                    db.select(AuditEvent).where(
+                        AuditEvent.object_type == "project_saved_view"
+                    )
+                )
+            }
+            self.assertEqual(actions, {"created", "deleted"})
 
     def test_stage_history_soft_delete_and_manager_restore(self) -> None:
         project_id = self._seed_project()
@@ -528,6 +736,167 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.get_json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_manager_reactivates_terminal_project_without_losing_history(self) -> None:
+        project_id = self._seed_project()
+        self._login("manager@test.com")
+        closed = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/stage-transitions",
+            json={
+                "to_stage_code": "lost",
+                "reason": "客户原方案取消",
+                "close_reason_code": "customer_cancelled",
+                "close_notes": "预算调整，保留后续机会。",
+                "project_version": 1,
+            },
+            headers={"Idempotency-Key": "close-before-reactivation"},
+        )
+        self.assertEqual(closed.status_code, 201)
+        payload = {
+            "to_stage_code": "sampling",
+            "reason": "客户新平台恢复验证",
+            "next_action": "安排新样品",
+            "next_follow_up_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "primary_sales_user_id": self.sales_id,
+            "project_version": 2,
+        }
+        reopened = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/reactivate",
+            json=payload,
+            headers={"Idempotency-Key": "reactivate-one"},
+        )
+        self.assertEqual(reopened.status_code, 201)
+        retry = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/reactivate",
+            json=payload,
+            headers={"Idempotency-Key": "reactivate-one"},
+        )
+        self.assertEqual(retry.status_code, 201)
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            self.assertEqual(project.stage_code, "sampling")
+            self.assertEqual(project.version, 3)
+            self.assertEqual(project.close_reason_code, "customer_cancelled")
+            events = list(
+                db.session.scalars(
+                    db.select(ProjectStageEvent)
+                    .where(ProjectStageEvent.project_id == project_id)
+                    .order_by(ProjectStageEvent.occurred_at)
+                )
+            )
+            self.assertEqual([item.to_stage_code for item in events], ["evaluation", "lost", "sampling"])
+
+    def test_derived_project_copies_selected_assets_but_not_activity_history(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        activity = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/activities",
+            json={
+                "activity_type": "meeting",
+                "summary": "来源项目跟进",
+                "next_action": "等待结论",
+                "next_follow_up_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+                "project_version": 1,
+            },
+            headers={"Idempotency-Key": "source-activity"},
+        )
+        self.assertEqual(activity.status_code, 201)
+        material = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={"promoted_brand": "Mavis", "promoted_mpn": "MPX-100"},
+            headers={"Idempotency-Key": "source-material"},
+        )
+        material_id = material.get_json()["data"]["id"]
+        competitor = self.client.post(
+            f"/api/v1/customer-projects/materials/{material_id}/competitors",
+            json={"brand": "竞品甲", "mpn": "ALT-1", "distributor": "渠道甲"},
+            headers={"Idempotency-Key": "source-competitor"},
+        )
+        self.assertEqual(competitor.status_code, 201)
+        payload = {
+            "name": "车载控制器二代",
+            "product_name": "车载电源控制器二代",
+            "annual_usage": "180000",
+            "stage_code": "evaluation",
+            "next_action": "确认二代规格",
+            "next_follow_up_at": (datetime.now(timezone.utc) + timedelta(days=5)).isoformat(),
+            "copy_members": True,
+            "copy_materials": True,
+            "copy_competitors": True,
+        }
+        created = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/derive",
+            json=payload,
+            headers={"Idempotency-Key": "derive-one"},
+        )
+        self.assertEqual(created.status_code, 201)
+        derived_id = created.get_json()["data"]["id"]
+        retry = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/derive",
+            json=payload,
+            headers={"Idempotency-Key": "derive-one"},
+        )
+        self.assertEqual(retry.get_json()["data"]["id"], derived_id)
+        with app.app_context():
+            derived = db.session.get(CustomerProject, derived_id)
+            self.assertEqual(derived.derived_from_project_id, project_id)
+            self.assertNotEqual(derived.project_code, db.session.get(CustomerProject, project_id).project_code)
+            self.assertEqual(
+                db.session.scalar(db.select(db.func.count()).select_from(ProjectActivity).where(ProjectActivity.project_id == derived_id)),
+                0,
+            )
+            copied_materials = list(db.session.scalars(db.select(ProjectMaterial).where(ProjectMaterial.project_id == derived_id)))
+            self.assertEqual(len(copied_materials), 1)
+            self.assertEqual(
+                db.session.scalar(db.select(db.func.count()).select_from(MaterialCompetitor).where(MaterialCompetitor.project_material_id == copied_materials[0].id)),
+                1,
+            )
+
+    def test_lifecycle_report_exposes_definition_and_respects_scope(self) -> None:
+        project_id = self._seed_project()
+        self._login("manager@test.com")
+        material = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "MPX-RPT",
+                "category_code": "Power IC",
+            },
+            headers={"Idempotency-Key": "report-material"},
+        )
+        material_id = material.get_json()["data"]["id"]
+        self.client.post(
+            f"/api/v1/customer-projects/materials/{material_id}/competitors",
+            json={"brand": "竞品乙", "mpn": "ALT-RPT", "distributor": "渠道乙"},
+            headers={"Idempotency-Key": "report-competitor"},
+        )
+        closed = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/stage-transitions",
+            json={
+                "to_stage_code": "lost",
+                "reason": "竞品锁定",
+                "close_reason_code": "competition",
+                "close_notes": "复盘完成",
+                "project_version": 1,
+            },
+            headers={"Idempotency-Key": "report-close"},
+        )
+        self.assertEqual(closed.status_code, 201)
+        response = self.client.get("/api/v1/customer-projects/reports/lifecycle?stage=lost")
+        self.assertEqual(response.status_code, 200)
+        report = response.get_json()["data"]
+        self.assertEqual(report["summary"]["by_stage"]["lost"], 1)
+        self.assertEqual(report["summary"]["lost_by_reason"]["competition"], 1)
+        self.assertIn("不是阶段转化率", report["metadata"]["definition"])
+        filtered = self.client.get(
+            "/api/v1/customer-projects/reports/lifecycle?category=Power%20IC&competitor_brand=竞品乙&material_brand=Mavis"
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.get_json()["data"]["summary"]["total"], 1)
+        page = self.client.get("/customer-projects/lifecycle")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("项目生命周期汇总", page.get_data(as_text=True))
+
 
 if __name__ == "__main__":
     unittest.main()

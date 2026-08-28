@@ -17,6 +17,7 @@
 | `audit_events` | `organization_id`, `object_type`, `object_id`, `action`, `actor_user_id`, `safe_diff`, `occurred_at` | 对象 + 时间索引；差异必须脱敏且不可覆盖 |
 | `notification_outbox` | `kind`, `idempotency_key`, `status`, `scheduled_at`, `attempt_count`, `next_attempt_at`, `safe_error_code` | 幂等键唯一；状态 + 计划时间索引 |
 | `notification_deliveries` | `outbox_id`, `recipient_user_id`, `status`, `provider_message_id` | 发件箱 + 收件人唯一；不保存正文副本 |
+| `organization_business_day_overrides` | `organization_id`, `calendar_date`, `is_working_day`, `label`, `version` | 组织 + 日期唯一；同时表达法定休息日和周末调休工作日 |
 
 `roles` 首发可使用 PostgreSQL 文本数组或 JSON；领域权限层必须将其解析为受控稳定代码，禁止任意角色字符串直接授权。
 
@@ -71,6 +72,10 @@
 | `notification_outbox` | 模块/事件/对象、幂等键、模板参数、计划/重试/领取/状态字段 | 共享通知事实；幂等键全局唯一；不保存渲染后正文或原始供应商错误 |
 | `notification_deliveries` | 发件箱、用户、投递地址、状态、尝试、安全错误码 | 发件箱 + 用户唯一；停用账号不创建记录 |
 | `notification_worker_heartbeats` | worker 名称、开始/完成时间、处理/失败计数、安全错误码 | 扫描和发送各一个稳定心跳，可供统一后台与告警读取 |
+| `project_import_batches` | 文件名、SHA-256、识别映射、状态、总/有效/错误行数、提交/撤销时间 | 不保存原始文件；组织 + 创建时间索引 |
+| `project_import_rows` | 批次、行号、规范化负载、错误、创建的客户/项目、创建版本、状态 | 批次 + 行号唯一；仅版本未变化的新增项目可撤销 |
+| `project_export_policies` | 允许角色、是否包含价格、最大项目数、最大输出行数、策略版本 | 每组织唯一；默认仅管理员/业务经理；只控制客户项目导出 |
+| `project_saved_views` | 个人/组织命名空间、显示名、规范化名、白名单筛选 JSON、创建人和版本 | 组织 + 命名空间 + 规范化名唯一；不保存查询语句或公开令牌 |
 | `project_tags` / `tag_links` | 标签名、颜色、对象类型/ID | 组织内规范标签名唯一 |
 
 ## 默认字典

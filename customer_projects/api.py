@@ -18,6 +18,8 @@ from .services.projects import (
     add_competitor,
     add_material,
     create_project,
+    derive_project,
+    reactivate_project,
     restore_project,
     soft_delete_competitor,
     soft_delete_material,
@@ -27,6 +29,7 @@ from .services.projects import (
     update_project,
     update_material_commercial,
 )
+from .services.reports import build_lifecycle_report
 
 
 def _membership():
@@ -297,6 +300,70 @@ def api_update_material_commercial(material_id: str):
         db.session.rollback()
         return _error(exc)
 
+
+@customer_projects_api_bp.post("/projects/<string:project_id>/reactivate")
+@module_required
+def api_reactivate_project(project_id: str):
+    membership = _membership()
+    require_manager(membership)
+    project = db.session.get(CustomerProject, project_id)
+    if project is None or project.deleted_at is not None or not can_view_project(membership, project):
+        return jsonify(error={"code": "NOT_FOUND", "message": "项目不存在或不可访问。"}), 404
+    try:
+        event = reactivate_project(
+            project,
+            request.get_json(silent=True) or {},
+            membership,
+            request.headers.get("Idempotency-Key", ""),
+        )
+        db.session.commit()
+        current = db.session.get(CustomerProject, project.id)
+        response = jsonify(
+            data={
+                "id": event.id,
+                "from_stage_code": event.from_stage_code,
+                "to_stage_code": event.to_stage_code,
+                "version": current.version,
+            }
+        )
+        response.status_code = 201
+        response.headers["ETag"] = f'"{current.version}"'
+        return response
+    except DomainError as exc:
+        db.session.rollback()
+        return _error(exc)
+
+
+@customer_projects_api_bp.post("/projects/<string:project_id>/derive")
+@module_required
+def api_derive_project(project_id: str):
+    membership = _membership()
+    require_write(membership)
+    source = db.session.get(CustomerProject, project_id)
+    if source is None or source.deleted_at is not None or not can_view_project(membership, source):
+        return jsonify(error={"code": "NOT_FOUND", "message": "来源项目不存在或不可访问。"}), 404
+    try:
+        derived = derive_project(
+            source,
+            request.get_json(silent=True) or {},
+            membership,
+            request.headers.get("Idempotency-Key", ""),
+        )
+        db.session.commit()
+        return jsonify(data=project_json(derived, include_customer=True)), 201
+    except DomainError as exc:
+        db.session.rollback()
+        return _error(exc)
+
+
+@customer_projects_api_bp.get("/reports/lifecycle")
+@module_required
+def api_lifecycle_report():
+    membership = _membership()
+    try:
+        return jsonify(data=build_lifecycle_report(membership, request.args))
+    except DomainError as exc:
+        return _error(exc)
 
 
 @customer_projects_api_bp.delete("/materials/<string:material_id>")

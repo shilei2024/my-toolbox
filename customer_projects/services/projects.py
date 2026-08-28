@@ -654,6 +654,292 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
     return event
 
 
+def reactivate_project(
+    project: CustomerProject,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    idempotency_key: str,
+) -> ProjectStageEvent:
+    """Reopen a paused/terminal project without erasing its prior lifecycle."""
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
+    if not membership.roles.intersection({"organization_admin", "business_manager"}):
+        raise DomainError("MANAGER_REQUIRED", "重新激活项目需要业务经理或组织管理员权限。")
+    existing = db.session.scalar(
+        select(ProjectStageEvent).where(
+            ProjectStageEvent.organization_id == membership.organization_id,
+            ProjectStageEvent.project_id == project.id,
+            ProjectStageEvent.idempotency_key == idempotency_key,
+        )
+    )
+    target = str(data.get("to_stage_code") or "evaluation").strip()
+    if existing is not None:
+        if existing.to_stage_code != target:
+            raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的重新激活请求。")
+        return existing
+    if project.organization_id != membership.organization_id or project.deleted_at is not None:
+        raise DomainError("PROJECT_NOT_FOUND", "项目不存在或不可访问。")
+    if project.stage_code not in TERMINAL_STAGES | {"paused"}:
+        raise DomainError("REACTIVATION_NOT_ALLOWED", "只有暂停或终态项目可以重新激活。")
+    if target not in ACTIVE_STAGES:
+        raise DomainError("INVALID_STAGE_TRANSITION", "重新激活的目标必须是进行中阶段。")
+    reason = str(data.get("reason") or "").strip()
+    next_action = str(data.get("next_action") or "").strip()
+    if not reason or not next_action or not data.get("next_follow_up_at"):
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "重新激活原因、下一步和下次跟进时间必填。",
+            field_errors={
+                key: "必填"
+                for key, value in {
+                    "reason": reason,
+                    "next_action": next_action,
+                    "next_follow_up_at": data.get("next_follow_up_at"),
+                }.items()
+                if not value
+            },
+        )
+    try:
+        expected_version = int(data.get("project_version") or 0)
+        owner_id = int(data.get("primary_sales_user_id") or project.primary_sales_user_id)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("VALIDATION_ERROR", "项目版本或负责人无效。") from exc
+    if expected_version != project.version:
+        raise VersionConflict(project.version)
+    owner = db.session.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == membership.organization_id,
+            OrganizationMembership.user_id == owner_id,
+            OrganizationMembership.status == "active",
+        )
+    )
+    if owner is None or not owner.roles.intersection(
+        {"organization_admin", "business_manager", "sales"}
+    ):
+        raise DomainError("INVALID_OWNER", "主业务不是当前组织的有效成员。")
+    organization = db.session.get(Organization, membership.organization_id)
+    follow_up = parse_datetime(
+        data["next_follow_up_at"], organization.timezone if organization else "Asia/Shanghai"
+    )
+    now = datetime.now(timezone.utc)
+    from_stage = project.stage_code
+    result = db.session.execute(
+        update(CustomerProject)
+        .where(
+            CustomerProject.id == project.id,
+            CustomerProject.organization_id == membership.organization_id,
+            CustomerProject.version == expected_version,
+            CustomerProject.deleted_at.is_(None),
+        )
+        .values(
+            stage_code=target,
+            primary_sales_user_id=owner_id,
+            next_action=next_action[:500],
+            next_follow_up_at=follow_up,
+            last_meaningful_update_at=now,
+            version=expected_version + 1,
+            updated_by_user_id=membership.user_id,
+            updated_at=now,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(CustomerProject, project.id)
+        raise VersionConflict(current.version if current else expected_version)
+    db.session.execute(
+        update(ProjectMember)
+        .where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.role_code == "sales",
+            ProjectMember.left_at.is_(None),
+        )
+        .values(is_primary=False)
+    )
+    primary_member = db.session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == owner_id,
+            ProjectMember.role_code == "sales",
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    if primary_member is None:
+        db.session.add(
+            ProjectMember(
+                organization_id=membership.organization_id,
+                project_id=project.id,
+                user_id=owner_id,
+                role_code="sales",
+                is_primary=True,
+            )
+        )
+    else:
+        primary_member.is_primary = True
+    cancel_pending_notifications("customer_projects", "project", project.id)
+    event = ProjectStageEvent(
+        organization_id=membership.organization_id,
+        project_id=project.id,
+        from_stage_code=from_stage,
+        to_stage_code=target,
+        reason=reason[:8000],
+        idempotency_key=idempotency_key,
+        actor_user_id=membership.user_id,
+        approved_by_user_id=membership.user_id,
+    )
+    db.session.add(event)
+    add_audit(
+        project.organization_id,
+        "project",
+        project.id,
+        "reactivated",
+        membership.user_id,
+        {"from": from_stage, "to": target, "primary_sales_user_id": owner_id},
+    )
+    return event
+
+
+def derive_project(
+    source: CustomerProject,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    idempotency_key: str,
+) -> CustomerProject:
+    """Create a new lifecycle from a project while keeping histories isolated."""
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
+    if source.organization_id != membership.organization_id or source.deleted_at is not None:
+        raise DomainError("PROJECT_NOT_FOUND", "来源项目不存在或不可访问。")
+    project_id = _project_id_for_key(membership.organization_id, idempotency_key)
+    existing = db.session.get(CustomerProject, project_id)
+    if existing is not None:
+        if existing.derived_from_project_id != source.id:
+            raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于其他项目请求。")
+        return existing
+
+    payload = dict(data)
+    payload.setdefault("customer_id", source.customer_id)
+    payload.setdefault("product_name", source.product_name or source.name)
+    payload.setdefault("annual_usage", source.annual_usage)
+    payload.setdefault("assessment_grade", source.assessment_grade)
+    payload.setdefault("probability_band", source.probability_band)
+    payload.setdefault("primary_sales_user_id", source.primary_sales_user_id)
+    derived = create_project(payload, membership, idempotency_key)
+    derived.derived_from_project_id = source.id
+
+    if bool(data.get("copy_members")):
+        members = db.session.scalars(
+            select(ProjectMember).where(
+                ProjectMember.project_id == source.id,
+                ProjectMember.left_at.is_(None),
+            )
+        )
+        existing_roles = {(derived.primary_sales_user_id, "sales")}
+        for member in members:
+            key = (member.user_id, member.role_code)
+            if key in existing_roles:
+                continue
+            db.session.add(
+                ProjectMember(
+                    organization_id=membership.organization_id,
+                    project_id=derived.id,
+                    user_id=member.user_id,
+                    role_code=member.role_code,
+                    is_primary=False,
+                    notification_preferences_json=member.notification_preferences_json,
+                )
+            )
+            existing_roles.add(key)
+
+    material_map: dict[str, ProjectMaterial] = {}
+    if bool(data.get("copy_materials")):
+        materials = list(
+            db.session.scalars(
+                select(ProjectMaterial).where(
+                    ProjectMaterial.project_id == source.id,
+                    ProjectMaterial.deleted_at.is_(None),
+                )
+            )
+        )
+        for material in materials:
+            clone = ProjectMaterial(
+                organization_id=membership.organization_id,
+                project_id=derived.id,
+                category_code=material.category_code,
+                promoted_brand=material.promoted_brand,
+                promoted_mpn=material.promoted_mpn,
+                normalized_mpn=material.normalized_mpn,
+                mpn_pending=material.mpn_pending,
+                customer_part_number=material.customer_part_number,
+                application_position=material.application_position,
+                machine_quantity=material.machine_quantity,
+                estimated_quantity=material.estimated_quantity,
+                quantity_period=material.quantity_period,
+                unit_code=material.unit_code,
+                target_price=material.target_price,
+                currency=material.currency,
+                fx_rate_usd_cny=material.fx_rate_usd_cny,
+                unit_price_usd=material.unit_price_usd,
+                unit_price_cny_tax_included=material.unit_price_cny_tax_included,
+                price_updated_by_user_id=membership.user_id if material.target_price is not None else None,
+                price_updated_at=datetime.now(timezone.utc) if material.target_price is not None else None,
+                technical_status=material.technical_status,
+                commercial_status=material.commercial_status,
+                expected_mass_production_at=material.expected_mass_production_at,
+                is_primary=material.is_primary,
+                notes=material.notes,
+                idempotency_key=f"derive:{material.id}"[:128],
+                created_by_user_id=membership.user_id,
+                updated_by_user_id=membership.user_id,
+            )
+            db.session.add(clone)
+            db.session.flush()
+            material_map[material.id] = clone
+
+    if material_map and bool(data.get("copy_competitors")):
+        competitors = db.session.scalars(
+            select(MaterialCompetitor).where(
+                MaterialCompetitor.project_material_id.in_(material_map),
+                MaterialCompetitor.deleted_at.is_(None),
+            )
+        )
+        for competitor in competitors:
+            db.session.add(
+                MaterialCompetitor(
+                    organization_id=membership.organization_id,
+                    project_material_id=material_map[competitor.project_material_id].id,
+                    brand=competitor.brand,
+                    mpn=competitor.mpn,
+                    normalized_mpn=competitor.normalized_mpn,
+                    distributor=competitor.distributor,
+                    model_pending=competitor.model_pending,
+                    incumbent_status=competitor.incumbent_status,
+                    quoted_price=competitor.quoted_price,
+                    strengths=competitor.strengths,
+                    weaknesses=competitor.weaknesses,
+                    confidence_level=competitor.confidence_level,
+                    observed_at=competitor.observed_at,
+                    notes=competitor.notes,
+                    idempotency_key=f"derive:{competitor.id}"[:128],
+                    created_by_user_id=membership.user_id,
+                    updated_by_user_id=membership.user_id,
+                )
+            )
+    add_audit(
+        membership.organization_id,
+        "project",
+        derived.id,
+        "derived",
+        membership.user_id,
+        {
+            "source_project_id": source.id,
+            "copied_members": bool(data.get("copy_members")),
+            "copied_materials": bool(data.get("copy_materials")),
+            "copied_competitors": bool(data.get("copy_competitors")),
+        },
+    )
+    return derived
+
+
 def add_material(
     project: CustomerProject,
     data: dict[str, Any],

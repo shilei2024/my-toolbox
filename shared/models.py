@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from extensions import db
@@ -70,6 +70,32 @@ class OrganizationMembership(db.Model):
 
     def set_roles(self, roles: list[str] | set[str] | tuple[str, ...]) -> None:
         self.roles_json = json.dumps(sorted(set(roles)), ensure_ascii=False)
+
+
+class OrganizationBusinessDayOverride(db.Model):
+    """Organization-local override for a weekend or weekday."""
+
+    __tablename__ = "organization_business_day_overrides"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "calendar_date", name="uq_org_business_day_date"),
+        Index("ix_org_business_day_range", "organization_id", "calendar_date"),
+        CheckConstraint("version > 0", name="ck_org_business_day_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    calendar_date: Mapped[date] = mapped_column(Date, nullable=False)
+    is_working_day: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by_user_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"), nullable=False)
+    updated_by_user_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class AuditEvent(db.Model):

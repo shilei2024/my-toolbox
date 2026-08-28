@@ -72,6 +72,100 @@ class ProjectReminderPolicy(db.Model):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class ProjectExportPolicy(db.Model):
+    __tablename__ = "project_export_policies"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_project_export_policy_org"),
+        CheckConstraint("max_projects > 0 AND max_projects <= 10000", name="ck_project_export_max_projects"),
+        CheckConstraint("max_rows > 0 AND max_rows <= 100000", name="ck_project_export_max_rows"),
+        CheckConstraint("version > 0", name="ck_project_export_policy_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    allowed_roles_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default='["business_manager", "organization_admin"]'
+    )
+    include_prices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_projects: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    max_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=20000)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    @property
+    def allowed_roles(self) -> frozenset[str]:
+        import json
+
+        try:
+            value = json.loads(self.allowed_roles_json)
+        except (TypeError, ValueError):
+            return frozenset()
+        if not isinstance(value, list):
+            return frozenset()
+        return frozenset(str(role) for role in value)
+
+    def set_allowed_roles(self, roles: set[str] | list[str] | tuple[str, ...]) -> None:
+        import json
+
+        self.allowed_roles_json = json.dumps(sorted(set(roles)), ensure_ascii=False)
+
+
+class ProjectSavedView(db.Model):
+    __tablename__ = "project_saved_views"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "namespace_key", "normalized_name",
+            name="uq_project_saved_view_namespace_name",
+        ),
+        Index("ix_project_saved_view_org_namespace", "organization_id", "namespace_key"),
+        CheckConstraint(
+            "visibility IN ('personal', 'organization')",
+            name="ck_project_saved_view_visibility",
+        ),
+        CheckConstraint("version > 0", name="ck_project_saved_view_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    namespace_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    filters_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_by_user_id: Mapped[int] = mapped_column(
+        Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    @property
+    def filters(self) -> dict[str, str]:
+        import json
+
+        try:
+            value = json.loads(self.filters_json)
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        return {str(key): str(item) for key, item in value.items()}
+
+    def set_filters(self, filters: dict[str, str]) -> None:
+        import json
+
+        self.filters_json = json.dumps(filters, ensure_ascii=False, sort_keys=True)
+
+
 class ProjectReminderOverride(db.Model):
     __tablename__ = "project_reminder_overrides"
     __table_args__ = (
@@ -86,6 +180,56 @@ class ProjectReminderOverride(db.Model):
     include_pm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     include_fae: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ProjectImportBatch(db.Model):
+    __tablename__ = "project_import_batches"
+    __table_args__ = (
+        Index("ix_project_import_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="preview")
+    mapping_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by_user_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"), nullable=False)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reverted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ProjectImportRow(db.Model):
+    __tablename__ = "project_import_rows"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "row_number", name="uq_project_import_batch_row"),
+        Index("ix_project_import_row_batch_status", "batch_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(
+        db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    batch_id: Mapped[str] = mapped_column(
+        db.ForeignKey("project_import_batches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    errors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    customer_id: Mapped[str | None] = mapped_column(db.ForeignKey("customers.id"), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(db.ForeignKey("customer_projects.id"), nullable=True)
+    customer_was_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    project_version_at_create: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 

@@ -2,7 +2,7 @@
 
 ## 当前能力
 
-Phase 1 提供核心台账；Phase 2 首个切片提供提醒策略、幂等发件箱、dry-run/SMTP 发送、重试和心跳。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
+Phase 1 提供核心台账；Phase 2 提供提醒闭环；Phase 3 提供生命周期汇总、重新激活与衍生项目；Phase 4 提供组织工作日日历、受控 Excel 导入、受控导出及个人/组织筛选视图。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
 
 ## 日常检查
 
@@ -11,6 +11,8 @@ Phase 1 提供核心台账；Phase 2 首个切片提供提醒策略、幂等发�
 3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量，并在统一后台核对扫描/发送心跳、最老待发、失败和死信状态。
 4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表、`audit_events`、提醒策略、通知发件箱、投递和心跳表。
 5. 抽查 Excel 导出审计中的项目数、物料数和筛选标记；导出文件可能含客户与价格信息，只能通过受控业务账号下载和传递。
+6. 节假日前检查统一后台日历是否包含休息日及调休工作日；修改后确认旧 pending/failed 提醒已取消，下一次扫描按新策略版本生成。
+7. 导入后检查批次有效/错误行数和审计。撤销出现 `not_revertible` 表示项目已经被后续修改，应由业务人工处理，禁止直接改版本或删除历史。
 
 ## 汇率与价格异常
 
@@ -32,4 +34,6 @@ Phase 1 提供核心台账；Phase 2 首个切片提供提醒策略、幂等发�
 
 ## 回滚
 
-先关闭提醒扫描和真实发送，再设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用。保留 migrations `8904db6a3fa5`、`f1a2b3c4d5e6`、`a2b3c4d5e6f7` 与 `b3c4d5e6f7a8` 创建的表、列和业务记录；事故处理中禁止执行 Alembic downgrade。基础台账恢复见[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)，提醒见[Phase 2 部署与回滚](../deployment/customer-project-tracking-phase-2-reminders.md)。
+先关闭提醒扫描和真实发送，再设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用。保留所有已应用迁移创建的表、列、日历、导入批次和业务记录；事故处理中禁止执行 Alembic downgrade。基础台账恢复见[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)，提醒见[Phase 2 部署与回滚](../deployment/customer-project-tracking-phase-2-reminders.md)，Phase 4 见[工作日历与受控导入发布手册](../deployment/customer-project-tracking-phase-4-calendar-import.md)。
+
+若导出范围过大，先用项目阶段或关键字缩小结果，不应临时把上限提升到 10 万项目。审计中 `customer_project_export/exported` 的 `file_sha256` 可核对文件，`blocked` 记录拒绝原因。权限或字段策略异常时先在统一后台收紧允许角色并关闭价格列，详见[受控导出发布手册](../deployment/customer-project-tracking-phase-4-controlled-export.md)。

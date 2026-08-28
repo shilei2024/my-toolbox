@@ -26,8 +26,10 @@ from shared.models import (  # noqa: E402
     NotificationDelivery,
     NotificationOutbox,
     NotificationWorkerHeartbeat,
+    OrganizationBusinessDayOverride,
     OrganizationMembership,
 )
+from shared.business_calendar import add_workdays, upsert_business_day_override  # noqa: E402
 from shared.notifications import dispatch_due_notifications  # noqa: E402
 
 
@@ -294,6 +296,70 @@ class CustomerProjectReminderTest(unittest.TestCase):
                 },
                 {self.sales_id},
             )
+
+    def test_organization_calendar_shifts_holiday_and_makeup_workday(self) -> None:
+        with app.app_context():
+            upsert_business_day_override(
+                self.org_id, date(2026, 8, 27), False, "测试休息日", self.manager_id
+            )
+            upsert_business_day_override(
+                self.org_id, date(2026, 8, 29), True, "测试调休工作日", self.manager_id
+            )
+            self.assertEqual(
+                add_workdays(date(2026, 8, 31), -1, {date(2026, 8, 29): True}),
+                date(2026, 8, 29),
+            )
+            self._seed_project(
+                followup=datetime(2026, 8, 28, 9, 0, tzinfo=timezone.utc),
+                meaningful=self.NOW,
+            )
+            scan_project_reminders(self.NOW)
+            outboxes = {
+                row.event_type: row
+                for row in db.session.scalars(db.select(NotificationOutbox))
+            }
+            pre_due = outboxes["followup_pre_due"].scheduled_for
+            if pre_due.tzinfo is None:
+                pre_due = pre_due.replace(tzinfo=timezone.utc)
+            self.assertEqual(pre_due, datetime(2026, 8, 26, 1, 0, tzinfo=timezone.utc))
+
+    def test_admin_calendar_change_cancels_old_intents_and_versions_policy(self) -> None:
+        with app.app_context():
+            self._seed_project(
+                followup=datetime(2026, 8, 28, 9, 0, tzinfo=timezone.utc),
+                meaningful=self.NOW,
+            )
+            scan_project_reminders(self.NOW)
+        client = app.test_client()
+        login = client.post(
+            "/login", data={"email": "manager@test.com", "password": "Passw0rd1"}
+        )
+        self.assertIn(login.status_code, (301, 302))
+        changed = client.post(
+            "/admin/customer-projects/business-calendar",
+            data={"calendar_date": "2026-10-01", "day_type": "holiday", "label": "国庆节测试"},
+        )
+        self.assertEqual(changed.status_code, 302)
+        with app.app_context():
+            override = db.session.scalar(
+                db.select(OrganizationBusinessDayOverride).where(
+                    OrganizationBusinessDayOverride.organization_id == self.org_id,
+                    OrganizationBusinessDayOverride.calendar_date == date(2026, 10, 1),
+                )
+            )
+            self.assertIsNotNone(override)
+            self.assertFalse(override.is_working_day)
+            self.assertEqual(
+                {row.status for row in db.session.scalars(db.select(NotificationOutbox))},
+                {"cancelled"},
+            )
+            policy = db.session.scalar(
+                db.select(ProjectReminderPolicy).where(
+                    ProjectReminderPolicy.organization_id == self.org_id
+                )
+            )
+            self.assertEqual(policy.version, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

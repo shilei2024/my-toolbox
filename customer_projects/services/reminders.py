@@ -27,6 +27,7 @@ from shared.models import (
     Organization,
     OrganizationMembership,
 )
+from shared.business_calendar import add_workdays, load_business_day_overrides
 
 ACTIVE_STAGES = ("evaluation", "initiated", "sampling", "pilot_batch", "trial_production", "design_win")
 REMINDER_LABELS = {
@@ -44,18 +45,6 @@ def _aware(value: datetime) -> datetime:
 
 def _local_schedule(day: date, hour: int, tz: ZoneInfo) -> datetime:
     return datetime.combine(day, time(hour=max(0, min(hour, 23))), tzinfo=tz).astimezone(timezone.utc)
-
-
-def _add_workdays(value: date, amount: int) -> date:
-    """Plain Monday–Friday workday arithmetic; org holiday calendar arrives in Phase 4."""
-    step = 1 if amount >= 0 else -1
-    remaining = abs(amount)
-    current = value
-    while remaining:
-        current += timedelta(days=step)
-        if current.weekday() < 5:
-            remaining -= 1
-    return current
 
 
 def ensure_default_policy(organization_id: str) -> ProjectReminderPolicy:
@@ -239,6 +228,24 @@ def scan_project_reminders(now: datetime | None = None, organization_id: str | N
                 )
             )
         )
+        calendar_base_days: list[date] = []
+        for project in projects:
+            calendar_base_days.append(_aware(project.next_follow_up_at).astimezone(tz).date())
+            stale_days = statuses.get(project.stage_code)
+            if stale_days:
+                calendar_base_days.append(
+                    _aware(project.last_meaningful_update_at).astimezone(tz).date()
+                    + timedelta(days=stale_days)
+                )
+        calendar_overrides = (
+            load_business_day_overrides(
+                organization.id,
+                min(calendar_base_days) - timedelta(days=45),
+                max(calendar_base_days) + timedelta(days=45),
+            )
+            if calendar_base_days
+            else {}
+        )
         for project in projects:
             scanned += 1
             override = db.session.scalar(
@@ -254,9 +261,9 @@ def scan_project_reminders(now: datetime | None = None, organization_id: str | N
             followup_local = _aware(project.next_follow_up_at).astimezone(tz)
             due_day = followup_local.date()
             followup_events = (
-                ("followup_pre_due", _add_workdays(due_day, -policy.pre_due_workdays)),
+                ("followup_pre_due", add_workdays(due_day, -policy.pre_due_workdays, calendar_overrides)),
                 ("followup_due", due_day),
-                ("followup_overdue", _add_workdays(due_day, policy.overdue_workdays)),
+                ("followup_overdue", add_workdays(due_day, policy.overdue_workdays, calendar_overrides)),
             )
             stale_days = statuses.get(project.stage_code)
             candidates: list[tuple[str, datetime, str]] = []
@@ -266,8 +273,8 @@ def scan_project_reminders(now: datetime | None = None, organization_id: str | N
             if stale_days:
                 stale_day = _aware(project.last_meaningful_update_at).astimezone(tz).date() + timedelta(days=stale_days)
                 candidates.append(("stale_primary", _local_schedule(stale_day, policy.due_hour_local, tz), _aware(project.last_meaningful_update_at).isoformat()))
-                manager_day = _add_workdays(
-                    stale_day, policy.stale_manager_after_workdays
+                manager_day = add_workdays(
+                    stale_day, policy.stale_manager_after_workdays, calendar_overrides
                 )
                 candidates.append(("stale_manager", _local_schedule(manager_day, policy.due_hour_local, tz), _aware(project.last_meaningful_update_at).isoformat()))
             for event_type, scheduled, cycle_key in candidates:
