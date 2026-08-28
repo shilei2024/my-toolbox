@@ -55,10 +55,10 @@ HEADER_ALIASES = {
     "product_name": {"产品名称", "产品", "product_name"},
     "annual_usage": {"项目年用量", "年用量", "annual_usage"},
     "stage_code": {"阶段", "当前阶段", "stage_code"},
-    "owner_email": {"主业务邮箱", "负责人邮箱", "owner_email"},
+    "owner_email": {"主负责人邮箱", "主业务邮箱", "负责人邮箱", "owner_email"},
     "next_action": {"下一步", "下一步动作", "next_action"},
     "next_follow_up_at": {"下次跟进时间", "下次跟进", "next_follow_up_at"},
-    "assessment_grade": {"评估等级", "assessment_grade"},
+    "assessment_grade": {"项目等级", "评估等级", "assessment_grade"},
     "probability_band": {"成功概率", "成功概率区间", "probability_band"},
 }
 
@@ -242,7 +242,7 @@ def preview_project_import(
             )
         owner_id = owner_cache[email]
         if owner_id is None:
-            errors.append("主业务邮箱不是当前组织的有效成员")
+            errors.append("主负责人邮箱不是当前组织的有效成员")
         else:
             payload["primary_sales_user_id"] = owner_id
 
@@ -278,7 +278,7 @@ def preview_project_import(
 
         grade = str(payload.get("assessment_grade") or "").strip().upper()
         if grade and grade not in {"A", "B", "C", "D"}:
-            errors.append("评估等级仅支持 A/B/C/D")
+            errors.append("项目等级仅支持 A/B/C/D")
         payload["assessment_grade"] = grade or None
         probability = str(payload.get("probability_band") or "").strip().rstrip("%")
         if probability:

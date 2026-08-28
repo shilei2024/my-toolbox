@@ -46,8 +46,11 @@
     input.min = "1";
     input.step = "1";
     input.inputMode = "numeric";
-    const value = Number(input.value);
-    if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    // 空值保持占位符提示，不默认填 0
+    if (input.value !== "") {
+      const value = Number(input.value);
+      if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    }
     input.placeholder = "项目年用量（PCS，整数）";
     const fieldLabel = input.closest(".mb-3")?.querySelector("label");
     if (fieldLabel) fieldLabel.textContent = "项目年用量（PCS） *";
@@ -57,17 +60,30 @@
     input.min = "0";
     input.step = "1";
     input.inputMode = "numeric";
-    const value = Number(input.value);
-    if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    // 空值显示“单机数量”占位符，不默认填 0
+    if (input.value !== "") {
+      const value = Number(input.value);
+      if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    }
     input.placeholder = "单机数量（PCS，整数）";
   });
 
+  /**
+   * 价格输入统一口径：允许小数（最多 5 位），失焦时去除多余小数位与末尾 0。
+   * step 设为 any 避免浏览器按 step 校验拦截小数提交。
+   */
   root.querySelectorAll('input[name="unit_price"], input[name="quoted_price"]').forEach((input) => {
-    input.step = "0.00001";
-    const value = Number(input.value);
-    if (Number.isFinite(value) && input.value !== "") {
-      input.value = value.toFixed(5).replace(/\.?0+$/, "");
-    }
+    input.step = "any";
+    input.min = "0";
+    const normalize = () => {
+      if (input.value === "") return;
+      const value = Number(input.value);
+      if (Number.isFinite(value)) {
+        input.value = value.toFixed(5).replace(/\.?0+$/, "");
+      }
+    };
+    normalize();
+    input.addEventListener("blur", normalize);
   });
 
   const opportunitySelect = (selected = "design_in") => {
@@ -138,6 +154,46 @@
     root.querySelector("[data-project-title]"),
     "编辑项目基础信息"
   );
+
+  /**
+   * 阶段（评估/送样/小批等）可点击徽章变更：
+   * 点击页头阶段徽章弹出变更阶段表单，提交后时间线记录“阶段变化”。
+   */
+  const stagePanel = root.querySelector("[data-stage-panel]");
+  const stageForm = stagePanel?.querySelector("form");
+  const stageBadge = root.querySelector(".cp-detail-status .cp-stage");
+  if (stagePanel && stageForm && stageBadge) {
+    const dialog = document.createElement("dialog");
+    dialog.className = "cp-edit-dialog";
+    const header = document.createElement("header");
+    const heading = document.createElement("h3");
+    heading.textContent = "变更阶段";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "cp-dialog-close";
+    close.setAttribute("aria-label", "关闭弹窗");
+    close.textContent = "×";
+    close.addEventListener("click", () => dialog.close());
+    header.append(heading, close);
+    const hint = document.createElement("p");
+    hint.className = "text-muted small";
+    hint.textContent = "阶段变化会记录到跟进时间线；跳过阶段必须说明原因。";
+    dialog.append(header, hint, stageForm);
+    root.append(dialog);
+    stagePanel.remove();
+    stageBadge.classList.add("cp-model-trigger");
+    stageBadge.setAttribute("role", "button");
+    stageBadge.setAttribute("tabindex", "0");
+    stageBadge.setAttribute("aria-label", "变更阶段，点击打开");
+    stageBadge.setAttribute("title", "点击变更阶段");
+    stageBadge.addEventListener("click", () => openDialog(dialog));
+    stageBadge.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDialog(dialog);
+      }
+    });
+  }
 
   const materials = Array.from(root.querySelectorAll(".cp-material[data-opportunity-type]"));
   materials.forEach((material) => {

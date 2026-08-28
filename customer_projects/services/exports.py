@@ -187,7 +187,7 @@ def build_project_export(
     includes_prices = bool(policy.include_prices and can_edit_prices(membership))
     headers = [
         "项目编号", "客户", "客户评级", "项目名称", "产品名称", "项目年用量", "阶段",
-        "主业务", "下一步", "下次跟进", "机会分类", "推广品牌", "推广型号", "应用位置", "单机数量",
+        "主负责人", "下一步", "下次跟进", "机会分类", "推广品牌", "推广型号", "应用位置", "单机数量",
     ]
     if includes_prices:
         headers.extend(["录入单价", "录入币别", "美元单价", "含税人民币单价", "USD/CNY汇率", "价格更新时间", "年度机会金额（USD）"])

@@ -34,7 +34,7 @@
             <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
             <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
             <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%m-%d %H:%M') }}</span>
-            <span class="cp-owner"><small>主业务</small>{{ user_names.get(project.primary_sales_user_id, '待确认') }}</span>
+            <span class="cp-owner"><small>主负责人</small>{{ user_names.get(project.primary_sales_user_id, '待确认') }}</span>
           </a>
         {% endfor %}
       </div>
