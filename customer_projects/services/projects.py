@@ -5,10 +5,11 @@ import re
 import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from flask import g
+from flask import current_app, g
 from sqlalchemy import func, select, update
 
 from customer_projects.models import (
@@ -23,7 +24,9 @@ from customer_projects.models import (
     ProjectStatusCatalog,
 )
 from extensions import db
+from shared.exchange_rates import ExchangeRateError, get_exchange_rate
 from shared.models import AuditEvent, Organization, OrganizationMembership
+from shared.notifications import cancel_pending_notifications
 
 ACTIVE_STAGES = (
     "evaluation",
@@ -64,6 +67,12 @@ class VersionConflict(DomainError):
         self.current_version = current_version
 
 
+class ObjectVersionConflict(DomainError):
+    def __init__(self, code: str, message: str, current_version: int):
+        super().__init__(code, message)
+        self.current_version = current_version
+
+
 def normalize_name(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "").strip().casefold()
     return re.sub(r"\s+", "", normalized)
@@ -97,6 +106,28 @@ def parse_date(value: str | date | None) -> date | None:
         return date.fromisoformat(str(value))
     except ValueError as exc:
         raise DomainError("INVALID_DATE", "日期格式不正确。") from exc
+
+
+def parse_nonnegative_decimal(value: Any, field: str, label: str) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise DomainError(
+            "VALIDATION_ERROR", f"{label}格式不正确。", field_errors={field: "请输入有效数字"}
+        ) from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise DomainError(
+            "VALIDATION_ERROR", f"{label}不能为负数。", field_errors={field: "不能为负数"}
+        )
+    return parsed
+
+
+def parse_boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def local_day_bounds(now: datetime, timezone_name: str) -> tuple[datetime, datetime]:
@@ -198,6 +229,11 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         {"organization_admin", "business_manager", "sales"}
     ):
         raise DomainError("INVALID_OWNER", "客户负责人不是当前组织的有效业务成员。")
+    grade = str(data.get("grade") or "").upper().strip()
+    if grade and grade not in {"A", "B", "C", "D"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+        )
     customer = Customer(
         organization_id=membership.organization_id,
         name=name[:255],
@@ -205,6 +241,7 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         short_name=str(data.get("short_name") or "").strip()[:120] or None,
         industry=str(data.get("industry") or "").strip()[:120] or None,
         region=str(data.get("region") or "").strip()[:120] or None,
+        grade=grade or None,
         primary_owner_user_id=owner_id,
         notes=str(data.get("notes") or "").strip()[:4000] or None,
         created_by_user_id=membership.user_id,
@@ -213,6 +250,31 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
     db.session.add(customer)
     db.session.flush()
     add_audit(customer.organization_id, "customer", customer.id, "created", membership.user_id, {"name": customer.name})
+    return customer
+
+
+def update_customer_grade(
+    customer: Customer, grade_value: Any, membership: OrganizationMembership
+) -> Customer:
+    if customer.organization_id != membership.organization_id or customer.deleted_at is not None:
+        raise DomainError("CUSTOMER_NOT_FOUND", "客户不存在或不可访问。")
+    grade = str(grade_value or "").upper().strip()
+    if grade and grade not in {"A", "B", "C", "D"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+        )
+    customer.grade = grade or None
+    customer.version += 1
+    customer.updated_by_user_id = membership.user_id
+    customer.updated_at = datetime.now(timezone.utc)
+    add_audit(
+        customer.organization_id,
+        "customer",
+        customer.id,
+        "grade_updated",
+        membership.user_id,
+        {"grade": grade or None},
+    )
     return customer
 
 
@@ -253,6 +315,9 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
     if existing is not None:
         if (
             existing.name != str(data.get("name", "")).strip()
+            or (existing.product_name or "") != str(data.get("product_name", "")).strip()
+            or existing.annual_usage
+            != parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
             or existing.customer_id != str(data.get("customer_id", "")).strip()
         ):
             raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的项目请求。")
@@ -260,11 +325,17 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
 
     fields: dict[str, str] = {}
     name = str(data.get("name", "")).strip()
+    product_name = str(data.get("product_name", "")).strip()
+    annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
     customer_id = str(data.get("customer_id", "")).strip()
     stage = str(data.get("stage_code") or "evaluation")
     next_action = str(data.get("next_action", "")).strip()
     if not name:
         fields["name"] = "必填"
+    if not product_name:
+        fields["product_name"] = "必填"
+    if annual_usage in (None, Decimal("0")):
+        fields["annual_usage"] = "必须大于 0"
     if not customer_id:
         fields["customer_id"] = "必填"
     if stage not in ACTIVE_STAGES:
@@ -316,6 +387,8 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
         customer_id=customer.id,
         name=name[:255],
         normalized_name=normalize_name(name)[:255],
+        product_name=product_name[:255],
+        annual_usage=annual_usage,
         stage_code=stage,
         assessment_grade=grade or None,
         probability_band=probability,
@@ -357,7 +430,7 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
 def update_project(project: CustomerProject, data: dict[str, Any], membership: OrganizationMembership, expected_version: int) -> CustomerProject:
     values: dict[str, Any] = {"updated_by_user_id": membership.user_id, "version": expected_version + 1, "updated_at": datetime.now(timezone.utc)}
     safe_diff: dict[str, Any] = {}
-    for field, limit in (("name", 255), ("next_action", 500)):
+    for field, limit in (("name", 255), ("product_name", 255), ("next_action", 500)):
         if field in data:
             value = str(data[field]).strip()
             if not value:
@@ -366,6 +439,14 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
             safe_diff[field] = "已变更"
             if field == "name":
                 values["normalized_name"] = normalize_name(value)[:255]
+    if "annual_usage" in data:
+        annual_usage = parse_nonnegative_decimal(data.get("annual_usage"), "annual_usage", "项目年用量")
+        if annual_usage in (None, Decimal("0")):
+            raise DomainError(
+                "VALIDATION_ERROR", "项目年用量必须大于 0。", field_errors={"annual_usage": "必须大于 0"}
+            )
+        values["annual_usage"] = annual_usage
+        safe_diff["annual_usage"] = str(annual_usage)
     if "assessment_grade" in data:
         grade = str(data.get("assessment_grade") or "").upper()
         if grade and grade not in {"A", "B", "C", "D"}:
@@ -412,6 +493,8 @@ def update_project(project: CustomerProject, data: dict[str, Any], membership: O
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    if "next_follow_up_at" in data:
+        cancel_pending_notifications("customer_projects", "project", project.id)
     add_audit(project.organization_id, "project", project.id, "updated", membership.user_id, safe_diff)
     db.session.flush()
     return db.session.get(CustomerProject, project.id)
@@ -483,6 +566,7 @@ def add_activity(project: CustomerProject, data: dict[str, Any], membership: Org
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    cancel_pending_notifications("customer_projects", "project", project.id)
     db.session.add(activity)
     add_audit(project.organization_id, "project", project.id, "activity_added", membership.user_id, {"activity_type": activity.activity_type, "is_meaningful": meaningful})
     return activity
@@ -553,6 +637,8 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    if target in TERMINAL_STAGES | {"paused"}:
+        cancel_pending_notifications("customer_projects", "project", project.id)
     event = ProjectStageEvent(
         organization_id=membership.organization_id,
         project_id=project.id,
@@ -566,6 +652,292 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
     db.session.add(event)
     add_audit(project.organization_id, "project", project.id, "stage_changed", membership.user_id, {"from": from_stage, "to": target})
     return event
+
+
+def reactivate_project(
+    project: CustomerProject,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    idempotency_key: str,
+) -> ProjectStageEvent:
+    """Reopen a paused/terminal project without erasing its prior lifecycle."""
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
+    if not membership.roles.intersection({"organization_admin", "business_manager"}):
+        raise DomainError("MANAGER_REQUIRED", "重新激活项目需要业务经理或组织管理员权限。")
+    existing = db.session.scalar(
+        select(ProjectStageEvent).where(
+            ProjectStageEvent.organization_id == membership.organization_id,
+            ProjectStageEvent.project_id == project.id,
+            ProjectStageEvent.idempotency_key == idempotency_key,
+        )
+    )
+    target = str(data.get("to_stage_code") or "evaluation").strip()
+    if existing is not None:
+        if existing.to_stage_code != target:
+            raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的重新激活请求。")
+        return existing
+    if project.organization_id != membership.organization_id or project.deleted_at is not None:
+        raise DomainError("PROJECT_NOT_FOUND", "项目不存在或不可访问。")
+    if project.stage_code not in TERMINAL_STAGES | {"paused"}:
+        raise DomainError("REACTIVATION_NOT_ALLOWED", "只有暂停或终态项目可以重新激活。")
+    if target not in ACTIVE_STAGES:
+        raise DomainError("INVALID_STAGE_TRANSITION", "重新激活的目标必须是进行中阶段。")
+    reason = str(data.get("reason") or "").strip()
+    next_action = str(data.get("next_action") or "").strip()
+    if not reason or not next_action or not data.get("next_follow_up_at"):
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "重新激活原因、下一步和下次跟进时间必填。",
+            field_errors={
+                key: "必填"
+                for key, value in {
+                    "reason": reason,
+                    "next_action": next_action,
+                    "next_follow_up_at": data.get("next_follow_up_at"),
+                }.items()
+                if not value
+            },
+        )
+    try:
+        expected_version = int(data.get("project_version") or 0)
+        owner_id = int(data.get("primary_sales_user_id") or project.primary_sales_user_id)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("VALIDATION_ERROR", "项目版本或负责人无效。") from exc
+    if expected_version != project.version:
+        raise VersionConflict(project.version)
+    owner = db.session.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == membership.organization_id,
+            OrganizationMembership.user_id == owner_id,
+            OrganizationMembership.status == "active",
+        )
+    )
+    if owner is None or not owner.roles.intersection(
+        {"organization_admin", "business_manager", "sales"}
+    ):
+        raise DomainError("INVALID_OWNER", "主业务不是当前组织的有效成员。")
+    organization = db.session.get(Organization, membership.organization_id)
+    follow_up = parse_datetime(
+        data["next_follow_up_at"], organization.timezone if organization else "Asia/Shanghai"
+    )
+    now = datetime.now(timezone.utc)
+    from_stage = project.stage_code
+    result = db.session.execute(
+        update(CustomerProject)
+        .where(
+            CustomerProject.id == project.id,
+            CustomerProject.organization_id == membership.organization_id,
+            CustomerProject.version == expected_version,
+            CustomerProject.deleted_at.is_(None),
+        )
+        .values(
+            stage_code=target,
+            primary_sales_user_id=owner_id,
+            next_action=next_action[:500],
+            next_follow_up_at=follow_up,
+            last_meaningful_update_at=now,
+            version=expected_version + 1,
+            updated_by_user_id=membership.user_id,
+            updated_at=now,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(CustomerProject, project.id)
+        raise VersionConflict(current.version if current else expected_version)
+    db.session.execute(
+        update(ProjectMember)
+        .where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.role_code == "sales",
+            ProjectMember.left_at.is_(None),
+        )
+        .values(is_primary=False)
+    )
+    primary_member = db.session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == owner_id,
+            ProjectMember.role_code == "sales",
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    if primary_member is None:
+        db.session.add(
+            ProjectMember(
+                organization_id=membership.organization_id,
+                project_id=project.id,
+                user_id=owner_id,
+                role_code="sales",
+                is_primary=True,
+            )
+        )
+    else:
+        primary_member.is_primary = True
+    cancel_pending_notifications("customer_projects", "project", project.id)
+    event = ProjectStageEvent(
+        organization_id=membership.organization_id,
+        project_id=project.id,
+        from_stage_code=from_stage,
+        to_stage_code=target,
+        reason=reason[:8000],
+        idempotency_key=idempotency_key,
+        actor_user_id=membership.user_id,
+        approved_by_user_id=membership.user_id,
+    )
+    db.session.add(event)
+    add_audit(
+        project.organization_id,
+        "project",
+        project.id,
+        "reactivated",
+        membership.user_id,
+        {"from": from_stage, "to": target, "primary_sales_user_id": owner_id},
+    )
+    return event
+
+
+def derive_project(
+    source: CustomerProject,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    idempotency_key: str,
+) -> CustomerProject:
+    """Create a new lifecycle from a project while keeping histories isolated."""
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
+    if source.organization_id != membership.organization_id or source.deleted_at is not None:
+        raise DomainError("PROJECT_NOT_FOUND", "来源项目不存在或不可访问。")
+    project_id = _project_id_for_key(membership.organization_id, idempotency_key)
+    existing = db.session.get(CustomerProject, project_id)
+    if existing is not None:
+        if existing.derived_from_project_id != source.id:
+            raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于其他项目请求。")
+        return existing
+
+    payload = dict(data)
+    payload.setdefault("customer_id", source.customer_id)
+    payload.setdefault("product_name", source.product_name or source.name)
+    payload.setdefault("annual_usage", source.annual_usage)
+    payload.setdefault("assessment_grade", source.assessment_grade)
+    payload.setdefault("probability_band", source.probability_band)
+    payload.setdefault("primary_sales_user_id", source.primary_sales_user_id)
+    derived = create_project(payload, membership, idempotency_key)
+    derived.derived_from_project_id = source.id
+
+    if bool(data.get("copy_members")):
+        members = db.session.scalars(
+            select(ProjectMember).where(
+                ProjectMember.project_id == source.id,
+                ProjectMember.left_at.is_(None),
+            )
+        )
+        existing_roles = {(derived.primary_sales_user_id, "sales")}
+        for member in members:
+            key = (member.user_id, member.role_code)
+            if key in existing_roles:
+                continue
+            db.session.add(
+                ProjectMember(
+                    organization_id=membership.organization_id,
+                    project_id=derived.id,
+                    user_id=member.user_id,
+                    role_code=member.role_code,
+                    is_primary=False,
+                    notification_preferences_json=member.notification_preferences_json,
+                )
+            )
+            existing_roles.add(key)
+
+    material_map: dict[str, ProjectMaterial] = {}
+    if bool(data.get("copy_materials")):
+        materials = list(
+            db.session.scalars(
+                select(ProjectMaterial).where(
+                    ProjectMaterial.project_id == source.id,
+                    ProjectMaterial.deleted_at.is_(None),
+                )
+            )
+        )
+        for material in materials:
+            clone = ProjectMaterial(
+                organization_id=membership.organization_id,
+                project_id=derived.id,
+                category_code=material.category_code,
+                promoted_brand=material.promoted_brand,
+                promoted_mpn=material.promoted_mpn,
+                normalized_mpn=material.normalized_mpn,
+                mpn_pending=material.mpn_pending,
+                customer_part_number=material.customer_part_number,
+                application_position=material.application_position,
+                machine_quantity=material.machine_quantity,
+                estimated_quantity=material.estimated_quantity,
+                quantity_period=material.quantity_period,
+                unit_code=material.unit_code,
+                target_price=material.target_price,
+                currency=material.currency,
+                fx_rate_usd_cny=material.fx_rate_usd_cny,
+                unit_price_usd=material.unit_price_usd,
+                unit_price_cny_tax_included=material.unit_price_cny_tax_included,
+                price_updated_by_user_id=membership.user_id if material.target_price is not None else None,
+                price_updated_at=datetime.now(timezone.utc) if material.target_price is not None else None,
+                technical_status=material.technical_status,
+                commercial_status=material.commercial_status,
+                expected_mass_production_at=material.expected_mass_production_at,
+                is_primary=material.is_primary,
+                notes=material.notes,
+                idempotency_key=f"derive:{material.id}"[:128],
+                created_by_user_id=membership.user_id,
+                updated_by_user_id=membership.user_id,
+            )
+            db.session.add(clone)
+            db.session.flush()
+            material_map[material.id] = clone
+
+    if material_map and bool(data.get("copy_competitors")):
+        competitors = db.session.scalars(
+            select(MaterialCompetitor).where(
+                MaterialCompetitor.project_material_id.in_(material_map),
+                MaterialCompetitor.deleted_at.is_(None),
+            )
+        )
+        for competitor in competitors:
+            db.session.add(
+                MaterialCompetitor(
+                    organization_id=membership.organization_id,
+                    project_material_id=material_map[competitor.project_material_id].id,
+                    brand=competitor.brand,
+                    mpn=competitor.mpn,
+                    normalized_mpn=competitor.normalized_mpn,
+                    distributor=competitor.distributor,
+                    model_pending=competitor.model_pending,
+                    incumbent_status=competitor.incumbent_status,
+                    quoted_price=competitor.quoted_price,
+                    strengths=competitor.strengths,
+                    weaknesses=competitor.weaknesses,
+                    confidence_level=competitor.confidence_level,
+                    observed_at=competitor.observed_at,
+                    notes=competitor.notes,
+                    idempotency_key=f"derive:{competitor.id}"[:128],
+                    created_by_user_id=membership.user_id,
+                    updated_by_user_id=membership.user_id,
+                )
+            )
+    add_audit(
+        membership.organization_id,
+        "project",
+        derived.id,
+        "derived",
+        membership.user_id,
+        {
+            "source_project_id": source.id,
+            "copied_members": bool(data.get("copy_members")),
+            "copied_materials": bool(data.get("copy_materials")),
+            "copied_competitors": bool(data.get("copy_competitors")),
+        },
+    )
+    return derived
 
 
 def add_material(
@@ -595,6 +967,9 @@ def add_material(
     pending = bool(data.get("mpn_pending"))
     if not brand or (not mpn and not pending):
         raise DomainError("VALIDATION_ERROR", "推广品牌必填；推广型号或“型号待确认”至少填写一项。")
+    machine_quantity = parse_nonnegative_decimal(
+        data.get("machine_quantity"), "machine_quantity", "单机数量"
+    )
     material = ProjectMaterial(
         organization_id=membership.organization_id,
         project_id=project.id,
@@ -604,6 +979,7 @@ def add_material(
         normalized_mpn=normalize_mpn(mpn),
         mpn_pending=pending,
         application_position=str(data.get("application_position") or "").strip()[:255] or None,
+        machine_quantity=machine_quantity,
         technical_status=str(data.get("technical_status") or "").strip()[:64] or None,
         commercial_status=str(data.get("commercial_status") or "").strip()[:64] or None,
         is_primary=bool(data.get("is_primary")),
@@ -611,10 +987,228 @@ def add_material(
         created_by_user_id=membership.user_id,
         updated_by_user_id=membership.user_id,
     )
+    if data.get("unit_price") not in (None, ""):
+        apply_material_price(material, data, membership)
     db.session.add(material)
     db.session.flush()
     add_audit(project.organization_id, "material", material.id, "created", membership.user_id, {"brand": brand, "mpn": mpn or "待确认"})
     return material
+
+
+def apply_material_price(
+    material: ProjectMaterial, data: dict[str, Any], membership: OrganizationMembership
+) -> None:
+    allowed_roles = {"organization_admin", "business_manager", "sales", "pm"}
+    if not membership.roles.intersection(allowed_roles):
+        raise DomainError("PRICE_EDIT_FORBIDDEN", "只有业务和 PM 可以编辑单价。")
+    amount = parse_nonnegative_decimal(data.get("unit_price"), "unit_price", "单价")
+    if amount in (None, Decimal("0")):
+        raise DomainError(
+            "VALIDATION_ERROR", "单价必须大于 0。", field_errors={"unit_price": "必须大于 0"}
+        )
+    currency = str(data.get("currency") or "").upper().strip()
+    if currency not in {"USD", "CNY"}:
+        raise DomainError(
+            "VALIDATION_ERROR", "单价币别仅支持 USD 或 CNY。", field_errors={"currency": "请选择币别"}
+        )
+    try:
+        fx_rate = Decimal(
+            str(get_exchange_rate(current_app._get_current_object(), "USD", "CNY")["rate"])
+        )
+    except ExchangeRateError as exc:
+        raise DomainError("EXCHANGE_RATE_UNAVAILABLE", "汇率暂不可用，单价未保存，请稍后重试。") from exc
+    tax_multiplier = Decimal("1.13")
+    precision = Decimal("0.000001")
+    if currency == "USD":
+        usd_price = amount
+        cny_tax_price = amount * fx_rate * tax_multiplier
+    else:
+        cny_tax_price = amount
+        usd_price = amount / tax_multiplier / fx_rate
+    material.target_price = amount.quantize(precision, rounding=ROUND_HALF_UP)
+    material.currency = currency
+    material.fx_rate_usd_cny = fx_rate.quantize(precision, rounding=ROUND_HALF_UP)
+    material.unit_price_usd = usd_price.quantize(precision, rounding=ROUND_HALF_UP)
+    material.unit_price_cny_tax_included = cny_tax_price.quantize(
+        precision, rounding=ROUND_HALF_UP
+    )
+    material.price_updated_by_user_id = membership.user_id
+    material.price_updated_at = datetime.now(timezone.utc)
+
+
+def update_material_commercial(
+    material: ProjectMaterial,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> ProjectMaterial:
+    if material.organization_id != membership.organization_id or material.deleted_at is not None:
+        raise DomainError("MATERIAL_NOT_FOUND", "推广物料不存在或不可访问。")
+    values: dict[str, Any] = {
+        "updated_by_user_id": membership.user_id,
+        "updated_at": datetime.now(timezone.utc),
+        "version": expected_version + 1,
+    }
+    safe_diff: dict[str, Any] = {}
+    supported_fields = {
+        "category_code",
+        "promoted_brand",
+        "promoted_mpn",
+        "mpn_pending",
+        "customer_part_number",
+        "application_position",
+        "machine_quantity",
+        "technical_status",
+        "commercial_status",
+        "expected_mass_production_at",
+        "is_primary",
+        "notes",
+    }
+    has_price = data.get("unit_price") not in (None, "")
+    if not supported_fields.intersection(data) and not has_price:
+        raise DomainError("VALIDATION_ERROR", "请至少更新一项物料信息。")
+
+    brand = str(data.get("promoted_brand", material.promoted_brand) or "").strip()
+    mpn = str(data.get("promoted_mpn", material.promoted_mpn) or "").strip()
+    pending = (
+        parse_boolean(data.get("mpn_pending"))
+        if "mpn_pending" in data
+        else material.mpn_pending
+    )
+    if not brand or (not mpn and not pending):
+        raise DomainError(
+            "VALIDATION_ERROR",
+            "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
+        )
+    if "promoted_brand" in data:
+        values["promoted_brand"] = brand[:120]
+        safe_diff["promoted_brand"] = "已变更"
+    if "promoted_mpn" in data:
+        values["promoted_mpn"] = mpn[:160] or None
+        values["normalized_mpn"] = normalize_mpn(mpn)
+        safe_diff["promoted_mpn"] = "已变更"
+    if "mpn_pending" in data:
+        values["mpn_pending"] = pending
+        safe_diff["mpn_pending"] = pending
+    for field, limit in (
+        ("category_code", 64),
+        ("customer_part_number", 160),
+        ("application_position", 255),
+        ("technical_status", 64),
+        ("commercial_status", 64),
+        ("notes", 8000),
+    ):
+        if field in data:
+            values[field] = str(data.get(field) or "").strip()[:limit] or None
+            safe_diff[field] = "已变更"
+    if "is_primary" in data:
+        values["is_primary"] = parse_boolean(data.get("is_primary"))
+        safe_diff["is_primary"] = values["is_primary"]
+    if "expected_mass_production_at" in data:
+        values["expected_mass_production_at"] = parse_date(
+            data.get("expected_mass_production_at")
+        )
+        safe_diff["expected_mass_production_at"] = str(
+            values["expected_mass_production_at"] or ""
+        )
+    if "machine_quantity" in data:
+        values["machine_quantity"] = parse_nonnegative_decimal(
+            data.get("machine_quantity"), "machine_quantity", "单机数量"
+        )
+        safe_diff["machine_quantity"] = str(values["machine_quantity"] or "")
+    if has_price:
+        apply_material_price(material, data, membership)
+        for field in (
+            "target_price",
+            "currency",
+            "fx_rate_usd_cny",
+            "unit_price_usd",
+            "unit_price_cny_tax_included",
+            "price_updated_by_user_id",
+            "price_updated_at",
+        ):
+            values[field] = getattr(material, field)
+        safe_diff.update(
+            {
+                "currency": material.currency,
+                "fx_rate_usd_cny": str(material.fx_rate_usd_cny),
+                "price": "已更新",
+            }
+        )
+    result = db.session.execute(
+        update(ProjectMaterial)
+        .where(
+            ProjectMaterial.id == material.id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.version == expected_version,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(ProjectMaterial, material.id)
+        raise ObjectVersionConflict(
+            "MATERIAL_VERSION_CONFLICT",
+            "物料已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        material.organization_id,
+        "material",
+        material.id,
+        "updated",
+        membership.user_id,
+        safe_diff,
+    )
+    db.session.flush()
+    return db.session.get(ProjectMaterial, material.id)
+
+
+def soft_delete_material(
+    material: ProjectMaterial,
+    reason: str,
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> None:
+    reason = reason.strip()
+    if not reason:
+        raise DomainError(
+            "VALIDATION_ERROR", "删除原因必填。", field_errors={"reason": "必填"}
+        )
+    result = db.session.execute(
+        update(ProjectMaterial)
+        .where(
+            ProjectMaterial.id == material.id,
+            ProjectMaterial.organization_id == membership.organization_id,
+            ProjectMaterial.version == expected_version,
+            ProjectMaterial.deleted_at.is_(None),
+        )
+        .values(
+            deleted_at=datetime.now(timezone.utc),
+            deleted_by_user_id=membership.user_id,
+            delete_reason=reason[:500],
+            updated_by_user_id=membership.user_id,
+            updated_at=datetime.now(timezone.utc),
+            version=expected_version + 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(ProjectMaterial, material.id)
+        raise ObjectVersionConflict(
+            "MATERIAL_VERSION_CONFLICT",
+            "物料已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        material.organization_id,
+        "material",
+        material.id,
+        "deleted",
+        membership.user_id,
+        {"reason": reason[:500]},
+    )
 
 
 def add_competitor(
@@ -666,6 +1260,152 @@ def add_competitor(
     db.session.flush()
     add_audit(membership.organization_id, "competitor", competitor.id, "created", membership.user_id, {"brand": brand or "待确认", "mpn": mpn or "待确认"})
     return competitor
+
+
+def update_competitor(
+    competitor: MaterialCompetitor,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> MaterialCompetitor:
+    if competitor.organization_id != membership.organization_id or competitor.deleted_at is not None:
+        raise DomainError("COMPETITOR_NOT_FOUND", "竞争方案不存在或不可访问。")
+    supported_fields = {
+        "brand",
+        "mpn",
+        "distributor",
+        "model_pending",
+        "incumbent_status",
+        "quoted_price",
+        "strengths",
+        "weaknesses",
+        "confidence_level",
+        "observed_at",
+        "notes",
+    }
+    if not supported_fields.intersection(data):
+        raise DomainError("VALIDATION_ERROR", "请至少更新一项竞争方案信息。")
+    brand = str(data.get("brand", competitor.brand) or "").strip()
+    mpn = str(data.get("mpn", competitor.mpn) or "").strip()
+    distributor = str(data.get("distributor", competitor.distributor) or "").strip()
+    pending = (
+        parse_boolean(data.get("model_pending"))
+        if "model_pending" in data
+        else competitor.model_pending
+    )
+    if not any((brand, mpn, distributor, pending)):
+        raise DomainError("VALIDATION_ERROR", "品牌、型号、代理商至少填写一项，或标记型号待确认。")
+    values: dict[str, Any] = {
+        "updated_by_user_id": membership.user_id,
+        "updated_at": datetime.now(timezone.utc),
+        "version": expected_version + 1,
+    }
+    safe_diff: dict[str, Any] = {}
+    for field, value, limit in (
+        ("brand", brand, 120),
+        ("mpn", mpn, 160),
+        ("distributor", distributor, 160),
+    ):
+        if field in data:
+            values[field] = value[:limit] or None
+            safe_diff[field] = "已变更"
+    if "mpn" in data:
+        values["normalized_mpn"] = normalize_mpn(mpn)
+    if "model_pending" in data:
+        values["model_pending"] = pending
+        safe_diff["model_pending"] = pending
+    for field, limit in (
+        ("incumbent_status", 64),
+        ("strengths", 4000),
+        ("weaknesses", 4000),
+        ("confidence_level", 32),
+        ("notes", 8000),
+    ):
+        if field in data:
+            values[field] = str(data.get(field) or "").strip()[:limit] or None
+            safe_diff[field] = "已变更"
+    if "quoted_price" in data:
+        values["quoted_price"] = parse_nonnegative_decimal(
+            data.get("quoted_price"), "quoted_price", "竞品报价"
+        )
+        safe_diff["quoted_price"] = str(values["quoted_price"] or "")
+    if "observed_at" in data:
+        values["observed_at"] = parse_date(data.get("observed_at"))
+        safe_diff["observed_at"] = str(values["observed_at"] or "")
+    result = db.session.execute(
+        update(MaterialCompetitor)
+        .where(
+            MaterialCompetitor.id == competitor.id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.version == expected_version,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(MaterialCompetitor, competitor.id)
+        raise ObjectVersionConflict(
+            "COMPETITOR_VERSION_CONFLICT",
+            "竞争方案已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        competitor.organization_id,
+        "competitor",
+        competitor.id,
+        "updated",
+        membership.user_id,
+        safe_diff,
+    )
+    db.session.flush()
+    return db.session.get(MaterialCompetitor, competitor.id)
+
+
+def soft_delete_competitor(
+    competitor: MaterialCompetitor,
+    reason: str,
+    membership: OrganizationMembership,
+    expected_version: int,
+) -> None:
+    reason = reason.strip()
+    if not reason:
+        raise DomainError(
+            "VALIDATION_ERROR", "删除原因必填。", field_errors={"reason": "必填"}
+        )
+    result = db.session.execute(
+        update(MaterialCompetitor)
+        .where(
+            MaterialCompetitor.id == competitor.id,
+            MaterialCompetitor.organization_id == membership.organization_id,
+            MaterialCompetitor.version == expected_version,
+            MaterialCompetitor.deleted_at.is_(None),
+        )
+        .values(
+            deleted_at=datetime.now(timezone.utc),
+            deleted_by_user_id=membership.user_id,
+            delete_reason=reason[:500],
+            updated_by_user_id=membership.user_id,
+            updated_at=datetime.now(timezone.utc),
+            version=expected_version + 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        current = db.session.get(MaterialCompetitor, competitor.id)
+        raise ObjectVersionConflict(
+            "COMPETITOR_VERSION_CONFLICT",
+            "竞争方案已被其他成员更新，请刷新后重试。",
+            current.version if current else expected_version,
+        )
+    add_audit(
+        competitor.organization_id,
+        "competitor",
+        competitor.id,
+        "deleted",
+        membership.user_id,
+        {"reason": reason[:500]},
+    )
 
 
 def add_project_member(project: CustomerProject, user_id: int, role_code: str, membership: OrganizationMembership) -> ProjectMember:
@@ -729,6 +1469,7 @@ def soft_delete_project(project: CustomerProject, reason: str, membership: Organ
         db.session.rollback()
         current = db.session.get(CustomerProject, project.id)
         raise VersionConflict(current.version if current else expected_version)
+    cancel_pending_notifications("customer_projects", "project", project.id)
     add_audit(project.organization_id, "project", project.id, "soft_deleted", membership.user_id, {"reason": reason[:500]})
 
 

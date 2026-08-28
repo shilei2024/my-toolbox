@@ -1,15 +1,25 @@
-# 客户项目跟进 Phase 1 运维手册
+# 客户项目跟进运维手册
 
 ## 当前能力
 
-Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`；未完成 PostgreSQL staging 和发布审批前不得开启。
+Phase 1 提供核心台账；Phase 2 提供提醒闭环；Phase 3 提供生命周期汇总、重新激活与衍生项目；Phase 4 提供组织工作日日历、受控 Excel 导入、受控导出及个人/组织筛选视图。生产默认 `CUSTOMER_PROJECTS_ENABLED=false`、`CUSTOMER_PROJECT_REMINDERS_ENABLED=false`、`CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false`；未完成 PostgreSQL staging、dry-run 和发布审批前不得开启。
 
 ## 日常检查
 
 1. 检查 `/healthz`、登录、统一后台和现有工具无异常。
 2. 功能开放后检查客户项目 API 的请求量、4xx/5xx、P95 延迟和 409 冲突数量。
-3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量；日期按组织时区计算，Phase 1 仅展示，不自动通知。
-4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表和 `audit_events`。
+3. 检查项目列表中逾期、今日到期、7 天内到期和长期未更新数量，并在统一后台核对扫描/发送心跳、最老待发、失败和死信状态。
+4. 检查数据库备份包含 `organizations`、`organization_memberships`、`customers`、`customer_projects`、项目子表、`audit_events`、提醒策略、通知发件箱、投递和心跳表。
+5. 抽查 Excel 导出审计中的项目数、物料数和筛选标记；导出文件可能含客户与价格信息，只能通过受控业务账号下载和传递。
+6. 节假日前检查统一后台日历是否包含休息日及调休工作日；修改后确认旧 pending/failed 提醒已取消，下一次扫描按新策略版本生成。
+7. 导入后检查批次有效/错误行数和审计。撤销出现 `not_revertible` 表示项目已经被后续修改，应由业务人工处理，禁止直接改版本或删除历史。
+
+## 汇率与价格异常
+
+- 页面汇率预览失败但无保存动作：刷新后重试；预览不是最终计算依据。
+- 保存单价提示汇率不可用：不要手工猜测汇率或直接改库。确认服务器可访问主站汇率上游；若已有缓存，系统会标记为过期缓存并继续使用，完全无缓存时整笔价格写入不会落库。
+- 折算结果争议：核对物料记录中的原始录入币别、`fx_rate_usd_cny` 和更新时间。USD 按未税口径，CNY 按含 13% 增值税口径。
+- FAE 无法编辑单价属于预期权限；如需授权，应由统一后台调整为业务或 PM 角色并保留审批记录，不得改前端绕过。
 
 ## 账号或权限异常
 
@@ -24,4 +34,6 @@ Phase 1 提供核心台账，不包含自动提醒或邮件发送。生产默认
 
 ## 回滚
 
-先设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用，再回退到上一稳定应用包。保留 migration `8904db6a3fa5` 创建的表和所有业务记录；事故处理中禁止执行 Alembic downgrade。恢复步骤以[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)为准。
+先关闭提醒扫描和真实发送，再设置 `CUSTOMER_PROJECTS_ENABLED=false` 并重启/滚动更新应用。保留所有已应用迁移创建的表、列、日历、导入批次和业务记录；事故处理中禁止执行 Alembic downgrade。基础台账恢复见[Phase 1 发布计划](../deployment/customer-project-tracking-phase-1-rollout.md)，提醒见[Phase 2 部署与回滚](../deployment/customer-project-tracking-phase-2-reminders.md)，Phase 4 见[工作日历与受控导入发布手册](../deployment/customer-project-tracking-phase-4-calendar-import.md)。
+
+若导出范围过大，先用项目阶段或关键字缩小结果，不应临时把上限提升到 10 万项目。审计中 `customer_project_export/exported` 的 `file_sha256` 可核对文件，`blocked` 记录拒绝原因。权限或字段策略异常时先在统一后台收紧允许角色并关闭价格列，详见[受控导出发布手册](../deployment/customer-project-tracking-phase-4-controlled-export.md)。

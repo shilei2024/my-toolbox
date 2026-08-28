@@ -85,28 +85,42 @@ docker compose -f compose.yaml -f compose.staging.yaml ps
 
 生产命令与 staging 相同，只将 env/override 文件替换为 production。命令模板中的文件在仓库实际补齐前不可执行。
 
-## 客户项目 Phase 1 首次启用
+## 客户项目 Phase 1–4 更新与首次启用
 
-客户项目是主站 Flask 模块，必须与现有站点使用同一应用发布包。腾讯云服务器完成应用发布后，在应用目录执行一次受控迁移；不要让 Web 进程自动建表：
+客户项目是主站 Flask 模块，必须与现有站点使用同一不可变发布包。只有合并 PR、CI 全绿、staging 验证和生产发布审批全部完成后，才能把同一镜像 digest 晋级到腾讯云；不要在 CVM 上 `git pull`、临时改代码或构建。若主站 Flask 实际不运行在该 CVM，应在主站的受控 one-off job 执行下列迁移，而不是在无应用代码的 Generation Service 容器中执行。
+
+迁移前创建 PostgreSQL 备份并保存备份 ID、当前镜像 digest 和 `flask db current` 输出。在应用目录或同镜像的一次性迁移容器中执行：
 
 ```bash
 cd /opt/mindfulpenpal
 export FLASK_APP='app:create_app'
 export AUTO_CREATE_SCHEMA=false
 flask db current
+flask db heads
 flask db upgrade
 flask db current
 ```
 
-预期最后显示 revision `8904db6a3fa5` 且退出码为 `0`。迁移前必须完成 PostgreSQL 备份并保存备份 ID。然后确认环境文件中：
+预期 `heads` 和升级后的 `current` 都显示 revision `f7a8b9c0d1e2` 且退出码为 `0`。这条迁移链只新增组织工作日日历、导入批次、受控导出策略和保存视图表；生产事故处理中仍不得执行 downgrade。然后确认环境文件中：
 
 ```dotenv
 CUSTOMER_PROJECTS_ENABLED=false
 CUSTOMER_PROJECTS_PILOT_EMAILS=
+CUSTOMER_PROJECT_REMINDERS_ENABLED=false
+CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false
 AUTO_CREATE_SCHEMA=false
 ```
 
-先以关闭开关启动并验证主站、登录、健康检查和现有工具；完成 staging 的组织隔离、权限、409、备份恢复、性能和人工页面验收后，再由审批人将试点邮箱写入 `CUSTOMER_PROJECTS_PILOT_EMAILS` 并滚动重启。回滚时先将 `CUSTOMER_PROJECTS_ENABLED=false`，再回退应用镜像；保留新增表和业务记录，事故处理中不要执行 `flask db downgrade`。
+先以关闭开关启动并验证主站、登录、健康检查和现有工具，再执行以下 staging/试点验收：
+
+1. 验证组织隔离、项目成员范围、乐观锁 409、生命周期重新激活和衍生关系。
+2. 日历节假日/调休能移动提醒日期；通知保持 dry-run，确认发件箱幂等后才单独审批 SMTP。
+3. Excel 导入先预览，确认后重复提交不重复创建；只撤销创建后未被修改的项目。
+4. 受控导出默认仅管理员/业务经理，超限被拒绝，审计文件 SHA-256 与下载文件一致。
+5. 个人保存视图跨用户返回 404；组织共享视图只有组织管理员能发布或删除。
+6. 观察数据库、应用内存、5xx、403/404、409 和审计事件，完成备份恢复演练。
+
+全部通过后，审批人再写入少量 `CUSTOMER_PROJECTS_PILOT_EMAILS`，开启 `CUSTOMER_PROJECTS_ENABLED=true` 并滚动重启。回滚时先关闭客户项目、提醒和通知开关，再恢复上一稳定镜像 digest；保留新增表、导入批次、策略、视图和业务记录，不执行 `flask db downgrade`。完整分阶段手册见本目录的 customer-project-tracking Phase 1–4 文档。
 
 ## 常见失败
 

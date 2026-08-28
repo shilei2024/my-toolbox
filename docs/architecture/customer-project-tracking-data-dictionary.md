@@ -17,6 +17,7 @@
 | `audit_events` | `organization_id`, `object_type`, `object_id`, `action`, `actor_user_id`, `safe_diff`, `occurred_at` | 对象 + 时间索引；差异必须脱敏且不可覆盖 |
 | `notification_outbox` | `kind`, `idempotency_key`, `status`, `scheduled_at`, `attempt_count`, `next_attempt_at`, `safe_error_code` | 幂等键唯一；状态 + 计划时间索引 |
 | `notification_deliveries` | `outbox_id`, `recipient_user_id`, `status`, `provider_message_id` | 发件箱 + 收件人唯一；不保存正文副本 |
+| `organization_business_day_overrides` | `organization_id`, `calendar_date`, `is_working_day`, `label`, `version` | 组织 + 日期唯一；同时表达法定休息日和周末调休工作日 |
 
 `roles` 首发可使用 PostgreSQL 文本数组或 JSON；领域权限层必须将其解析为受控稳定代码，禁止任意角色字符串直接授权。
 
@@ -37,6 +38,8 @@
 | `project_code` | varchar(32) | 组织内唯一，服务端生成 |
 | `customer_id` | UUID | 同组织有效客户 |
 | `name` / `normalized_name` | varchar(255) | 名称必填，规范名用于重复提示 |
+| `product_name` | varchar(255) | 新建项目必填；旧项目迁移后可空，首次编辑时补齐 |
+| `annual_usage` | numeric(18,4) | 新建/编辑时必须大于 0；不隐含单位换算 |
 | `stage_code` | 稳定代码 | 引用启用的阶段字典 |
 | `assessment_grade` | A/B/C/D | 可空 |
 | `probability_band` | 10/30/50/70/90 | 可配置显示，不做自动预测 |
@@ -59,11 +62,20 @@
 | 表 | 核心字段 | 关键规则 |
 | --- | --- | --- |
 | `project_members` | `project_id`, `user_id`, `role_code`, `is_primary`, `joined_at`, `left_at`, `notification_preferences` | 项目 + 用户 + 职责唯一；至少一名主业务 |
-| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；物料允许没有竞品；项目 + 幂等键唯一 |
-| `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；物料 + 幂等键唯一 |
+| `project_materials` | `project_id`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | 型号或“待确认”至少一项；`target_price/currency` 保存原始录入，两个标准价格及汇率保存当次快照；含税人民币固定按 13% 增值税口径；编辑/删除使用对象版本，删除带原因并软删除；项目 + 幂等键唯一 |
+| `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；编辑/删除使用对象版本，删除带原因并软删除；物料 + 幂等键唯一 |
 | `project_activities` | `project_id`, `activity_type`, `occurred_at`, `summary`, `details`, `customer_feedback`, `risk`, `decision`, `next_action`, `next_follow_up_at`, `is_meaningful`, `created_by_user_id` | 追加式记录；业务活动不可覆盖 |
 | `project_stage_events` | `project_id`, `from_stage_code`, `to_stage_code`, `reason`, `idempotency_key`, `actor_user_id`, `approved_by_user_id`, `occurred_at` | 项目 + 幂等键唯一；追加式记录 |
 | `project_status_catalog` | `organization_id`, `code`, `display_name`, `sort_order`, `stale_after_days`, `is_active`, `version` | 组织 + 稳定代码唯一；历史引用后不可删除代码 |
+| `project_reminder_policies` | `organization_id`, 本地发送小时、提前/逾期/升级工作日、抄送角色、每日上限、`version` | 首切片为组织级唯一策略；默认停用；业务配置不放环境变量 |
+| `project_reminder_overrides` | `project_id`, 启停、PM/FAE 可空覆盖、`version` | 项目唯一；空值继承组织，版本进入提醒幂等键；修改时取消未发送旧意图 |
+| `notification_outbox` | 模块/事件/对象、幂等键、模板参数、计划/重试/领取/状态字段 | 共享通知事实；幂等键全局唯一；不保存渲染后正文或原始供应商错误 |
+| `notification_deliveries` | 发件箱、用户、投递地址、状态、尝试、安全错误码 | 发件箱 + 用户唯一；停用账号不创建记录 |
+| `notification_worker_heartbeats` | worker 名称、开始/完成时间、处理/失败计数、安全错误码 | 扫描和发送各一个稳定心跳，可供统一后台与告警读取 |
+| `project_import_batches` | 文件名、SHA-256、识别映射、状态、总/有效/错误行数、提交/撤销时间 | 不保存原始文件；组织 + 创建时间索引 |
+| `project_import_rows` | 批次、行号、规范化负载、错误、创建的客户/项目、创建版本、状态 | 批次 + 行号唯一；仅版本未变化的新增项目可撤销 |
+| `project_export_policies` | 允许角色、是否包含价格、最大项目数、最大输出行数、策略版本 | 每组织唯一；默认仅管理员/业务经理；只控制客户项目导出 |
+| `project_saved_views` | 个人/组织命名空间、显示名、规范化名、白名单筛选 JSON、创建人和版本 | 组织 + 命名空间 + 规范化名唯一；不保存查询语句或公开令牌 |
 | `project_tags` / `tag_links` | 标签名、颜色、对象类型/ID | 组织内规范标签名唯一 |
 
 ## 默认字典

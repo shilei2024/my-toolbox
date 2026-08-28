@@ -236,68 +236,15 @@ def create_app() -> Flask:
 
     @app.get("/api/exchange-rate")
     def exchange_rate():
-        """Return exchange rate for any pair, defaults to USD→CNY.
+        """Return the shared exchange rate, defaults to USD→CNY."""
+        from shared.exchange_rates import ExchangeRateError, get_exchange_rate
 
-        Query params:
-            from  — base currency (default USD)
-            to    — target currency (default CNY)
-
-        Uses open.er-api.com (free, no key).  All rates are USD-based;
-        cross pairs are calculated from the cached USD rates object.
-        Cached 10 minutes; stale-while-revalidate on upstream failure.
-        """
         from_cur = (request.args.get("from", "") or "USD").upper().strip()
         to_cur = (request.args.get("to", "") or "CNY").upper().strip()
-        # valid currency codes are 3 letters
-        if len(from_cur) != 3 or len(to_cur) != 3:
-            return jsonify(error="Invalid currency code"), 400
-
-        def _calc(rates: dict, frm: str, to: str):
-            if frm == to:
-                return 1.0
-            if frm not in rates or to not in rates:
-                return None
-            return round(rates[to] / rates[frm], 6)
-
-        cache = getattr(app, "_fx_cache", None)
-        if cache is None:
-            cache = {"rates": {}, "updated": None, "ts": 0}
-            app._fx_cache = cache
-
-        now = time.time()
-        # cache hit
-        if cache["rates"] and (now - cache["ts"]) < 600:
-            rate = _calc(cache["rates"], from_cur, to_cur)
-            if rate is not None:
-                return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
-                               updated=cache["updated"], cached=True)
-
-        import requests  # noqa: PLC0415
-
         try:
-            # open.er-api.com gives full rates vs USD with 6 decimal precision
-            resp = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
-            if resp.status_code >= 400:
-                raise RuntimeError(f"HTTP {resp.status_code}")
-            data = resp.json()
-            if data.get("result") != "success":
-                raise RuntimeError("API returned non-success")
-            cache["rates"] = data["rates"]  # {"USD":1, "CNY":6.7653, ...}
-            cache["updated"] = data.get("time_last_update_utc", "")
-            cache["ts"] = now
-            rate = _calc(cache["rates"], from_cur, to_cur)
-            if rate is None:
-                return jsonify(error=f"不支持币种 {from_cur}/{to_cur}"), 400
-            return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
-                           updated=cache["updated"], cached=False)
-        except Exception as exc:  # noqa: BLE001
-            app.logger.warning("exchange-rate fetch failed: %s", exc)
-            if cache["rates"]:
-                rate = _calc(cache["rates"], from_cur, to_cur)
-                if rate is not None:
-                    return jsonify(rate=rate, from_cur=from_cur, to_cur=to_cur,
-                                   updated=cache["updated"], cached=True, stale=True)
-            return jsonify(error="汇率获取失败，请稍后再试"), 502
+            return jsonify(get_exchange_rate(app, from_cur, to_cur))
+        except ExchangeRateError as exc:
+            return jsonify(error=str(exc)), exc.status_code
 
     @app.get("/")
     def home():
@@ -561,9 +508,16 @@ def _register_context(app: Flask) -> None:
     @app.context_processor
     def inject_globals():  # noqa: ANN202
         from auth.decorators import remaining_for
+        from customer_projects.permissions import module_available
 
         def _remaining_for(tool_id: str) -> int:
             return remaining_for(tool_id)
+
+        try:
+            customer_projects_available = module_available()
+        except Exception:  # noqa: BLE001
+            # A database outage must not break the public homepage.
+            customer_projects_available = False
 
         return {
             "site_name": app.config["SITE_NAME"],
@@ -572,6 +526,7 @@ def _register_context(app: Flask) -> None:
             "is_admin": current_user.is_authenticated and getattr(current_user, "is_admin", False),
             "remaining_for": _remaining_for,
             "now": china_now,
+            "customer_projects_available": customer_projects_available,
         }
 
     @app.after_request

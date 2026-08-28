@@ -6,7 +6,7 @@
   {% include "customer_projects/_module_nav.html" %}
   <div class="cp-page-heading">
     <div><p class="cp-kicker">PROJECT LEDGER</p><h1>项目台账</h1><p>每个项目只有一个主记录，生命周期变化不搬表。</p></div>
-    <a class="btn btn-primary" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a>
+    <div class="d-flex gap-2">{% if can_export %}<a class="btn btn-outline-primary" href="{{ url_for('customer_projects.projects_export', q=q, stage=selected_stage) }}"><i class="bi bi-file-earmark-excel"></i> 导出当前结果</a>{% endif %}<a class="btn btn-primary" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a></div>
   </div>
   <form class="cp-filter-bar" method="get">
     <label class="visually-hidden" for="cp-search">搜索</label>
@@ -14,12 +14,19 @@
     <select class="form-select" name="stage" aria-label="按阶段筛选"><option value="">全部阶段</option>{% for code,label in stages.items() %}<option value="{{ code }}" {% if selected_stage == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
     <button class="btn btn-outline-primary" type="submit">筛选</button>
   </form>
+  <section class="cp-panel p-3 mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+      <div><strong>保存的筛选视图</strong><div class="d-flex flex-wrap gap-2 mt-2"><a class="btn btn-sm {{ 'btn-primary' if not active_view else 'btn-outline-secondary' }}" href="{{ url_for('customer_projects.projects') }}">全部项目</a>{% for view in saved_views %}<a class="btn btn-sm {{ 'btn-primary' if active_view and active_view.id == view.id else 'btn-outline-secondary' }}" href="{{ url_for('customer_projects.projects', view=view.id) }}">{{ '组织 · ' if view.visibility == 'organization' else '我的 · ' }}{{ view.name }}</a>{% endfor %}</div></div>
+      {% if active_view and can_delete_active_view %}<form method="post" action="{{ url_for('customer_projects.project_view_delete', view_id=active_view.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="version" value="{{ active_view.version }}"><button class="btn btn-sm btn-outline-danger">删除当前视图</button></form>{% endif %}
+    </div>
+    <form class="row g-2 align-items-end mt-2" method="post" action="{{ url_for('customer_projects.project_view_create') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="stage" value="{{ selected_stage }}"><div class="col-md"><label class="form-label">将当前筛选保存为</label><input class="form-control" name="name" maxlength="80" required placeholder="例如：本月重点送样项目"></div>{% if can_publish_shared_view %}<div class="col-md-3"><label class="form-label">可见范围</label><select class="form-select" name="visibility"><option value="personal">仅自己</option><option value="organization">组织共享</option></select></div>{% else %}<input type="hidden" name="visibility" value="personal">{% endif %}<div class="col-md-auto"><button class="btn btn-outline-primary">保存视图</button></div></form>
+  </section>
   <section class="cp-panel cp-table-panel">
     {% if projects %}
       <div class="cp-project-list">
         {% for project in projects %}
           <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
-            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
+            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ project.product_name or '产品待补齐' }} · {{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
             <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
             <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
             <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</span>

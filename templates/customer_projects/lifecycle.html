@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}生命周期汇总 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <header class="cp-page-header">
+    <div><p class="cp-kicker">LIFECYCLE REPORT</p><h1>项目生命周期汇总</h1><p>量产、失败与归档项目的当前状态快照。</p></div>
+  </header>
+  <section class="cp-panel cp-form-panel mb-4">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-3"><label class="form-label">客户</label><select class="form-select" name="customer_id"><option value="">全部客户</option>{% for customer in filter_customers %}<option value="{{ customer.id }}" {% if report.metadata.filters.customer_id == customer.id %}selected{% endif %}>{{ customer.name }}</option>{% endfor %}</select></div>
+      <div class="col-md-3"><label class="form-label">主业务</label><select class="form-select" name="owner_user_id"><option value="">全部负责人</option>{% for owner in filter_owners %}<option value="{{ owner.id }}" {% if report.metadata.filters.owner_user_id == owner.id|string %}selected{% endif %}>{{ owner.display_name }}</option>{% endfor %}</select></div>
+      <div class="col-md-3"><label class="form-label">当前状态</label><select class="form-select" name="stage"><option value="">全部终态</option>{% for code in report_stages %}<option value="{{ code }}" {% if report.metadata.filters.stage == code %}selected{% endif %}>{{ stages.get(code, code) }}</option>{% endfor %}</select></div>
+      <div class="col-md-3"><label class="form-label">物料品类</label><select class="form-select" name="category"><option value="">全部品类</option>{% for category in filter_categories %}<option value="{{ category }}" {% if report.metadata.filters.category == category %}selected{% endif %}>{{ category }}</option>{% endfor %}</select></div>
+      <div class="col-md-3"><label class="form-label">推广品牌</label><input class="form-control" name="material_brand" value="{{ report.metadata.filters.material_brand or '' }}" maxlength="120"></div>
+      <div class="col-md-3"><label class="form-label">竞品品牌</label><input class="form-control" name="competitor_brand" value="{{ report.metadata.filters.competitor_brand or '' }}" maxlength="120"></div>
+      <div class="col-md-3"><label class="form-label">竞品渠道</label><input class="form-control" name="distributor" value="{{ report.metadata.filters.distributor or '' }}" maxlength="160"></div>
+      <div class="col-6 col-md-2"><label class="form-label">年份</label><input class="form-control" type="number" name="year" min="2000" max="2100" value="{{ report.metadata.filters.year or '' }}"></div>
+      <div class="col-6 col-md-2"><label class="form-label">月份</label><select class="form-select" name="month"><option value="">全年</option>{% for month in range(1, 13) %}<option value="{{ month }}" {% if report.metadata.filters.month == month|string %}selected{% endif %}>{{ month }} 月</option>{% endfor %}</select></div>
+      <div class="col-md-3"><label class="form-label">开始日期（更新时间）</label><input class="form-control" type="date" name="date_from" value="{{ report.metadata.filters.date_from or '' }}"></div>
+      <div class="col-md-3"><label class="form-label">结束日期（更新时间）</label><input class="form-control" type="date" name="date_to" value="{{ report.metadata.filters.date_to or '' }}"></div>
+      <div class="col-md-2"><button class="btn btn-primary w-100">应用筛选</button></div>
+    </form>
+  </section>
+  <div class="cp-summary-grid mb-4">
+    <article><small>终态项目</small><strong>{{ report.summary.total }}</strong></article>
+    {% for code in report_stages %}<article><small>{{ stages.get(code, code) }}</small><strong>{{ report.summary.by_stage.get(code, 0) }}</strong></article>{% endfor %}
+  </div>
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6"><section class="cp-panel h-100"><div class="cp-panel-heading"><div><h2>失败原因</h2><p>按当前为失败状态的项目统计。</p></div></div>{% for label,count in report.summary.lost_by_reason.items() %}<div class="d-flex justify-content-between border-bottom py-2"><span>{{ label }}</span><strong>{{ count }}</strong></div>{% else %}<p class="text-muted">当前筛选没有失败项目。</p>{% endfor %}</section></div>
+    <div class="col-lg-6"><section class="cp-panel h-100"><div class="cp-panel-heading"><div><h2>量产客户</h2><p>按客户汇总当前量产项目。</p></div></div>{% for label,count in report.summary.mass_production_by_customer.items() %}<div class="d-flex justify-content-between border-bottom py-2"><span>{{ label }}</span><strong>{{ count }}</strong></div>{% else %}<p class="text-muted">当前筛选没有量产项目。</p>{% endfor %}</section></div>
+  </div>
+  <section class="cp-panel">
+    <div class="cp-panel-heading"><div><h2>项目明细</h2><p>{{ report.metadata.definition }}</p></div><small>生成于 {{ report.metadata.generated_at|china_time('%Y-%m-%d %H:%M') }}</small></div>
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>项目</th><th>客户</th><th>产品</th><th>状态</th><th>失败原因</th><th>更新时间</th></tr></thead><tbody>{% for item in report.projects %}<tr><td><a href="{{ url_for('customer_projects.project_detail', project_id=item.id) }}">{{ item.project_code }} · {{ item.name }}</a></td><td>{{ item.customer_name }}</td><td>{{ item.product_name or '未记录' }}</td><td>{{ stages.get(item.stage_code, item.stage_code) }}</td><td>{{ item.close_reason_code or '—' }}</td><td>{{ item.updated_at|china_time('%Y-%m-%d %H:%M') }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">当前筛选没有生命周期记录。</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+</section>
+{% endblock %}

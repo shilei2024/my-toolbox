@@ -10,6 +10,7 @@ customer_projects_bp = Blueprint(
     __name__,
     url_prefix="/customer-projects",
     template_folder="../templates",
+    cli_group="customer-projects",
 )
 customer_projects_api_bp = Blueprint(
     "customer_projects_api",
@@ -56,3 +57,26 @@ def bootstrap_command(admin_email: str, name: str | None) -> None:
         name or current_app.config["CUSTOMER_PROJECTS_DEFAULT_ORG_NAME"], user.id
     )
     click.echo(f"customer projects organization ready: {org.id}")
+
+
+@customer_projects_bp.cli.command("scan-reminders")
+@click.option("--organization-id", default=None, help="Optional organization UUID.")
+@click.option("--force", is_flag=True, help="Allow a controlled local/staging scan while the global switch is off.")
+def scan_reminders_command(organization_id: str | None, force: bool) -> None:
+    """Scan due/stale projects and create idempotent notification intents."""
+    if not current_app.config.get("CUSTOMER_PROJECT_REMINDERS_ENABLED", False) and not force:
+        raise click.ClickException("CUSTOMER_PROJECT_REMINDERS_ENABLED=false; scan not started")
+    from .services.reminders import scan_project_reminders
+
+    result = scan_project_reminders(organization_id=organization_id)
+    click.echo(f"scanned={result['scanned']} created={result['created']} limited={result['limited']}")
+
+
+@customer_projects_bp.cli.command("dispatch-notifications")
+@click.option("--limit", default=100, type=click.IntRange(1, 500))
+def dispatch_notifications_command(limit: int) -> None:
+    """Claim due outbox rows and deliver through dry-run or configured SMTP."""
+    from shared.notifications import dispatch_due_notifications
+
+    result = dispatch_due_notifications(limit=limit)
+    click.echo(f"claimed={result['claimed']} sent={result['sent']} failed={result['failed']}")
