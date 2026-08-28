@@ -18,6 +18,8 @@ from customer_projects.models import (
     CustomerProject,
     MaterialCompetitor,
     ProjectActivity,
+    ProjectComment,
+    ProjectCommentMention,
     ProjectMaterial,
     ProjectMember,
     ProjectStageEvent,
@@ -127,6 +129,45 @@ def parse_nonnegative_decimal(value: Any, field: str, label: str) -> Decimal | N
             "VALIDATION_ERROR", f"{label}不能为负数。", field_errors={field: "不能为负数"}
         )
     return parsed
+
+
+def parse_nonnegative_integer(value: Any, field: str, label: str) -> Decimal | None:
+    parsed = parse_nonnegative_decimal(value, field, label)
+    if parsed is None:
+        return None
+    if parsed != parsed.to_integral_value():
+        raise DomainError(
+            "VALIDATION_ERROR",
+            f"{label}必须是整数。",
+            field_errors={field: "请输入整数"},
+        )
+    return parsed.to_integral_value()
+
+
+def parse_price(value: Any, field: str, label: str) -> Decimal | None:
+    parsed = parse_nonnegative_decimal(value, field, label)
+    if parsed is None:
+        return None
+    normalized = parsed.normalize() if parsed else Decimal("0")
+    decimal_places = max(0, -normalized.as_tuple().exponent)
+    if decimal_places > 5:
+        raise DomainError(
+            "VALIDATION_ERROR",
+            f"{label}最多保留 5 位小数。",
+            field_errors={field: "最多输入 5 位小数"},
+        )
+    return parsed.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+
+
+def decimal_display(value: Decimal | None, max_places: int | None = None) -> str | None:
+    if value is None:
+        return None
+    displayed = value
+    if max_places is not None:
+        displayed = displayed.quantize(
+            Decimal(1).scaleb(-max_places), rounding=ROUND_HALF_UP
+        )
+    return format(displayed, "f").rstrip("0").rstrip(".") or "0"
 
 
 def parse_positive_integer(value: Any, field: str, label: str) -> Decimal | None:
@@ -642,6 +683,99 @@ def add_activity(project: CustomerProject, data: dict[str, Any], membership: Org
     return activity
 
 
+def add_comment(
+    project: CustomerProject,
+    data: dict[str, Any],
+    membership: OrganizationMembership,
+    idempotency_key: str,
+) -> ProjectComment:
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
+    body = str(data.get("body") or "").strip()
+    if not body:
+        raise DomainError(
+            "VALIDATION_ERROR", "留言内容必填。", field_errors={"body": "请输入留言内容"}
+        )
+    if len(body) > 4000:
+        raise DomainError(
+            "VALIDATION_ERROR", "留言不能超过 4000 个字符。", field_errors={"body": "最多 4000 个字符"}
+        )
+    raw_mentions = data.get("mention_user_ids") or []
+    if isinstance(raw_mentions, (str, int)):
+        raw_mentions = [raw_mentions]
+    try:
+        mention_ids = {int(value) for value in raw_mentions if str(value).strip()}
+    except (TypeError, ValueError) as exc:
+        raise DomainError(
+            "VALIDATION_ERROR", "@成员格式不正确。", field_errors={"mention_user_ids": "请选择有效成员"}
+        ) from exc
+    mention_ids.discard(membership.user_id)
+    if len(mention_ids) > 10:
+        raise DomainError(
+            "VALIDATION_ERROR", "每条留言最多 @ 10 人。", field_errors={"mention_user_ids": "最多选择 10 人"}
+        )
+    if mention_ids:
+        valid_ids = set(
+            db.session.scalars(
+                select(OrganizationMembership.user_id).where(
+                    OrganizationMembership.organization_id == membership.organization_id,
+                    OrganizationMembership.status == "active",
+                    OrganizationMembership.user_id.in_(mention_ids),
+                )
+            )
+        )
+        if valid_ids != mention_ids:
+            raise DomainError(
+                "VALIDATION_ERROR",
+                "只能 @ 当前组织的有效成员。",
+                field_errors={"mention_user_ids": "包含无效成员"},
+            )
+    existing = db.session.scalar(
+        select(ProjectComment).where(
+            ProjectComment.organization_id == membership.organization_id,
+            ProjectComment.project_id == project.id,
+            ProjectComment.idempotency_key == idempotency_key,
+        )
+    )
+    if existing:
+        existing_mentions = set(
+            db.session.scalars(
+                select(ProjectCommentMention.user_id).where(
+                    ProjectCommentMention.comment_id == existing.id
+                )
+            )
+        )
+        if existing.body != body or existing_mentions != mention_ids:
+            raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的留言请求。")
+        return existing
+    comment = ProjectComment(
+        organization_id=membership.organization_id,
+        project_id=project.id,
+        body=body,
+        idempotency_key=idempotency_key,
+        created_by_user_id=membership.user_id,
+    )
+    db.session.add(comment)
+    db.session.flush()
+    db.session.add_all(
+        ProjectCommentMention(
+            organization_id=membership.organization_id,
+            comment_id=comment.id,
+            user_id=user_id,
+        )
+        for user_id in sorted(mention_ids)
+    )
+    add_audit(
+        project.organization_id,
+        "project",
+        project.id,
+        "comment_added",
+        membership.user_id,
+        {"comment_id": comment.id, "mention_count": len(mention_ids), "body_length": len(body)},
+    )
+    return comment
+
+
 def transition_stage(project: CustomerProject, data: dict[str, Any], membership: OrganizationMembership, idempotency_key: str) -> ProjectStageEvent:
     if not idempotency_key or len(idempotency_key) > 128:
         raise DomainError("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的幂等键。")
@@ -1038,7 +1172,7 @@ def add_material(
     pending = bool(data.get("mpn_pending"))
     if not brand or (not mpn and not pending):
         raise DomainError("VALIDATION_ERROR", "推广品牌必填；推广型号或“型号待确认”至少填写一项。")
-    machine_quantity = parse_nonnegative_decimal(
+    machine_quantity = parse_nonnegative_integer(
         data.get("machine_quantity"), "machine_quantity", "单机数量"
     )
     material = ProjectMaterial(
@@ -1073,7 +1207,7 @@ def apply_material_price(
     allowed_roles = {"organization_admin", "business_manager", "sales", "pm"}
     if not membership.roles.intersection(allowed_roles):
         raise DomainError("PRICE_EDIT_FORBIDDEN", "只有业务和 PM 可以编辑单价。")
-    amount = parse_nonnegative_decimal(data.get("unit_price"), "unit_price", "单价")
+    amount = parse_price(data.get("unit_price"), "unit_price", "单价")
     if amount in (None, Decimal("0")):
         raise DomainError(
             "VALIDATION_ERROR", "单价必须大于 0。", field_errors={"unit_price": "必须大于 0"}
@@ -1090,7 +1224,7 @@ def apply_material_price(
     except ExchangeRateError as exc:
         raise DomainError("EXCHANGE_RATE_UNAVAILABLE", "汇率暂不可用，单价未保存，请稍后重试。") from exc
     tax_multiplier = Decimal("1.13")
-    precision = Decimal("0.000001")
+    precision = Decimal("0.00001")
     if currency == "USD":
         usd_price = amount
         cny_tax_price = amount * fx_rate * tax_multiplier
@@ -1204,7 +1338,7 @@ def update_material_commercial(
             values["expected_mass_production_at"] or ""
         )
     if "machine_quantity" in data:
-        values["machine_quantity"] = parse_nonnegative_decimal(
+        values["machine_quantity"] = parse_nonnegative_integer(
             data.get("machine_quantity"), "machine_quantity", "单机数量"
         )
         safe_diff["machine_quantity"] = str(values["machine_quantity"] or "")
@@ -1417,7 +1551,7 @@ def update_competitor(
             values[field] = str(data.get(field) or "").strip()[:limit] or None
             safe_diff[field] = "已变更"
     if "quoted_price" in data:
-        values["quoted_price"] = parse_nonnegative_decimal(
+        values["quoted_price"] = parse_price(
             data.get("quoted_price"), "quoted_price", "竞品报价"
         )
         safe_diff["quoted_price"] = str(values["quoted_price"] or "")

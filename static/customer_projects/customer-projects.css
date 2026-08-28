@@ -115,10 +115,17 @@ details summary { cursor: pointer; color: var(--cp-blue); font-size: 12px; font-
 .cp-timeline article:last-child::before { display: none; }
 .cp-timeline article > span { width: 13px; height: 13px; margin-top: 7px; z-index: 1; border: 3px solid #fff; border-radius: 50%; background: var(--cp-mint); box-shadow: 0 0 0 1px var(--cp-mint); }
 .cp-timeline article.is-stage > span { background: var(--cp-blue); box-shadow: 0 0 0 1px var(--cp-blue); }
+.cp-timeline article.is-comment > span { background: #8b5cf6; box-shadow: 0 0 0 1px #8b5cf6; }
 .cp-timeline article > div { display: grid; align-content: start; gap: 4px; }
 .cp-timeline small { color: var(--ink-muted); font-size: 13px; line-height: 1.45; }
 .cp-timeline p { margin: 0; color: var(--ink-muted); font-size: 13px; line-height: 1.6; }
 .cp-timeline em { color: #174a86; font-size: 13px; font-style: normal; }
+.cp-comment-form { margin: 0 0 22px; padding: 16px; display: grid; gap: 9px; border: 1px solid #d9d2f8; border-radius: 14px; background: #faf9ff; }
+.cp-comment-form label { margin: 0; color: var(--ink-muted); font-size: 13px; }
+.cp-comment-form button { width: fit-content; justify-self: end; }
+.cp-comment-body { white-space: pre-wrap; color: var(--ink) !important; font-size: 14px !important; }
+.cp-mentions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp-mentions span { padding: 3px 8px; border-radius: 999px; color: #6342ad; background: #f0eaff; font-size: 12px; font-weight: 700; }
 
 @media (max-width: 1099px) {
   .cp-project-row { grid-template-columns: minmax(180px, 1.4fr) auto minmax(150px, 1fr) minmax(110px, .7fr); }

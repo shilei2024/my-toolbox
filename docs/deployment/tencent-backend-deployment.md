@@ -101,7 +101,7 @@ flask db upgrade
 flask db current
 ```
 
-升级前 `current` 预期为 `f7a8b9c0d1e2`；`heads` 和升级后的 `current` 都应显示 revision `a8b9c0d1e2f3` 且退出码为 `0`。本次迁移只为 `project_materials` 新增 `opportunity_type`、分类检查约束和 `(project_id, opportunity_type)` 索引；完整迁移链还包含组织工作日日历、导入批次、受控导出策略和保存视图表。生产事故处理中仍不得执行 downgrade。然后确认环境文件中：
+升级前 `current` 预期为 `a8b9c0d1e2f3`；`heads` 和升级后的 `current` 都应显示 revision `b9c0d1e2f3a4` 且退出码为 `0`。本次迁移只新增项目评论与提及表；完整迁移链还包含组织工作日日历、导入批次、受控导出策略、保存视图和物料机会分类。生产事故处理中仍不得执行 downgrade。然后确认环境文件中：
 
 ```dotenv
 CUSTOMER_PROJECTS_ENABLED=false
@@ -119,7 +119,8 @@ AUTO_CREATE_SCHEMA=false
 4. 受控导出默认仅管理员/业务经理，超限被拒绝，审计文件 SHA-256 与下载文件一致。
 5. 个人保存视图跨用户返回 404；组织共享视图只有组织管理员能发布或删除。
 6. 验证项目年用量只接受正整数；三类物料分组、型号/竞品编辑弹窗及 TAM/SAM/SOM 计算口径正确。
-7. 观察数据库、应用内存、5xx、403/404、409 和审计事件，完成备份恢复演练。
+7. 验证单机数量为整数 PCS、价格最多 5 位并去尾零；项目名编辑弹窗、留言和同组织 @ 正常且留言不改变项目版本。
+8. 观察数据库、应用内存、5xx、403/404、409 和审计事件，完成备份恢复演练。
 
 全部通过后，审批人再写入少量 `CUSTOMER_PROJECTS_PILOT_EMAILS`，开启 `CUSTOMER_PROJECTS_ENABLED=true` 并滚动重启。回滚时先关闭客户项目、提醒和通知开关，再恢复上一稳定镜像 digest；保留新增表、导入批次、策略、视图和业务记录，不执行 `flask db downgrade`。完整分阶段手册见本目录的 customer-project-tracking Phase 1–4 文档。
 

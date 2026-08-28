@@ -467,6 +467,36 @@ class ProjectActivity(db.Model):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class ProjectComment(db.Model):
+    __tablename__ = "project_comments"
+    __table_args__ = (
+        UniqueConstraint("project_id", "idempotency_key", name="uq_project_comment_idempotency"),
+        Index("ix_project_comment_project_time", "project_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(db.ForeignKey("organizations.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(db.ForeignKey("customer_projects.id", ondelete="CASCADE"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ProjectCommentMention(db.Model):
+    __tablename__ = "project_comment_mentions"
+    __table_args__ = (
+        UniqueConstraint("comment_id", "user_id", name="uq_project_comment_mention_user"),
+        Index("ix_project_comment_mention_user", "organization_id", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    organization_id: Mapped[str] = mapped_column(db.ForeignKey("organizations.id"), nullable=False, index=True)
+    comment_id: Mapped[str] = mapped_column(db.ForeignKey("project_comments.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class ProjectStageEvent(db.Model):
     __tablename__ = "project_stage_events"
     __table_args__ = (

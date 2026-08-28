@@ -24,6 +24,8 @@ from .models import (
     CustomerProject,
     MaterialCompetitor,
     ProjectActivity,
+    ProjectComment,
+    ProjectCommentMention,
     ProjectMaterial,
     ProjectMember,
     ProjectImportBatch,
@@ -51,12 +53,14 @@ from .services.projects import (
     MATERIAL_OPPORTUNITY_TYPES,
     VersionConflict,
     add_activity,
+    add_comment,
     add_audit,
     add_competitor,
     add_contact,
     add_material,
     add_project_member,
     build_market_scope,
+    decimal_display,
     create_customer,
     create_project,
     derive_project,
@@ -544,12 +548,32 @@ def project_detail(project_id: str):
         competitors_by_material.setdefault(competitor.project_material_id, []).append(competitor)
     activities = list(db.session.scalars(select(ProjectActivity).where(ProjectActivity.project_id == project.id).order_by(ProjectActivity.occurred_at.desc()).limit(100)))
     stage_events = list(db.session.scalars(select(ProjectStageEvent).where(ProjectStageEvent.project_id == project.id).order_by(ProjectStageEvent.occurred_at.desc()).limit(100)))
+    comments = list(db.session.scalars(select(ProjectComment).where(ProjectComment.project_id == project.id).order_by(ProjectComment.created_at.desc()).limit(100)))
+    comment_ids = [comment.id for comment in comments]
+    comment_authors = {
+        user.id: user
+        for user in db.session.scalars(
+            select(User).where(User.id.in_({comment.created_by_user_id for comment in comments}))
+        )
+    } if comments else {}
+    comment_mentions: dict[str, list[User]] = {comment_id: [] for comment_id in comment_ids}
+    if comment_ids:
+        for mention, user in db.session.execute(
+            select(ProjectCommentMention, User)
+            .join(User, User.id == ProjectCommentMention.user_id)
+            .where(ProjectCommentMention.comment_id.in_(comment_ids))
+            .order_by(User.nickname, User.email)
+        ):
+            comment_mentions.setdefault(mention.comment_id, []).append(user)
     timeline = [
         {"kind": "activity", "occurred_at": item.occurred_at, "item": item}
         for item in activities
     ] + [
         {"kind": "stage", "occurred_at": item.occurred_at, "item": item}
         for item in stage_events
+    ] + [
+        {"kind": "comment", "occurred_at": item.created_at, "item": item}
+        for item in comments
     ]
     timeline.sort(key=lambda row: _aware(row["occurred_at"]), reverse=True)
     audits = []
@@ -561,6 +585,18 @@ def project_detail(project_id: str):
             .join(User, User.id == ProjectMember.user_id)
             .where(ProjectMember.project_id == project.id, ProjectMember.left_at.is_(None))
             .order_by(ProjectMember.role_code, User.email)
+        )
+    )
+    mention_members = list(
+        db.session.execute(
+            select(User, OrganizationMembership)
+            .join(OrganizationMembership, OrganizationMembership.user_id == User.id)
+            .where(
+                OrganizationMembership.organization_id == membership.organization_id,
+                OrganizationMembership.status == "active",
+                User.is_active_user.is_(True),
+            )
+            .order_by(User.nickname, User.email)
         )
     )
     organization_members = []
@@ -578,18 +614,7 @@ def project_detail(project_id: str):
             value = {}
         member_email_preferences[item.id] = not isinstance(value, dict) or value.get("email_enabled", True) is not False
     if membership.roles.intersection(ADMIN_ROLES):
-        organization_members = list(
-            db.session.execute(
-                select(User, OrganizationMembership)
-                .join(OrganizationMembership, OrganizationMembership.user_id == User.id)
-                .where(
-                    OrganizationMembership.organization_id == membership.organization_id,
-                    OrganizationMembership.status == "active",
-                    User.is_active_user.is_(True),
-                )
-                .order_by(User.email)
-            )
-        )
+        organization_members = mention_members
     return render_template(
         "customer_projects/project_detail.html",
         project=project,
@@ -603,6 +628,9 @@ def project_detail(project_id: str):
         activities=activities,
         stage_events=stage_events,
         timeline=timeline,
+        comment_authors=comment_authors,
+        comment_mentions=comment_mentions,
+        mention_members=mention_members,
         audits=audits,
         project_members=project_members,
         member_email_preferences=member_email_preferences,
@@ -613,6 +641,7 @@ def project_detail(project_id: str):
         can_edit_price=can_edit_prices(membership),
         reminder_override=reminder_override,
         form_key=str(uuid.uuid4()),
+        decimal_display=decimal_display,
     )
 
 
@@ -924,6 +953,30 @@ def project_add_activity(project_id: str):
         flash("跟进记录已保存，下一步已同步更新。", "success")
         return redirect(url_for("customer_projects.project_detail", project_id=project.id))
     except DomainError as exc:
+        return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
+
+
+@customer_projects_bp.post("/projects/<string:project_id>/comments")
+@login_required
+@module_required
+def project_add_comment(project_id: str):
+    membership = _membership()
+    require_write(membership)
+    project = _project_or_404(project_id, membership)
+    data = request.form.to_dict()
+    data["mention_user_ids"] = request.form.getlist("mention_user_ids")
+    try:
+        add_comment(
+            project,
+            data,
+            membership,
+            request.form.get("idempotency_key", ""),
+        )
+        db.session.commit()
+        flash("留言已发表。", "success")
+        return redirect(url_for("customer_projects.project_detail", project_id=project.id))
+    except DomainError as exc:
+        db.session.rollback()
         return _handle_domain_error(exc, "customer_projects.project_detail", project_id=project.id)
 
 

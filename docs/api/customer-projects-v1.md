@@ -85,6 +85,8 @@ If-Match: "7"
 
 `opportunity_type` 仅支持 `design_in`（设计中物料）、`matched_opportunity`（已匹配料号机会）和 `competitive_opportunity`（竞品替代机会）。物料响应增加 `annual_value_usd`，按项目年用量 × 单机数量 × `unit_price_usd` 计算；缺少任一因子时返回 `null`。项目页面的 TAM 为三类总和，SAM 为设计中与已匹配机会总和，SOM 为设计中物料总和，均为实时派生值而非持久化字段。
 
+`machine_quantity` 为空或非负整数，单位固定为 PCS。`unit_price` 与竞争方案 `quoted_price` 最多接受 5 位有效小数；多余末尾 0 不计入位数。API 的数量返回整数字符串，价格返回最多 5 位且不带末尾 0 的字符串。
+
 `currency` 仅支持 `USD` 或 `CNY`。USD 输入视为未税美元，服务端按主站 USD/CNY 汇率乘以 `1.13` 得到含税人民币；CNY 输入视为已含 13% 增值税，再反算未税美元。响应同时返回 `unit_price_usd`、`unit_price_cny_tax_included`、`fx_rate_usd_cny` 和原始录入币别。服务端保存折算快照，后续汇率变化不会修改历史单价。
 
 价格写入只允许组织管理员、业务经理、`sales` 和 `pm`；FAE 可以更新 `machine_quantity`，也可以查看折算结果，但提交 `unit_price` 返回 403。汇率服务不可用且无缓存时，价格不保存并返回 422；客户端预览只用于展示，最终结果以服务端计算为准。
@@ -109,6 +111,19 @@ If-Match: "7"
 ```
 
 该请求在一个事务中追加活动、更新项目快照、递增项目版本、写审计并取消尚未发送的旧提醒意图。
+
+## 时间线留言与 @
+
+`POST /projects/{project_id}/comments` 需要写权限和 `Idempotency-Key`：
+
+```json
+{
+  "body": "请协助确认客户测试结论。",
+  "mention_user_ids": [42, 57]
+}
+```
+
+正文必填且最多 4000 字；每条最多提及 10 名当前组织有效成员。留言是独立追加记录，不递增项目版本、不修改下一步或跟进时间，也不自动发送通知。响应返回评论 ID、作者、提及成员 ID 和创建时间；同键同内容重试返回原记录，同键不同内容返回 409。
 
 ## 统一错误
 

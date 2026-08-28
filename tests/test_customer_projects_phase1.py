@@ -26,6 +26,8 @@ from customer_projects.models import (  # noqa: E402
     ProjectExportPolicy,
     ProjectSavedView,
     ProjectActivity,
+    ProjectComment,
+    ProjectCommentMention,
     ProjectMaterial,
     ProjectMember,
     ProjectStageEvent,
@@ -190,6 +192,58 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.assertEqual(project.version, 2)
             self.assertEqual(project.next_action, "安排寄送")
 
+    def test_timeline_comment_mentions_member_without_changing_project_version(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        payload = {
+            "body": "请协助确认客户测试结论。",
+            "mention_user_ids": [self.other_id, self.fae_id],
+        }
+        first = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/comments",
+            json=payload,
+            headers={"Idempotency-Key": "comment-one"},
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.get_json()["data"]["mention_user_ids"], [self.other_id, self.fae_id])
+        retry = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/comments",
+            json=payload,
+            headers={"Idempotency-Key": "comment-one"},
+        )
+        self.assertEqual(retry.status_code, 201)
+        with app.app_context():
+            self.assertEqual(db.session.query(ProjectComment).count(), 1)
+            self.assertEqual(db.session.query(ProjectCommentMention).count(), 2)
+            self.assertEqual(db.session.get(CustomerProject, project_id).version, 1)
+        page = self.client.get(f"/customer-projects/projects/{project_id}")
+        html = page.get_data(as_text=True)
+        self.assertIn("请协助确认客户测试结论。", html)
+        self.assertIn("@other@test.com", html)
+        self.assertIn("发表留言", html)
+
+    def test_comment_rejects_member_from_another_organization(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            outsider_id = self._add_user("outsider@test.com")
+            other_org = Organization(name="其他组织")
+            db.session.add(other_org)
+            db.session.flush()
+            outsider_membership = OrganizationMembership(
+                organization_id=other_org.id, user_id=outsider_id
+            )
+            outsider_membership.set_roles(["sales"])
+            db.session.add(outsider_membership)
+            db.session.commit()
+        self._login()
+        response = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/comments",
+            json={"body": "不应跨组织提及", "mention_user_ids": [outsider_id]},
+            headers={"Idempotency-Key": "invalid-comment-mention"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.get_json()["error"]["code"], "VALIDATION_ERROR")
+
     def test_non_member_project_is_not_disclosed(self) -> None:
         project_id = self._seed_project()
         self._login("other@test.com")
@@ -267,7 +321,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(updated_material.status_code, 200)
         material_payload = updated_material.get_json()["data"]
         self.assertEqual(material_payload["promoted_brand"], "Mavis Semi")
-        self.assertEqual(material_payload["machine_quantity"], "4.0000")
+        self.assertEqual(material_payload["machine_quantity"], "4")
         self.assertTrue(material_payload["is_primary"])
         self.assertEqual(material_payload["version"], 2)
 
@@ -306,7 +360,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(updated_competitor.status_code, 200)
         competitor_payload = updated_competitor.get_json()["data"]
         self.assertEqual(competitor_payload["mpn"], "ALT-200")
-        self.assertEqual(competitor_payload["quoted_price"], "0.850000")
+        self.assertEqual(competitor_payload["quoted_price"], "0.85")
         self.assertEqual(competitor_payload["version"], 2)
         detail_before_delete = self.client.get(
             f"/customer-projects/projects/{project_id}"
@@ -427,8 +481,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(priced.status_code, 201)
         payload = priced.get_json()["data"]
-        self.assertEqual(payload["unit_price_usd"], "1.000000")
-        self.assertEqual(payload["unit_price_cny_tax_included"], "8.136000")
+        self.assertEqual(payload["unit_price_usd"], "1")
+        self.assertEqual(payload["unit_price_cny_tax_included"], "8.136")
         material_id = payload["id"]
         cny_priced = self.client.patch(
             f"/api/v1/customer-projects/materials/{material_id}",
@@ -437,8 +491,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(cny_priced.status_code, 200)
         cny_payload = cny_priced.get_json()["data"]
-        self.assertEqual(cny_payload["unit_price_usd"], "1.000000")
-        self.assertEqual(cny_payload["unit_price_cny_tax_included"], "8.136000")
+        self.assertEqual(cny_payload["unit_price_usd"], "1")
+        self.assertEqual(cny_payload["unit_price_cny_tax_included"], "8.136")
         self.assertEqual(cny_payload["version"], 2)
         self.client.post("/logout")
         self._login("manager@test.com")
@@ -489,13 +543,65 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             headers={"If-Match": '"2"'},
         )
         self.assertEqual(quantity_only.status_code, 200)
-        self.assertEqual(quantity_only.get_json()["data"]["machine_quantity"], "3.0000")
+        self.assertEqual(quantity_only.get_json()["data"]["machine_quantity"], "3")
         denied = self.client.patch(
             f"/api/v1/customer-projects/materials/{material_id}",
             json={"machine_quantity": "3", "unit_price": "2", "currency": "USD"},
             headers={"If-Match": '"3"'},
         )
         self.assertEqual(denied.status_code, 403)
+
+    def test_material_quantity_is_integer_and_price_has_at_most_five_decimals(self) -> None:
+        project_id = self._seed_project()
+        app._fx_cache = {
+            "rates": {"USD": 1.0, "CNY": 7.2},
+            "updated": "test-rate",
+            "ts": time.time(),
+        }
+        self._login()
+        fractional_quantity = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "INTEGER-ONLY",
+                "machine_quantity": "1.5",
+            },
+            headers={"Idempotency-Key": "fractional-machine-quantity"},
+        )
+        self.assertEqual(fractional_quantity.status_code, 422)
+        self.assertEqual(
+            fractional_quantity.get_json()["error"]["field_errors"]["machine_quantity"],
+            "请输入整数",
+        )
+        excessive_price = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "PRICE-LIMIT",
+                "machine_quantity": "2",
+                "unit_price": "1.123456",
+                "currency": "USD",
+            },
+            headers={"Idempotency-Key": "excessive-price"},
+        )
+        self.assertEqual(excessive_price.status_code, 422)
+        self.assertEqual(
+            excessive_price.get_json()["error"]["field_errors"]["unit_price"],
+            "最多输入 5 位小数",
+        )
+        trailing_zero_price = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "PRICE-TRIM",
+                "machine_quantity": "2",
+                "unit_price": "1.230000",
+                "currency": "USD",
+            },
+            headers={"Idempotency-Key": "trimmed-price"},
+        )
+        self.assertEqual(trailing_zero_price.status_code, 201)
+        self.assertEqual(trailing_zero_price.get_json()["data"]["unit_price_usd"], "1.23")
 
     def test_controlled_export_policy_scopes_roles_prices_and_formula_text(self) -> None:
         project_id = self._seed_project()
@@ -725,6 +831,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertIn("新增跟进", html)
         self.assertIn("尚未添加推广物料", html)
         self.assertIn("编辑项目基础信息", html)
+        self.assertIn("data-project-title", html)
+        self.assertIn("data-project-edit", html)
         self.assertNotIn("cp-form-panel cp-sticky", html)
 
     def test_local_day_bounds_use_organization_timezone(self) -> None:

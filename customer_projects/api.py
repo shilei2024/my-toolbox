@@ -9,12 +9,13 @@ from sqlalchemy import select
 from extensions import db
 
 from . import customer_projects_api_bp
-from .models import Customer, CustomerProject, MaterialCompetitor, ProjectActivity, ProjectMaterial
+from .models import Customer, CustomerProject, MaterialCompetitor, ProjectActivity, ProjectComment, ProjectCommentMention, ProjectMaterial
 from .permissions import apply_project_scope, can_view_project, current_membership, module_required, require_manager, require_price_edit, require_write
 from .services.projects import (
     DomainError,
     VersionConflict,
     add_activity,
+    add_comment,
     add_competitor,
     add_material,
     create_project,
@@ -29,6 +30,7 @@ from .services.projects import (
     update_project,
     update_material_commercial,
     material_annual_value_usd,
+    decimal_display,
 )
 from .services.reports import build_lifecycle_report
 
@@ -106,16 +108,16 @@ def material_json(
         "mpn_pending": material.mpn_pending,
         "customer_part_number": material.customer_part_number,
         "application_position": material.application_position,
-        "machine_quantity": str(material.machine_quantity) if material.machine_quantity is not None else None,
+        "machine_quantity": _integer_string(material.machine_quantity),
         "technical_status": material.technical_status,
         "commercial_status": material.commercial_status,
         "expected_mass_production_at": _serialize_value(material.expected_mass_production_at),
         "is_primary": material.is_primary,
         "notes": material.notes,
         "currency": material.currency,
-        "unit_price_usd": str(material.unit_price_usd) if material.unit_price_usd is not None else None,
-        "unit_price_cny_tax_included": str(material.unit_price_cny_tax_included) if material.unit_price_cny_tax_included is not None else None,
-        "fx_rate_usd_cny": str(material.fx_rate_usd_cny) if material.fx_rate_usd_cny is not None else None,
+        "unit_price_usd": decimal_display(material.unit_price_usd, 5),
+        "unit_price_cny_tax_included": decimal_display(material.unit_price_cny_tax_included, 5),
+        "fx_rate_usd_cny": decimal_display(material.fx_rate_usd_cny, 6),
         "annual_value_usd": str(annual_value) if annual_value is not None else None,
         "version": material.version,
     }
@@ -130,13 +132,31 @@ def competitor_json(competitor: MaterialCompetitor) -> dict:
         "model_pending": competitor.model_pending,
         "distributor": competitor.distributor,
         "incumbent_status": competitor.incumbent_status,
-        "quoted_price": str(competitor.quoted_price) if competitor.quoted_price is not None else None,
+        "quoted_price": decimal_display(competitor.quoted_price, 5),
         "strengths": competitor.strengths,
         "weaknesses": competitor.weaknesses,
         "confidence_level": competitor.confidence_level,
         "observed_at": _serialize_value(competitor.observed_at),
         "notes": competitor.notes,
         "version": competitor.version,
+    }
+
+
+def comment_json(comment: ProjectComment) -> dict:
+    mention_user_ids = list(
+        db.session.scalars(
+            select(ProjectCommentMention.user_id)
+            .where(ProjectCommentMention.comment_id == comment.id)
+            .order_by(ProjectCommentMention.user_id)
+        )
+    )
+    return {
+        "id": comment.id,
+        "project_id": comment.project_id,
+        "body": comment.body,
+        "created_by_user_id": comment.created_by_user_id,
+        "mention_user_ids": mention_user_ids,
+        "created_at": _serialize_value(comment.created_at),
     }
 
 
@@ -226,6 +246,28 @@ def api_add_activity(project_id: str):
         response.status_code = 201
         response.headers["ETag"] = f'"{current.version}"'
         return response
+    except DomainError as exc:
+        db.session.rollback()
+        return _error(exc)
+
+
+@customer_projects_api_bp.post("/projects/<string:project_id>/comments")
+@module_required
+def api_add_comment(project_id: str):
+    membership = _membership()
+    require_write(membership)
+    project = db.session.get(CustomerProject, project_id)
+    if project is None or project.deleted_at is not None or not can_view_project(membership, project):
+        return jsonify(error={"code": "NOT_FOUND", "message": "项目不存在或不可访问。"}), 404
+    try:
+        comment = add_comment(
+            project,
+            request.get_json(silent=True) or {},
+            membership,
+            request.headers.get("Idempotency-Key", ""),
+        )
+        db.session.commit()
+        return jsonify(data=comment_json(comment)), 201
     except DomainError as exc:
         db.session.rollback()
         return _error(exc)
