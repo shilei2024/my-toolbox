@@ -360,7 +360,7 @@ class ProjectMaterial(db.Model):
         Index("ix_material_org_brand_mpn", "organization_id", "promoted_brand", "normalized_mpn"),
         Index("ix_material_project_opportunity", "project_id", "opportunity_type"),
         CheckConstraint(
-            "opportunity_type IN ('design_in', 'matched_opportunity', 'competitive_opportunity')",
+            "opportunity_type IN ('design_in', 'design_win', 'matched_opportunity', 'competitive_opportunity')",
             name="ck_material_opportunity_type",
         ),
         CheckConstraint("version > 0", name="ck_material_version_positive"),

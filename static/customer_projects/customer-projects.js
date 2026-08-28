@@ -8,10 +8,39 @@
   if (!projectId || !Number.isFinite(initialVersion) || !alert) return;
 
   const opportunityTypes = [
-    ["design_in", "设计中物料", "当前正在设计、验证或推进定点的物料"],
-    ["matched_opportunity", "已匹配料号机会", "已找到可推广型号的新增机会"],
-    ["competitive_opportunity", "竞品替代机会", "客户正在使用其他品牌、尚未匹配推广型号的机会"],
+    ["design_in", "Design In", "正在设计与验证推广的物料"],
+    ["design_win", "Design Win", "已获得定点的推广物料"],
+    ["matched_opportunity", "Evaluation", "已匹配推广型号、正在评估的机会"],
+    ["competitive_opportunity", "Lost", "被竞品占据的机会，仅记录竞品信息"],
   ];
+  const lostType = "competitive_opportunity";
+
+  /**
+   * 根据机会类型切换推广物料输入的必填与可见性：
+   * Lost 仅记录竞品信息，推广品牌/型号与单价输入放宽并隐藏。
+   */
+  const applyOpportunityFormMode = (form, type) => {
+    const isLost = type === lostType;
+    form.querySelectorAll('input[name="promoted_brand"], input[name="promoted_mpn"]').forEach((input) => {
+      input.required = !isLost;
+      input.placeholder = isLost ? "Lost 机会可不填推广品牌" : input.placeholder;
+    });
+    form.querySelectorAll(
+      'select[name="currency"], input[name="unit_price"], [data-price-preview]'
+    ).forEach((node) => {
+      node.hidden = isLost;
+    });
+    if (!form.dataset.cpLostHint) {
+      const hint = document.createElement("small");
+      hint.className = "text-muted cp-lost-hint";
+      hint.hidden = !isLost;
+      hint.textContent = "Lost 仅记录竞品信息：保存后请在物料卡片中补充竞品详情与报价（TAM 按竞品最高报价估算）。";
+      form.append(hint);
+      form.dataset.cpLostHint = "1";
+    }
+    const hintNode = form.querySelector(".cp-lost-hint");
+    if (hintNode) hintNode.hidden = !isLost;
+  };
 
   root.querySelectorAll('input[name="annual_usage"]').forEach((input) => {
     input.min = "1";
@@ -56,6 +85,10 @@
       select.append(option);
     });
     wrapper.append(select);
+    select.addEventListener("change", () => {
+      const form = select.closest("form");
+      if (form) applyOpportunityFormMode(form, select.value);
+    });
     return wrapper;
   };
 
@@ -116,6 +149,7 @@
     );
     const editForm = editDetails?.querySelector("form");
     if (editForm) editForm.prepend(opportunitySelect(type));
+    if (editForm) applyOpportunityFormMode(editForm, type);
     upgradeDetails(editDetails, title, "编辑推广物料");
 
     if (main) {
@@ -128,7 +162,9 @@
       value.className = "cp-material-value";
       value.textContent = annualValue
         ? `年度机会金额：USD ${Number(annualValue).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : "年度机会金额：待补齐年用量、单机数量或美金单价";
+        : type === lostType
+          ? "年度机会金额：待补齐年用量、单机数量或竞品报价"
+          : "年度机会金额：待补齐年用量、单机数量或美金单价";
       main.querySelector(":scope > div")?.append(value);
     }
 
@@ -157,6 +193,7 @@
   if (materialPanel && addBlock) {
     const addForm = addBlock.querySelector("form");
     if (addForm) addForm.prepend(opportunitySelect());
+    if (addForm) applyOpportunityFormMode(addForm, "design_in");
     const groups = document.createElement("div");
     groups.className = "cp-material-groups";
     opportunityTypes.forEach(([type, label, description]) => {

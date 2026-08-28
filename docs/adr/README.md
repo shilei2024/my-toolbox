@@ -10,6 +10,7 @@
 | --- | --- |
 | [0032](0032-customer-project-material-opportunity-and-market-scope.md) | 客户项目物料机会分类与 TAM/SAM/SOM 派生 |
 | [0033](0033-customer-project-comments-and-input-precision.md) | 客户项目留言/@ 与数量价格输入边界 |
+| [0034](0034-material-opportunity-design-win-and-lost.md) | 物料机会四类分类与 Lost 竞品口径 |
 | [0001](0001-phase-1-generation-service-boundary.md) | Generation Service 边界 |
 | [0002](0002-phase-2-postgresql-ai-schema-and-cos.md) | PostgreSQL AI Schema 与腾讯云 COS |
 | [0003](0003-phase-3-provider-contract.md) | Provider Contract |

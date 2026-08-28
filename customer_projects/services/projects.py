@@ -54,10 +54,13 @@ DEFAULT_STATUSES = (
 )
 ROLE_CODES = frozenset({"organization_admin", "business_manager", "sales", "pm", "fae", "readonly"})
 MATERIAL_OPPORTUNITY_TYPES = {
-    "design_in": "设计中物料",
-    "matched_opportunity": "已匹配料号机会",
-    "competitive_opportunity": "竞品替代机会",
+    "design_in": "Design In",
+    "design_win": "Design Win",
+    "matched_opportunity": "Evaluation",
+    "competitive_opportunity": "Lost",
 }
+# Lost 机会仅记录竞品信息，不要求推广品牌/型号
+LOST_OPPORTUNITY = "competitive_opportunity"
 
 
 class DomainError(ValueError):
@@ -206,29 +209,55 @@ def material_annual_value_usd(
     )
 
 
+def competitor_reference_price(competitors: list[MaterialCompetitor]) -> Decimal | None:
+    """取 Lost 物料下有效竞品的最高报价，作为市场容量估算单价。"""
+    prices = [
+        competitor.quoted_price
+        for competitor in competitors
+        if competitor.quoted_price is not None
+    ]
+    return max(prices) if prices else None
+
+
 def build_market_scope(
-    project: CustomerProject, materials: list[ProjectMaterial]
+    project: CustomerProject,
+    materials: list[ProjectMaterial],
+    competitors_by_material: dict[str, list[MaterialCompetitor]] | None = None,
 ) -> dict[str, Any]:
-    """Build a non-overlapping TAM/SAM/SOM funnel from material opportunity classes."""
+    """Build a non-overlapping TAM/SAM/SOM funnel from material opportunity classes.
+
+    TAM = 四类机会合计（Lost 按竞品最高报价估算）；SAM = Design In + Design Win + Evaluation；
+    SOM = Design In + Design Win。
+    """
+    competitors_by_material = competitors_by_material or {}
     category_totals = {key: Decimal("0.00") for key in MATERIAL_OPPORTUNITY_TYPES}
     material_values: dict[str, Decimal | None] = {}
     incomplete_material_ids: list[str] = []
     for material in materials:
-        value = material_annual_value_usd(
-            project.annual_usage, material.machine_quantity, material.unit_price_usd
-        )
+        if material.opportunity_type == LOST_OPPORTUNITY:
+            # Lost 物料没有推广单价，TAM 采用竞品最高报价
+            value = material_annual_value_usd(
+                project.annual_usage,
+                material.machine_quantity,
+                competitor_reference_price(competitors_by_material.get(material.id, [])),
+            )
+        else:
+            value = material_annual_value_usd(
+                project.annual_usage, material.machine_quantity, material.unit_price_usd
+            )
         material_values[material.id] = value
         if value is None:
             incomplete_material_ids.append(material.id)
             continue
         category_totals[material.opportunity_type] += value
     design_in = category_totals["design_in"]
+    design_win = category_totals["design_win"]
     matched = category_totals["matched_opportunity"]
-    competitive = category_totals["competitive_opportunity"]
+    lost = category_totals["competitive_opportunity"]
     return {
-        "tam_usd": design_in + matched + competitive,
-        "sam_usd": design_in + matched,
-        "som_usd": design_in,
+        "tam_usd": design_in + design_win + matched + lost,
+        "sam_usd": design_in + design_win + matched,
+        "som_usd": design_in + design_win,
         "category_totals": category_totals,
         "material_values": material_values,
         "incomplete_material_ids": incomplete_material_ids,
@@ -1167,10 +1196,13 @@ def add_material(
         ):
             raise DomainError("IDEMPOTENCY_KEY_CONFLICT", "相同幂等键已用于不同的物料请求。")
         return existing
+    opportunity_type = parse_opportunity_type(data.get("opportunity_type"))
     brand = str(data.get("promoted_brand") or "").strip()
     mpn = str(data.get("promoted_mpn") or "").strip()
     pending = bool(data.get("mpn_pending"))
-    if not brand or (not mpn and not pending):
+    if opportunity_type != LOST_OPPORTUNITY and (
+        not brand or (not mpn and not pending)
+    ):
         raise DomainError("VALIDATION_ERROR", "推广品牌必填；推广型号或“型号待确认”至少填写一项。")
     machine_quantity = parse_nonnegative_integer(
         data.get("machine_quantity"), "machine_quantity", "单机数量"
@@ -1282,12 +1314,30 @@ def update_material_commercial(
         if "mpn_pending" in data
         else material.mpn_pending
     )
-    legacy_incomplete = material.promoted_mpn is None and not material.mpn_pending
+    target_type = (
+        parse_opportunity_type(data.get("opportunity_type"))
+        if "opportunity_type" in data
+        else material.opportunity_type
+    )
     # Older records created before the MPN/pending invariant may legitimately
     # have neither value.  Allow those records to be edited and normalize them
     # to the explicit "model pending" state; newly-cleared MPNs still require
     # the user to check the pending box.
-    if not brand or (not mpn and not pending):
+    if target_type == LOST_OPPORTUNITY:
+        # Lost 仅记录竞品信息，推广品牌/型号可不填
+        pass
+    elif material.opportunity_type == LOST_OPPORTUNITY:
+        # Lost 转为其他三类时，必须补充推广物料信息
+        if not brand or (not mpn and not pending):
+            raise DomainError(
+                "VALIDATION_ERROR",
+                "Lost 转为其他机会类型时，必须补充推广品牌与型号（或勾选“型号待确认”）。",
+                field_errors={
+                    "promoted_brand": "请补充推广品牌",
+                    "promoted_mpn": "请补充推广型号或勾选型号待确认",
+                },
+            )
+    elif not brand or (not mpn and not pending):
         if (
             not brand
             or material.promoted_mpn is not None
@@ -1298,11 +1348,6 @@ def update_material_commercial(
                 "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
             )
         pending = True
-    if not brand or (not mpn and not pending and not legacy_incomplete):
-        raise DomainError(
-            "VALIDATION_ERROR",
-            "推广品牌必填；推广型号或“型号待确认”至少填写一项。",
-        )
     if "promoted_brand" in data:
         values["promoted_brand"] = brand[:120]
         safe_diff["promoted_brand"] = "已变更"
@@ -1478,6 +1523,11 @@ def add_competitor(
         weaknesses=str(data.get("weaknesses") or "").strip()[:4000] or None,
         confidence_level=str(data.get("confidence_level") or "").strip()[:32] or None,
         observed_at=parse_date(data.get("observed_at")),
+        quoted_price=(
+            parse_price(data.get("quoted_price"), "quoted_price", "竞品报价")
+            if data.get("quoted_price") not in (None, "")
+            else None
+        ),
         idempotency_key=idempotency_key,
         created_by_user_id=membership.user_id,
         updated_by_user_id=membership.user_id,

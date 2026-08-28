@@ -536,7 +536,6 @@ def project_detail(project_id: str):
         else None
     )
     materials = list(db.session.scalars(select(ProjectMaterial).where(ProjectMaterial.project_id == project.id, ProjectMaterial.deleted_at.is_(None)).order_by(ProjectMaterial.is_primary.desc(), ProjectMaterial.created_at)))
-    market_scope = build_market_scope(project, materials)
     materials_by_opportunity = {
         key: [item for item in materials if item.opportunity_type == key]
         for key in MATERIAL_OPPORTUNITY_TYPES
@@ -546,6 +545,7 @@ def project_detail(project_id: str):
     competitors_by_material: dict[str, list[MaterialCompetitor]] = {mid: [] for mid in material_ids}
     for competitor in competitors:
         competitors_by_material.setdefault(competitor.project_material_id, []).append(competitor)
+    market_scope = build_market_scope(project, materials, competitors_by_material)
     activities = list(db.session.scalars(select(ProjectActivity).where(ProjectActivity.project_id == project.id).order_by(ProjectActivity.occurred_at.desc()).limit(100)))
     stage_events = list(db.session.scalars(select(ProjectStageEvent).where(ProjectStageEvent.project_id == project.id).order_by(ProjectStageEvent.occurred_at.desc()).limit(100)))
     comments = list(db.session.scalars(select(ProjectComment).where(ProjectComment.project_id == project.id).order_by(ProjectComment.created_at.desc()).limit(100)))
