@@ -24,6 +24,23 @@
     if (fieldLabel) fieldLabel.textContent = "项目年用量（PCS） *";
   });
 
+  root.querySelectorAll('input[name="machine_quantity"]').forEach((input) => {
+    input.min = "0";
+    input.step = "1";
+    input.inputMode = "numeric";
+    const value = Number(input.value);
+    if (Number.isFinite(value)) input.value = String(Math.trunc(value));
+    input.placeholder = "单机数量（PCS，整数）";
+  });
+
+  root.querySelectorAll('input[name="unit_price"], input[name="quoted_price"]').forEach((input) => {
+    input.step = "0.00001";
+    const value = Number(input.value);
+    if (Number.isFinite(value) && input.value !== "") {
+      input.value = value.toFixed(5).replace(/\.?0+$/, "");
+    }
+  });
+
   const opportunitySelect = (selected = "design_in") => {
     const wrapper = document.createElement("label");
     wrapper.className = "cp-dialog-field cp-field-span";
@@ -82,6 +99,12 @@
       }
     });
   };
+
+  upgradeDetails(
+    root.querySelector("details[data-project-edit]"),
+    root.querySelector("[data-project-title]"),
+    "编辑项目基础信息"
+  );
 
   const materials = Array.from(root.querySelectorAll(".cp-material[data-opportunity-type]"));
   materials.forEach((material) => {
@@ -178,7 +201,8 @@
             }
             const usd = currencyInput.value === "USD" ? amount : amount / 1.13 / rate;
             const cnyTax = currencyInput.value === "USD" ? amount * rate * 1.13 : amount;
-            preview.textContent = `USD ${usd.toFixed(6)} · 含税人民币 ¥${cnyTax.toFixed(6)}（13% 增值税）`;
+            const displayPrice = (value) => value.toFixed(5).replace(/\.?0+$/, "");
+            preview.textContent = `USD ${displayPrice(usd)} · 含税人民币 ¥${displayPrice(cnyTax)}（13% 增值税）`;
           };
           amountInput.addEventListener("input", updatePreview);
           currencyInput.addEventListener("change", updatePreview);
