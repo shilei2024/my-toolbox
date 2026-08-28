@@ -1,6 +1,8 @@
 """Customer project tracking Flask blueprint."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import click
 from flask import Blueprint, current_app
 from sqlalchemy import select
@@ -62,21 +64,41 @@ def bootstrap_command(admin_email: str, name: str | None) -> None:
 @customer_projects_bp.cli.command("scan-reminders")
 @click.option("--organization-id", default=None, help="Optional organization UUID.")
 @click.option("--force", is_flag=True, help="Allow a controlled local/staging scan while the global switch is off.")
-def scan_reminders_command(organization_id: str | None, force: bool) -> None:
+@click.option("--now", "now_value", default=None, help="Override scan time with an ISO-8601 UTC timestamp.")
+def scan_reminders_command(organization_id: str | None, force: bool, now_value: str | None) -> None:
     """Scan due/stale projects and create idempotent notification intents."""
     if not current_app.config.get("CUSTOMER_PROJECT_REMINDERS_ENABLED", False) and not force:
         raise click.ClickException("CUSTOMER_PROJECT_REMINDERS_ENABLED=false; scan not started")
     from .services.reminders import scan_project_reminders
 
-    result = scan_project_reminders(organization_id=organization_id)
+    scan_now = None
+    if now_value:
+        try:
+            scan_now = datetime.fromisoformat(now_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise click.ClickException("--now must be an ISO-8601 timestamp, for example 2026-08-28T02:00:00Z") from exc
+        if scan_now.tzinfo is None:
+            scan_now = scan_now.replace(tzinfo=timezone.utc)
+
+    result = scan_project_reminders(now=scan_now, organization_id=organization_id)
     click.echo(f"scanned={result['scanned']} created={result['created']} limited={result['limited']}")
 
 
 @customer_projects_bp.cli.command("dispatch-notifications")
 @click.option("--limit", default=100, type=click.IntRange(1, 500))
-def dispatch_notifications_command(limit: int) -> None:
+@click.option("--now", "now_value", default=None, help="Override dispatch time with an ISO-8601 UTC timestamp.")
+def dispatch_notifications_command(limit: int, now_value: str | None) -> None:
     """Claim due outbox rows and deliver through dry-run or configured SMTP."""
     from shared.notifications import dispatch_due_notifications
 
-    result = dispatch_due_notifications(limit=limit)
+    dispatch_now = None
+    if now_value:
+        try:
+            dispatch_now = datetime.fromisoformat(now_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise click.ClickException("--now must be an ISO-8601 timestamp, for example 2026-08-28T02:00:00Z") from exc
+        if dispatch_now.tzinfo is None:
+            dispatch_now = dispatch_now.replace(tzinfo=timezone.utc)
+
+    result = dispatch_due_notifications(now=dispatch_now, limit=limit)
     click.echo(f"claimed={result['claimed']} sent={result['sent']} failed={result['failed']}")

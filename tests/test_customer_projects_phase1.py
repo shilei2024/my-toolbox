@@ -347,6 +347,43 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.assertIn("updated", actions)
             self.assertIn("deleted", actions)
 
+    def test_legacy_material_without_mpn_can_be_edited(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        created = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "LEGACY-100",
+            },
+            headers={"Idempotency-Key": "legacy-material"},
+        )
+        self.assertEqual(created.status_code, 201)
+        material_id = created.get_json()["data"]["id"]
+        with app.app_context():
+            material = db.session.get(ProjectMaterial, material_id)
+            material.promoted_mpn = None
+            material.normalized_mpn = None
+            material.mpn_pending = False
+            db.session.commit()
+
+        response = self.client.post(
+            f"/customer-projects/materials/{material_id}/commercial",
+            data={
+                "material_version": "1",
+                "promoted_brand": "Mavis Updated",
+                "promoted_mpn": "",
+                "category_code": "Power IC",
+                "mpn_pending": "off",
+                "is_primary": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with app.app_context():
+            material = db.session.get(ProjectMaterial, material_id)
+            self.assertEqual(material.promoted_brand, "Mavis Updated")
+            self.assertTrue(material.mpn_pending)
+
     def test_customer_grade_can_be_created_and_updated(self) -> None:
         self._login()
         created = self.client.post(
