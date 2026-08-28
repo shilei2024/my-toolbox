@@ -1044,6 +1044,55 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.get_json()["data"]["opportunity_type"], "design_in")
 
+    def test_opportunity_badge_quick_switch_preserves_flags(self) -> None:
+        """徽章快速转换表单（最小字段集）应保留主推/待确认状态并完成类型转换。"""
+        project_id = self._seed_project()
+        self._login()
+        created = self.client.post(
+            f"/api/v1/customer-projects/projects/{project_id}/materials",
+            json={
+                "opportunity_type": "design_in",
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "QUICK-1",
+                "is_primary": True,
+            },
+            headers={"Idempotency-Key": "badge-switch"},
+        )
+        self.assertEqual(created.status_code, 201)
+        material_id = created.get_json()["data"]["id"]
+        # 模拟徽章转换：仅提交类型 + 版本 + 回填 is_primary
+        page = self.client.post(
+            f"/customer-projects/materials/{material_id}/commercial",
+            data={
+                "opportunity_type": "matched_opportunity",
+                "material_version": "1",
+                "is_primary": "on",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn('data-opportunity-type="matched_opportunity"', html)
+        self.assertIn('data-is-primary="1"', html)
+        # Lost 转出（最小字段集、无品牌）应被服务端拒绝
+        to_lost = self.client.post(
+            f"/customer-projects/materials/{material_id}/commercial",
+            data={
+                "opportunity_type": "competitive_opportunity",
+                "material_version": "2",
+                "is_primary": "on",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(to_lost.status_code, 200)
+        back = self.client.post(
+            f"/customer-projects/materials/{material_id}/commercial",
+            data={"opportunity_type": "design_in", "material_version": "3"},
+            follow_redirects=True,
+        )
+        self.assertEqual(back.status_code, 200)
+        self.assertIn("Lost", back.get_data(as_text=True))
+
     def test_manager_reactivates_terminal_project_without_losing_history(self) -> None:
         project_id = self._seed_project()
         self._login("manager@test.com")

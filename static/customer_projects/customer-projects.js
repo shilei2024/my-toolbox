@@ -195,6 +195,108 @@
     });
   }
 
+  /**
+   * 打开机会分类快速转换弹窗：点击物料机会徽章直接转换
+   * Design In / Design Win / Evaluation / Lost。
+   * Lost 转出为其他三类时，按服务端规则要求补充推广品牌与型号（或勾选型号待确认）。
+   */
+  const openOpportunitySwitchDialog = (material, currentType) => {
+    const editForm = material.querySelector('form[action*="/commercial"]');
+    if (!editForm) return;
+    const action = editForm.getAttribute("action") || "";
+    const csrf = editForm.querySelector('input[name="csrf_token"]')?.value || "";
+    const version = editForm.querySelector('input[name="material_version"]')?.value || "0";
+    const appendHidden = (form, name, value) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.append(input);
+    };
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "cp-edit-dialog";
+    const header = document.createElement("header");
+    const heading = document.createElement("h3");
+    heading.textContent = "转换机会分类";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "cp-dialog-close";
+    close.setAttribute("aria-label", "关闭弹窗");
+    close.textContent = "×";
+    close.addEventListener("click", () => dialog.close());
+    header.append(heading, close);
+    dialog.append(header);
+
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = action;
+    appendHidden(form, "csrf_token", csrf);
+    appendHidden(form, "material_version", version);
+    // 路由会按提交值重置主推/待确认状态，转换时回填当前状态避免丢失
+    if (material.dataset.isPrimary === "1") appendHidden(form, "is_primary", "on");
+    if (currentType !== lostType && material.dataset.mpnPending === "1") {
+      appendHidden(form, "mpn_pending", "on");
+    }
+
+    const switcher = document.createElement("div");
+    switcher.className = "cp-opportunity-switcher";
+    const supplement = document.createElement("div");
+    supplement.className = "cp-switch-supplement";
+    supplement.hidden = true;
+    const brandInput = document.createElement("input");
+    brandInput.className = "form-control";
+    brandInput.name = "promoted_brand";
+    brandInput.maxLength = 120;
+    brandInput.placeholder = "推广品牌 *";
+    const mpnInput = document.createElement("input");
+    mpnInput.className = "form-control";
+    mpnInput.name = "promoted_mpn";
+    mpnInput.maxLength = 160;
+    mpnInput.placeholder = "推广型号";
+    const pendingLabel = document.createElement("label");
+    const pendingInput = document.createElement("input");
+    pendingInput.type = "checkbox";
+    pendingInput.name = "mpn_pending";
+    pendingLabel.append(pendingInput, " 型号待确认");
+    supplement.append(brandInput, mpnInput, pendingLabel);
+
+    const toggleSupplement = (selected) => {
+      // 仅 Lost 转出为其他三类时要求补充推广物料信息
+      const leaving = currentType === lostType && selected !== lostType;
+      supplement.hidden = !leaving;
+      brandInput.required = leaving;
+    };
+
+    opportunityTypes.forEach(([value, label]) => {
+      const option = document.createElement("label");
+      option.className = "cp-switch-option";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "opportunity_type";
+      radio.value = value;
+      radio.checked = value === currentType;
+      radio.addEventListener("change", () => toggleSupplement(radio.value));
+      option.append(radio, label);
+      switcher.append(option);
+    });
+
+    const hint = document.createElement("p");
+    hint.className = "text-muted small";
+    hint.textContent = "转换会记录物料审计日志；Lost 转出时需补充推广品牌与型号。";
+
+    const submit = document.createElement("button");
+    submit.className = "btn btn-primary w-100";
+    submit.type = "submit";
+    submit.textContent = "确认转换";
+
+    form.append(switcher, supplement, hint, submit);
+    dialog.append(form);
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => dialog.remove());
+    openDialog(dialog);
+  };
+
   const materials = Array.from(root.querySelectorAll(".cp-material[data-opportunity-type]"));
   materials.forEach((material) => {
     const type = material.dataset.opportunityType || "design_in";
@@ -212,6 +314,20 @@
       const badge = document.createElement("span");
       badge.className = `cp-opportunity-badge is-${type}`;
       badge.textContent = material.dataset.opportunityLabel || type;
+      if (root.dataset.cpCanWrite === "1") {
+        // 有写权限时，点击机会徽章直接弹出四类转换弹窗
+        badge.classList.add("is-switchable");
+        badge.setAttribute("role", "button");
+        badge.setAttribute("tabindex", "0");
+        badge.setAttribute("title", "点击转换机会分类");
+        badge.addEventListener("click", () => openOpportunitySwitchDialog(material, type));
+        badge.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openOpportunitySwitchDialog(material, type);
+          }
+        });
+      }
       main.append(badge);
       const annualValue = material.dataset.annualValue;
       const value = document.createElement("small");
