@@ -202,11 +202,11 @@ def preview_project_import(
 
         try:
             annual_usage = Decimal(str(payload.get("annual_usage") or ""))
-            if annual_usage <= 0:
+            if annual_usage <= 0 or annual_usage != annual_usage.to_integral_value():
                 raise InvalidOperation
-            payload["annual_usage"] = str(annual_usage)
+            payload["annual_usage"] = str(annual_usage.to_integral_value())
         except (InvalidOperation, ValueError):
-            errors.append("项目年用量必须大于 0")
+            errors.append("项目年用量必须是大于 0 的整数")
         stage = stage_lookup.get(_header_key(payload.get("stage_code")))
         if stage not in {"evaluation", "initiated", "sampling", "pilot_batch", "trial_production", "design_win"}:
             errors.append("阶段必须是有效的进行中阶段")

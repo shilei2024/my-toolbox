@@ -358,12 +358,20 @@ class ProjectMaterial(db.Model):
     __table_args__ = (
         UniqueConstraint("project_id", "idempotency_key", name="uq_material_project_idempotency"),
         Index("ix_material_org_brand_mpn", "organization_id", "promoted_brand", "normalized_mpn"),
+        Index("ix_material_project_opportunity", "project_id", "opportunity_type"),
+        CheckConstraint(
+            "opportunity_type IN ('design_in', 'matched_opportunity', 'competitive_opportunity')",
+            name="ck_material_opportunity_type",
+        ),
         CheckConstraint("version > 0", name="ck_material_version_positive"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     organization_id: Mapped[str] = mapped_column(db.ForeignKey("organizations.id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(db.ForeignKey("customer_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="design_in"
+    )
     category_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     promoted_brand: Mapped[str] = mapped_column(String(120), nullable=False)
     promoted_mpn: Mapped[str | None] = mapped_column(String(160), nullable=True)

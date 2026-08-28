@@ -4,6 +4,7 @@
 
 ## 平台部署标准
 
+- [客户项目物料机会分类与 TAM/SAM/SOM 发布手册](customer-project-material-opportunity-rollout.md)
 - [Vercel 前端部署](vercel-deployment.md)
 - [Gallery 部署：仅 Vercel（腾讯云自托管已撤销）](gallery-tencent-self-hosting.md)
 - [腾讯云 CVM 后端部署](tencent-backend-deployment.md)

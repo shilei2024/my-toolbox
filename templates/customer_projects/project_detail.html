@@ -9,13 +9,19 @@
     <div><p class="cp-kicker">{{ project.project_code }}</p><h1>{{ project.name }}</h1><p>{{ customer.name if customer else '未知客户' }} · 最近更新 {{ project.updated_at|china_time('%Y-%m-%d %H:%M') }}{% if source_project %} · 衍生自 <a href="{{ url_for('customer_projects.project_detail', project_id=source_project.id) }}">{{ source_project.project_code }}</a>{% endif %}</p></div>
     <div class="cp-detail-status"><span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span><span>版本 {{ project.version }}</span></div>
   </header>
-  <div class="cp-summary-grid"><article><small>产品名称</small><strong>{{ project.product_name or '待补齐' }}</strong></article><article><small>项目年用量</small><strong>{{ project.annual_usage or '待补齐' }}</strong></article><article><small>下一步</small><strong>{{ project.next_action }}</strong></article><article><small>跟进时间</small><strong>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</strong></article><article><small>评估</small><strong>{{ project.assessment_grade or '待评估' }}{% if project.probability_band %} · {{ project.probability_band }}%{% endif %}</strong></article><article><small>最后有效更新</small><strong>{{ project.last_meaningful_update_at|china_time('%Y-%m-%d %H:%M') }}</strong></article></div>
+  <div class="cp-summary-grid"><article><small>产品名称</small><strong>{{ project.product_name or '待补齐' }}</strong></article><article><small>项目年用量（PCS）</small><strong>{% if project.annual_usage is not none %}{{ project.annual_usage|int }}{% else %}待补齐{% endif %}</strong></article><article><small>下一步</small><strong>{{ project.next_action }}</strong></article><article><small>跟进时间</small><strong>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</strong></article><article><small>评估</small><strong>{{ project.assessment_grade or '待评估' }}{% if project.probability_band %} · {{ project.probability_band }}%{% endif %}</strong></article><article><small>最后有效更新</small><strong>{{ project.last_meaningful_update_at|china_time('%Y-%m-%d %H:%M') }}</strong></article></div>
+  <section class="cp-market-scope" aria-label="市场机会规模">
+    <article><span>TAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.tam_usd) }}</strong><small>全部三类物料机会</small></article>
+    <article><span>SAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.sam_usd) }}</strong><small>设计中 + 已匹配料号机会</small></article>
+    <article><span>SOM</span><strong>USD {{ '{:,.2f}'.format(market_scope.som_usd) }}</strong><small>当前设计中物料</small></article>
+    <p>计算口径：项目年用量 × 对应物料单机数量 × 美金单价。{% if market_scope.incomplete_material_ids %}另有 {{ market_scope.incomplete_material_ids|length }} 条物料因数量或价格缺失未计入。{% endif %}</p>
+  </section>
   <div class="cp-detail-grid">
     <div class="cp-detail-main">
       <section class="cp-panel">
         <div class="cp-panel-heading"><div><p class="cp-kicker">MATERIALS</p><h2>推广物料</h2></div><span>{{ materials|length }} 条</span></div>
         {% for material in materials %}
-          <article class="cp-material">
+          <article class="cp-material" data-opportunity-type="{{ material.opportunity_type }}" data-opportunity-label="{{ material_opportunity_types.get(material.opportunity_type, material.opportunity_type) }}" data-annual-value="{{ market_scope.material_values.get(material.id) if market_scope.material_values.get(material.id) is not none else '' }}">
             <div class="cp-material-main"><span class="cp-customer-mark"><i class="bi bi-cpu"></i></span><div><strong>{{ material.promoted_brand }} · {{ material.promoted_mpn or '型号待确认' }}</strong><small>{{ material.category_code or '品类待补齐' }} · {{ material.application_position or '应用位置待补齐' }}</small><small>单机数量：{{ material.machine_quantity if material.machine_quantity is not none else '待补齐' }}</small>{% if material.unit_price_usd is not none %}<small>USD {{ material.unit_price_usd }} · 含税人民币 ¥{{ material.unit_price_cny_tax_included }}（汇率 {{ material.fx_rate_usd_cny }}）</small>{% else %}<small>单价待补齐</small>{% endif %}</div>{% if material.is_primary %}<span class="cp-stage">主推</span>{% endif %}</div>
             <div class="cp-competitors">
               <strong>竞争方案</strong>

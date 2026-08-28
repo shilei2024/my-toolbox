@@ -25,7 +25,7 @@
 | POST | `/trash/projects/{project_id}/restore` | 管理员恢复软删除项目 | 组织与角色校验 |
 | GET | `/reports/lifecycle` | 当前量产/失败/归档快照和明细 | 与项目列表相同的数据范围 |
 
-项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的 `annual_usage`，兼容迁移前的旧项目记录可暂时返回 `null`。
+项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的整数 `annual_usage`（PCS），兼容迁移前的旧项目记录可暂时返回 `null`。
 
 客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD 和通知查询 API 仍属后续切片。未实现端点不返回伪成功。
 
@@ -76,11 +76,14 @@ If-Match: "7"
 
 ```json
 {
+  "opportunity_type": "matched_opportunity",
   "machine_quantity": "2",
   "unit_price": "1.25",
   "currency": "USD"
 }
 ```
+
+`opportunity_type` 仅支持 `design_in`（设计中物料）、`matched_opportunity`（已匹配料号机会）和 `competitive_opportunity`（竞品替代机会）。物料响应增加 `annual_value_usd`，按项目年用量 × 单机数量 × `unit_price_usd` 计算；缺少任一因子时返回 `null`。项目页面的 TAM 为三类总和，SAM 为设计中与已匹配机会总和，SOM 为设计中物料总和，均为实时派生值而非持久化字段。
 
 `currency` 仅支持 `USD` 或 `CNY`。USD 输入视为未税美元，服务端按主站 USD/CNY 汇率乘以 `1.13` 得到含税人民币；CNY 输入视为已含 13% 增值税，再反算未税美元。响应同时返回 `unit_price_usd`、`unit_price_cny_tax_included`、`fx_rate_usd_cny` 和原始录入币别。服务端保存折算快照，后续汇率变化不会修改历史单价。
 

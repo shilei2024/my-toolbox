@@ -28,6 +28,7 @@ from .services.projects import (
     update_competitor,
     update_project,
     update_material_commercial,
+    material_annual_value_usd,
 )
 from .services.reports import build_lifecycle_report
 
@@ -45,6 +46,10 @@ def _serialize_value(value):
     return value
 
 
+def _integer_string(value):
+    return str(int(value)) if value is not None else None
+
+
 def project_json(project: CustomerProject, *, include_customer: bool = False) -> dict:
     data = {
         "id": project.id,
@@ -52,7 +57,7 @@ def project_json(project: CustomerProject, *, include_customer: bool = False) ->
         "customer_id": project.customer_id,
         "name": project.name,
         "product_name": project.product_name,
-        "annual_usage": str(project.annual_usage) if project.annual_usage is not None else None,
+        "annual_usage": _integer_string(project.annual_usage),
         "stage_code": project.stage_code,
         "assessment_grade": project.assessment_grade,
         "probability_band": project.probability_band,
@@ -82,10 +87,19 @@ def _error(exc: DomainError, status: int = 422):
     return jsonify(error={"code": exc.code, "message": exc.message, "field_errors": exc.field_errors, "request_id": getattr(g, "request_id", None), "details": details}), (409 if conflict else status)
 
 
-def material_json(material: ProjectMaterial) -> dict:
+def material_json(
+    material: ProjectMaterial, project: CustomerProject | None = None
+) -> dict:
+    project = project or db.session.get(CustomerProject, material.project_id)
+    annual_value = material_annual_value_usd(
+        project.annual_usage if project else None,
+        material.machine_quantity,
+        material.unit_price_usd,
+    )
     return {
         "id": material.id,
         "project_id": material.project_id,
+        "opportunity_type": material.opportunity_type,
         "category_code": material.category_code,
         "promoted_brand": material.promoted_brand,
         "promoted_mpn": material.promoted_mpn,
@@ -102,6 +116,7 @@ def material_json(material: ProjectMaterial) -> dict:
         "unit_price_usd": str(material.unit_price_usd) if material.unit_price_usd is not None else None,
         "unit_price_cny_tax_included": str(material.unit_price_cny_tax_included) if material.unit_price_cny_tax_included is not None else None,
         "fx_rate_usd_cny": str(material.fx_rate_usd_cny) if material.fx_rate_usd_cny is not None else None,
+        "annual_value_usd": str(annual_value) if annual_value is not None else None,
         "version": material.version,
     }
 
@@ -259,7 +274,7 @@ def api_add_material(project_id: str):
             request.headers.get("Idempotency-Key", ""),
         )
         db.session.commit()
-        return jsonify(data=material_json(material)), 201
+        return jsonify(data=material_json(material, project)), 201
     except DomainError as exc:
         db.session.rollback()
         return _error(exc)
@@ -293,7 +308,7 @@ def api_update_material_commercial(material_id: str):
             material, payload, membership, expected
         )
         db.session.commit()
-        response = jsonify(data=material_json(updated))
+        response = jsonify(data=material_json(updated, project))
         response.headers["ETag"] = f'"{updated.version}"'
         return response
     except DomainError as exc:

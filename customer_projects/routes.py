@@ -48,6 +48,7 @@ from .permissions import (
 )
 from .services.projects import (
     DomainError,
+    MATERIAL_OPPORTUNITY_TYPES,
     VersionConflict,
     add_activity,
     add_audit,
@@ -55,6 +56,7 @@ from .services.projects import (
     add_contact,
     add_material,
     add_project_member,
+    build_market_scope,
     create_customer,
     create_project,
     derive_project,
@@ -530,6 +532,11 @@ def project_detail(project_id: str):
         else None
     )
     materials = list(db.session.scalars(select(ProjectMaterial).where(ProjectMaterial.project_id == project.id, ProjectMaterial.deleted_at.is_(None)).order_by(ProjectMaterial.is_primary.desc(), ProjectMaterial.created_at)))
+    market_scope = build_market_scope(project, materials)
+    materials_by_opportunity = {
+        key: [item for item in materials if item.opportunity_type == key]
+        for key in MATERIAL_OPPORTUNITY_TYPES
+    }
     material_ids = [m.id for m in materials]
     competitors = list(db.session.scalars(select(MaterialCompetitor).where(MaterialCompetitor.project_material_id.in_(material_ids), MaterialCompetitor.deleted_at.is_(None)))) if material_ids else []
     competitors_by_material: dict[str, list[MaterialCompetitor]] = {mid: [] for mid in material_ids}
@@ -589,6 +596,9 @@ def project_detail(project_id: str):
         source_project=source_project,
         customer=customer,
         materials=materials,
+        materials_by_opportunity=materials_by_opportunity,
+        material_opportunity_types=MATERIAL_OPPORTUNITY_TYPES,
+        market_scope=market_scope,
         competitors_by_material=competitors_by_material,
         activities=activities,
         stage_events=stage_events,

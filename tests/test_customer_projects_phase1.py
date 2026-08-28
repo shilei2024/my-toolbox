@@ -7,6 +7,7 @@ import json
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from io import BytesIO
 
 from openpyxl import load_workbook
@@ -31,6 +32,7 @@ from customer_projects.models import (  # noqa: E402
 )
 from customer_projects.services.projects import (  # noqa: E402
     bootstrap_organization,
+    build_market_scope,
     create_customer,
     create_project,
     local_day_bounds,
@@ -134,7 +136,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         detail = self.client.get(f"/api/v1/customer-projects/projects/{project_id}")
         self.assertEqual(detail.headers["ETag"], '"1"')
         self.assertEqual(detail.get_json()["data"]["product_name"], "车载电源控制器")
-        self.assertEqual(detail.get_json()["data"]["annual_usage"], "120000.0000")
+        self.assertEqual(detail.get_json()["data"]["annual_usage"], "120000")
         with app.app_context():
             self.assertEqual(db.session.query(CustomerProject).count(), 1)
             self.assertEqual(db.session.query(ProjectStageEvent).count(), 1)
@@ -451,8 +453,9 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertIn("产品名称", rows[0])
         self.assertIn("含税人民币单价", rows[0])
         self.assertEqual(rows[1][4], "车载电源控制器")
-        self.assertEqual(rows[1][16], 1)
-        self.assertAlmostEqual(rows[1][17], 8.136, places=6)
+        self.assertEqual(rows[1][17], 1)
+        self.assertAlmostEqual(rows[1][18], 8.136, places=6)
+        self.assertEqual(rows[1][21], 240000)
 
         with app.app_context():
             event = db.session.scalar(
@@ -773,6 +776,74 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.get_json()["error"]["code"], "VALIDATION_ERROR")
+
+    def test_project_annual_usage_requires_positive_integer(self) -> None:
+        project_id = self._seed_project()
+        self._login()
+        response = self.client.patch(
+            f"/api/v1/customer-projects/projects/{project_id}",
+            json={"annual_usage": "120000.5"},
+            headers={"If-Match": '"1"'},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.get_json()["error"]["field_errors"]["annual_usage"],
+            "请输入大于 0 的整数",
+        )
+
+    def test_material_opportunity_categories_drive_market_scope(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            materials = [
+                ProjectMaterial(
+                    organization_id=self.org_id,
+                    project_id=project_id,
+                    opportunity_type="design_in",
+                    promoted_brand="Mavis",
+                    promoted_mpn="DESIGN-1",
+                    machine_quantity=Decimal("2"),
+                    unit_price_usd=Decimal("1"),
+                    idempotency_key="scope-design",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+                ProjectMaterial(
+                    organization_id=self.org_id,
+                    project_id=project_id,
+                    opportunity_type="matched_opportunity",
+                    promoted_brand="Mavis",
+                    promoted_mpn="MATCH-1",
+                    machine_quantity=Decimal("1"),
+                    unit_price_usd=Decimal("0.5"),
+                    idempotency_key="scope-matched",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+                ProjectMaterial(
+                    organization_id=self.org_id,
+                    project_id=project_id,
+                    opportunity_type="competitive_opportunity",
+                    promoted_brand="Mavis",
+                    promoted_mpn="REPLACE-1",
+                    machine_quantity=Decimal("3"),
+                    unit_price_usd=Decimal("0.25"),
+                    idempotency_key="scope-competitive",
+                    created_by_user_id=self.sales_id,
+                    updated_by_user_id=self.sales_id,
+                ),
+            ]
+            db.session.add_all(materials)
+            db.session.commit()
+            scope = build_market_scope(project, materials)
+            self.assertEqual(scope["tam_usd"], Decimal("390000.00"))
+            self.assertEqual(scope["sam_usd"], Decimal("300000.00"))
+            self.assertEqual(scope["som_usd"], Decimal("240000.00"))
+        self._login()
+        page = self.client.get(f"/customer-projects/projects/{project_id}")
+        html = page.get_data(as_text=True)
+        self.assertIn("USD 390,000.00", html)
+        self.assertIn('data-opportunity-type="competitive_opportunity"', html)
 
     def test_manager_reactivates_terminal_project_without_losing_history(self) -> None:
         project_id = self._seed_project()

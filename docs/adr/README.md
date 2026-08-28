@@ -8,6 +8,7 @@
 
 | ADR | 决策 |
 | --- | --- |
+| [0032](0032-customer-project-material-opportunity-and-market-scope.md) | 客户项目物料机会分类与 TAM/SAM/SOM 派生 |
 | [0001](0001-phase-1-generation-service-boundary.md) | Generation Service 边界 |
 | [0002](0002-phase-2-postgresql-ai-schema-and-cos.md) | PostgreSQL AI Schema 与腾讯云 COS |
 | [0003](0003-phase-3-provider-contract.md) | Provider Contract |

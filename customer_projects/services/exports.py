@@ -11,11 +11,16 @@ from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy import func, select
 
 from customer_projects.models import Customer, CustomerProject, ProjectExportPolicy, ProjectMaterial, ProjectStatusCatalog
 from customer_projects.permissions import can_edit_prices
-from customer_projects.services.projects import add_audit
+from customer_projects.services.projects import (
+    MATERIAL_OPPORTUNITY_TYPES,
+    add_audit,
+    material_annual_value_usd,
+)
 from extensions import db
 from models import User
 from shared.models import OrganizationMembership
@@ -182,15 +187,15 @@ def build_project_export(
     includes_prices = bool(policy.include_prices and can_edit_prices(membership))
     headers = [
         "项目编号", "客户", "客户评级", "项目名称", "产品名称", "项目年用量", "阶段",
-        "主业务", "下一步", "下次跟进", "推广品牌", "推广型号", "应用位置", "单机数量",
+        "主业务", "下一步", "下次跟进", "机会分类", "推广品牌", "推广型号", "应用位置", "单机数量",
     ]
     if includes_prices:
-        headers.extend(["录入单价", "录入币别", "美元单价", "含税人民币单价", "USD/CNY汇率", "价格更新时间"])
+        headers.extend(["录入单价", "录入币别", "美元单价", "含税人民币单价", "USD/CNY汇率", "价格更新时间", "年度机会金额（USD）"])
 
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet("客户项目台账")
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:{'T' if includes_prices else 'N'}{row_count + 1}"
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{row_count + 1}"
     header_cells = []
     for header in headers:
         cell = WriteOnlyCell(sheet, value=header)
@@ -213,12 +218,18 @@ def build_project_export(
                 owners.get(project.primary_sales_user_id, ""),
                 project.next_action,
                 _aware(project.next_follow_up_at).strftime("%Y-%m-%d %H:%M"),
+                MATERIAL_OPPORTUNITY_TYPES.get(material.opportunity_type, material.opportunity_type) if material else "",
                 material.promoted_brand if material else "",
                 (material.promoted_mpn or "待确认") if material else "",
                 (material.application_position or "") if material else "",
                 float(material.machine_quantity) if material and material.machine_quantity is not None else None,
             ]
             if includes_prices:
+                annual_value = material_annual_value_usd(
+                    project.annual_usage,
+                    material.machine_quantity if material else None,
+                    material.unit_price_usd if material else None,
+                )
                 row.extend([
                     float(material.target_price) if material and material.target_price is not None else None,
                     (material.currency or "") if material else "",
@@ -226,6 +237,7 @@ def build_project_export(
                     float(material.unit_price_cny_tax_included) if material and material.unit_price_cny_tax_included is not None else None,
                     float(material.fx_rate_usd_cny) if material and material.fx_rate_usd_cny is not None else None,
                     _aware(material.price_updated_at).strftime("%Y-%m-%d %H:%M") if material and material.price_updated_at else "",
+                    float(annual_value) if annual_value is not None else None,
                 ])
             sheet.append([_safe_excel_value(value) for value in row])
 
