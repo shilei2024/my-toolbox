@@ -9,6 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 
 from openpyxl import load_workbook
 
@@ -551,7 +552,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
-    def test_price_form_accepts_decimal_values_and_renders_decimal_inputs(self) -> None:
+    def test_price_form_accepts_decimal_values_without_native_number_restrictions(self) -> None:
         project_id = self._seed_project()
         app._fx_cache = {
             "rates": {"USD": 1.0, "CNY": 7.2},
@@ -567,6 +568,12 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             'name="unit_price" min="0" step="any"',
             html,
         )
+        script = Path(app.static_folder, "customer_projects", "customer-projects.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('input.type = "text"', script)
+        self.assertIn('input.inputMode = "decimal"', script)
+        self.assertIn('replace(/[，。．]/g, ".")', script)
 
         created = self.client.post(
             f"/customer-projects/projects/{project_id}/materials",

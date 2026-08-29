@@ -69,14 +69,19 @@
   });
 
   /**
-   * 价格输入统一口径：允许小数（最多 5 位），失焦时去除多余小数位与末尾 0。
-   * step 设为 any 避免浏览器按 step 校验拦截小数提交。
+   * 价格输入统一口径：使用 text 而非 number，避免部分移动浏览器把 number
+   * 键盘锁定为整数、导致无法输入小数点。金额格式与精度始终由服务端 Decimal
+   * 校验；失焦时仅规范化合法数值的显示。
    */
   root.querySelectorAll('input[name="unit_price"], input[name="quoted_price"]').forEach((input) => {
-    input.step = "any";
-    input.min = "0";
+    input.type = "text";
     input.inputMode = "decimal";
+    input.autocomplete = "off";
+    const normalizeSeparator = () => {
+      input.value = input.value.replace(/[，。．]/g, ".");
+    };
     const normalize = () => {
+      normalizeSeparator();
       if (input.value === "") return;
       const value = Number(input.value);
       if (Number.isFinite(value)) {
@@ -84,6 +89,7 @@
       }
     };
     normalize();
+    input.addEventListener("input", normalizeSeparator);
     input.addEventListener("blur", normalize);
   });
 
