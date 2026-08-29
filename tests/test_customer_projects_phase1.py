@@ -551,6 +551,46 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_price_form_accepts_decimal_values_and_renders_decimal_inputs(self) -> None:
+        project_id = self._seed_project()
+        app._fx_cache = {
+            "rates": {"USD": 1.0, "CNY": 7.2},
+            "updated": "test-rate",
+            "ts": time.time(),
+        }
+        self._login()
+
+        page = self.client.get(f"/customer-projects/projects/{project_id}")
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn(
+            'name="unit_price" min="0" step="any"',
+            html,
+        )
+
+        created = self.client.post(
+            f"/customer-projects/projects/{project_id}/materials",
+            data={
+                "idempotency_key": "decimal-price-form",
+                "promoted_brand": "Mavis",
+                "promoted_mpn": "DECIMAL-PRICE",
+                "machine_quantity": "2",
+                "unit_price": "1.23456",
+                "currency": "USD",
+            },
+        )
+        self.assertEqual(created.status_code, 302)
+        with app.app_context():
+            material = db.session.scalar(
+                db.select(ProjectMaterial).where(
+                    ProjectMaterial.project_id == project_id,
+                    ProjectMaterial.promoted_mpn == "DECIMAL-PRICE",
+                )
+            )
+            self.assertIsNotNone(material)
+            self.assertEqual(material.target_price, Decimal("1.23456"))
+            self.assertEqual(material.unit_price_usd, Decimal("1.23456"))
+
     def test_material_quantity_is_integer_and_price_has_at_most_five_decimals(self) -> None:
         project_id = self._seed_project()
         app._fx_cache = {
