@@ -75,6 +75,7 @@
   root.querySelectorAll('input[name="unit_price"], input[name="quoted_price"]').forEach((input) => {
     input.step = "any";
     input.min = "0";
+    input.inputMode = "decimal";
     const normalize = () => {
       if (input.value === "") return;
       const value = Number(input.value);
