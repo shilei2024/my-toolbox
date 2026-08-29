@@ -78,7 +78,9 @@
     input.inputMode = "decimal";
     input.autocomplete = "off";
     const normalizeSeparator = () => {
-      input.value = input.value.replace(/[，。．]/g, ".");
+      // 部分移动输入法会为一次小数键触控连续派发两个分隔符；
+      // 仅折叠相邻分隔符，非连续的非法格式仍交由服务端提示。
+      input.value = input.value.replace(/[，。．]/g, ".").replace(/\.{2,}/g, ".");
     };
     const normalize = () => {
       normalizeSeparator();
