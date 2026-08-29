@@ -574,6 +574,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertIn('input.type = "text"', script)
         self.assertIn('input.inputMode = "decimal"', script)
         self.assertIn('replace(/[，。．]/g, ".")', script)
+        self.assertIn('replace(/\\.{2,}/g, ".")', script)
 
         created = self.client.post(
             f"/customer-projects/projects/{project_id}/materials",
