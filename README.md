@@ -36,7 +36,7 @@ deploy/                      # 生产部署（compose、Caddy、迁移脚本）
 ```
 
 最新能力：AI 生图/画廊、昵称、双积分账本、积分兑换码、模型配置中心等，见
-[CHANGELOG.md](CHANGELOG.md) 与 [平台升级方案](docs/development/platform-upgrade-plan.md)。
+[CHANGELOG.md](CHANGELOG.md) 与[平台路线图](docs/roadmap/ai-toolbox-platform-roadmap.md)。
 
 ### 1. 获取代码
 

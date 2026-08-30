@@ -27,8 +27,8 @@
 - **本地开发**：见 [local-development-bridge.md](deployment/local-development-bridge.md)。
 - **变更记录**：根目录 [CHANGELOG.md](../CHANGELOG.md) 为最新权威变更日志；
   [changelog/](changelog/README.md) 保留历史阶段档案，不再追加新条目。
-- **平台升级方案**：8 项需求与 Phase 1–3 进度见
-  [platform-upgrade-plan.md](development/platform-upgrade-plan.md)。
+- **平台升级方案**：原 8 项需求方案已结项；后续待办（订阅会员、Provider
+  凭证后台维护等）已并入[平台路线图](roadmap/ai-toolbox-platform-roadmap.md)的 M2/M5。
 
 ## 文档治理规则
 
