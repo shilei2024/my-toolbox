@@ -568,6 +568,8 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             'name="unit_price" min="0" step="any"',
             html,
         )
+        self.assertIn('cp-icon cp-icon--dashboard', html)
+        self.assertIn('cp-icon cp-icon--project', html)
         script = Path(app.static_folder, "customer_projects", "customer-projects.js").read_text(
             encoding="utf-8"
         )
@@ -575,6 +577,14 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertIn('input.inputMode = "decimal"', script)
         self.assertIn('replace(/[，。．]/g, ".")', script)
         self.assertIn('replace(/\\.{2,}/g, ".")', script)
+        self.assertIn('preview.classList.add("cp-price-preview")', script)
+        self.assertIn('cp-price-preview__currency', script)
+        stylesheet = Path(app.static_folder, "customer_projects", "customer-projects.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('.cp-price-preview {', stylesheet)
+        self.assertIn('color: #123e6a !important', stylesheet)
+        self.assertIn('.cp-icon--dashboard', stylesheet)
 
         created = self.client.post(
             f"/customer-projects/projects/{project_id}/materials",

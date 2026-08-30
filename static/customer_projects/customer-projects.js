@@ -419,16 +419,58 @@
           const currencyInput = form.querySelector('[name="currency"]');
           const preview = form.querySelector("[data-price-preview]");
           if (!amountInput || !currencyInput || !preview) return;
+          preview.classList.add("cp-price-preview");
+          const renderPreview = ({ usd, cnyTax, rate: previewRate, error = false }) => {
+            preview.classList.toggle("is-error", error);
+            preview.replaceChildren();
+            const icon = document.createElement("span");
+            icon.className = "cp-price-preview__icon";
+            const iconGlyph = document.createElement("i");
+            iconGlyph.className = `bi ${error ? "bi-exclamation-triangle" : "bi-arrow-left-right"}`;
+            icon.setAttribute("aria-hidden", "true");
+            icon.append(iconGlyph);
+            preview.append(icon);
+            if (error) {
+              const message = document.createElement("span");
+              message.textContent = "汇率暂不可用，保存时会再次校验";
+              preview.append(message);
+              return;
+            }
+            if (usd !== undefined && cnyTax !== undefined) {
+              const currency = (code, value) => {
+                const chip = document.createElement("span");
+                chip.className = `cp-price-preview__currency is-${code.toLowerCase()}`;
+                const label = document.createElement("span");
+                label.textContent = code;
+                const amount = document.createElement("strong");
+                amount.textContent = code === "CNY" ? `¥${value}` : value;
+                chip.append(label, amount);
+                return chip;
+              };
+              preview.append(currency("USD", usd));
+              const swap = document.createElement("span");
+              swap.className = "cp-price-preview__swap";
+              swap.textContent = "↔";
+              preview.append(swap, currency("CNY", cnyTax));
+            }
+            const rateLabel = document.createElement("span");
+            rateLabel.className = "cp-price-preview__rate";
+            rateLabel.textContent = "USD/CNY ";
+            const rateValue = document.createElement("strong");
+            rateValue.textContent = Number(previewRate).toFixed(4);
+            rateLabel.append(rateValue);
+            preview.append(rateLabel);
+          };
           const updatePreview = () => {
             const amount = Number(amountInput.value);
             if (!Number.isFinite(amount) || amount <= 0) {
-              preview.textContent = `当前 USD/CNY 汇率 ${rate.toFixed(4)}`;
+              renderPreview({ rate });
               return;
             }
             const usd = currencyInput.value === "USD" ? amount : amount / 1.13 / rate;
             const cnyTax = currencyInput.value === "USD" ? amount * rate * 1.13 : amount;
             const displayPrice = (value) => value.toFixed(5).replace(/\.?0+$/, "");
-            preview.textContent = `USD ${displayPrice(usd)} · 含税人民币 ¥${displayPrice(cnyTax)}（13% 增值税）`;
+            renderPreview({ usd: displayPrice(usd), cnyTax: displayPrice(cnyTax), rate });
           };
           amountInput.addEventListener("input", updatePreview);
           currencyInput.addEventListener("change", updatePreview);
@@ -438,7 +480,19 @@
       .catch(() => {
         priceForms.forEach((form) => {
           const preview = form.querySelector("[data-price-preview]");
-          if (preview) preview.textContent = "汇率暂不可用，保存时会再次校验";
+          if (preview) {
+            preview.classList.add("cp-price-preview", "is-error");
+            preview.replaceChildren();
+            const icon = document.createElement("span");
+            icon.className = "cp-price-preview__icon";
+            icon.setAttribute("aria-hidden", "true");
+            const iconGlyph = document.createElement("i");
+            iconGlyph.className = "bi bi-exclamation-triangle";
+            icon.append(iconGlyph);
+            const message = document.createElement("span");
+            message.textContent = "汇率暂不可用，保存时会再次校验";
+            preview.append(icon, message);
+          }
         });
       });
   }
