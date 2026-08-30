@@ -39,7 +39,7 @@
     <a href="#cat-{{ cat }}" class="category-chip">
       <i class="bi {{ meta.icon }}" style="color: {{ meta.color }};"></i>
       <span>{{ meta.title }}</span>
-      <span class="category-count">{{ groups[cat] | length }}</span>
+      <span class="category-count">{{ category_counts.get(cat, groups[cat] | length) }}</span>
     </a>
   {% endfor %}
 </nav>
@@ -52,28 +52,6 @@
   <p>所有处理都按类别整理；专有工具仅向获授权账户显示。</p>
 </div>
 
-{% if customer_projects_available %}
-<section id="customer-projects-entry" class="tool-section" aria-labelledby="customer-projects-entry-title">
-  <div class="category-header">
-    <span class="category-badge" style="background:#0d6efd1a;color:#0d6efd;"><i class="bi bi-kanban"></i></span>
-    <div><h3 id="customer-projects-entry-title">客户项目</h3><p>管理客户、项目进展、跟进动作和竞争方案。</p></div>
-    <span class="category-total">业务台账</span>
-  </div>
-  <div class="tool-grid">
-    <article>
-      <a class="tool-card-link" href="{{ url_for('customer_projects.dashboard') }}">
-        <div class="tool-card">
-          <div class="tool-card-topline"><span class="tool-icon" style="background:#0d6efd1a;color:#0d6efd;"><i class="bi bi-kanban"></i></span></div>
-          <h4>客户项目工作台</h4>
-          <p>查看逾期动作、项目阶段、最近跟进和下一步计划。</p>
-          <div class="tool-card-footer"><span>进入工作台</span><i class="bi bi-arrow-up-right"></i></div>
-        </div>
-      </a>
-    </article>
-  </div>
-</section>
-{% endif %}
-
 {% for cat in categories %}
   {% set meta = category_meta.get(cat, {"title": cat, "icon": "bi-grid", "color": "#6c757d", "description": ""}) %}
   <section id="cat-{{ cat }}" class="tool-section">
@@ -83,10 +61,25 @@
         <i class="bi {{ meta.icon }}"></i>
       </span>
       <div><h3>{{ meta.title }}</h3>{% if meta.description %}<p>{{ meta.description }}</p>{% endif %}</div>
-      <span class="category-total">{{ groups[cat] | length }} 个工具</span>
+      <span class="category-total">{{ category_counts.get(cat, groups[cat] | length) }} 个工具</span>
     </div>
 
     <div class="tool-grid">
+      {% if cat == 'business' and customer_projects_available %}
+        <article>
+          <a class="tool-card-link" href="{{ url_for('customer_projects.dashboard') }}">
+            <div class="tool-card tool-card-featured">
+              <div class="tool-card-topline">
+                <span class="tool-icon" style="background:#0d6efd1a;color:#0d6efd;"><i class="bi bi-kanban"></i></span>
+                <span class="tool-private tool-workbench-label"><i class="bi bi-diagram-3"></i> 协同台账</span>
+              </div>
+              <h4>客户项目工作台</h4>
+              <p>统一查看逾期动作、项目阶段、最近跟进和下一步计划。</p>
+              <div class="tool-card-footer"><span>进入工作台</span><i class="bi bi-arrow-up-right"></i></div>
+            </div>
+          </a>
+        </article>
+      {% endif %}
       {% for tool in groups[cat] %}
         <article>
           {% if tool.external_url %}

@@ -268,13 +268,29 @@ def create_app() -> Flask:
         def _cat_sort_key(cat: str) -> tuple[int, str]:
             meta = CATEGORY_META.get(cat)
             return (meta["order"] if meta else 100, cat)
+        # Customer projects is a first-class business capability rather than a
+        # separately maintained tool category. Keep the persisted tool registry
+        # unchanged, but include its visible entry in the business category's
+        # homepage count.
+        try:
+            from customer_projects.permissions import module_available
+
+            customer_projects_available = module_available()
+        except Exception:  # noqa: BLE001
+            customer_projects_available = False
+        if customer_projects_available:
+            groups.setdefault("business", [])
         categories = sorted(groups.keys(), key=_cat_sort_key)
+        category_counts = {category: len(items) for category, items in groups.items()}
+        if customer_projects_available:
+            category_counts["business"] = category_counts.get("business", 0) + 1
         return render_template(
             "index.html",
             tools=tools,
             groups=groups,
             categories=categories,
             category_meta=CATEGORY_META,
+            category_counts=category_counts,
         )
 
     @app.get("/privacy")
