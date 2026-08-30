@@ -6,3 +6,4 @@
 
 - [客户项目跟进系统 PRD](customer-project-tracking-prd.md)：Codex 实施基线，覆盖客户项目、物料、竞品、协作、提醒和生命周期管理。
 - [客户项目跟进低保真原型](customer-project-tracking-prototype.md)：Phase 0 信息架构、桌面/移动端关键页面和冲突交互评审稿。
+- [主站界面规范](main-site-ui.md)：工具首页的信息架构、主题偏好与视觉体验边界。
