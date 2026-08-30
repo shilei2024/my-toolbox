@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.37 · 清理开发阶段文档中间物 / 2026-08-30
+
+- 删除 `docs/development/`：`gallery-media-generation-plan.md`（PR #28 已合入，内容由 ADR-0025/0026 与 m4 文档覆盖）；`platform-upgrade-plan.md`（8 项需求 Phase 1–2 已完成，追加的变更记录与 CHANGELOG 0.6.1–0.9.14 重复，剩余待办并入 roadmap M2/M5）。
+- 删除 `docs/product/customer-project-tracking-prd.docx`（保留 .md 权威版本，符合文档治理规则）。
+- 同步修复 README、docs/README 中对已删除方案的引用；本地清理 `.tmp` 运行日志等未跟踪中间产物。无代码、数据库或部署变更。
+
 ## 0.9.36 · 修复机会分类快速转换 / 2026-08-29
 
 - 修复 Design In / Design Win / Evaluation 三类之间无法通过徽章快速转换的问题：隐藏的补充品牌/型号输入仍随表单提交空字符串，触发"推广品牌必填"误报；现在隐藏时同步 disabled（禁用输入不提交，服务端回退到物料现有品牌/型号）。
