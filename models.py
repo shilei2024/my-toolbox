@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Optional
 
 from flask_login import UserMixin
@@ -29,10 +29,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db
+from utils.helpers import utc_naive_now
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    """UTC wall time for this module's legacy timezone-naive columns."""
+    return utc_naive_now()
 
 
 # -----------------------------------------------------------------------------

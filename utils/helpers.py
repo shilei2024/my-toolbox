@@ -8,12 +8,13 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from flask import current_app, has_request_context, session
 from werkzeug.utils import secure_filename
 
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-CHINA_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
+CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
 DOWNLOAD_SESSION_KEY = "issued_downloads"
 DOWNLOAD_SESSION_LIMIT = 24
 DOWNLOAD_TTL_SECONDS = 60 * 30
@@ -69,6 +70,17 @@ def sha256_of(data: bytes) -> str:
 
 def utc_today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def utc_naive_now() -> datetime:
+    """Return UTC wall time for legacy timezone-naive database columns.
+
+    Binding an aware datetime to PostgreSQL ``timestamp without time zone``
+    first converts it through the connection session timezone.  On a China-
+    configured database that silently adds eight hours before the display
+    layer adds another eight.  Normalize these legacy values before binding.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def china_now() -> datetime:
