@@ -445,21 +445,96 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self._login()
         created = self.client.post(
             "/customer-projects/customers",
-            data={"name": "评级客户", "grade": "B"},
+            data={"name": "评级客户", "short_name": "评级", "grade": "AA"},
             follow_redirects=True,
         )
-        self.assertIn("B", created.get_data(as_text=True))
+        self.assertIn("AA", created.get_data(as_text=True))
+        self.assertIn("评级", created.get_data(as_text=True))
         with app.app_context():
             customer = db.session.scalar(db.select(Customer).where(Customer.name == "评级客户"))
             customer_id = customer.id
-            self.assertEqual(customer.grade, "B")
+            self.assertEqual(customer.grade, "AA")
         updated = self.client.post(
             f"/customer-projects/customers/{customer_id}/grade",
-            data={"grade": "A"},
+            data={"grade": "AAA"},
         )
         self.assertEqual(updated.status_code, 302)
         with app.app_context():
-            self.assertEqual(db.session.get(Customer, customer_id).grade, "A")
+            self.assertEqual(db.session.get(Customer, customer_id).grade, "AAA")
+
+        invalid = self.client.post(
+            f"/customer-projects/customers/{customer_id}/grade",
+            data={"grade": "B"},
+            follow_redirects=True,
+        )
+        self.assertIn("客户评级无效", invalid.get_data(as_text=True))
+
+    def test_reimbursement_links_organization_customer_by_short_name_and_grade(self) -> None:
+        with app.app_context():
+            membership = db.session.scalar(
+                db.select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == self.sales_id
+                )
+            )
+            customer = create_customer(
+                {"name": "深圳示例科技有限公司", "short_name": "示例科技", "grade": "AA"},
+                membership,
+            )
+            db.session.commit()
+            customer_id = customer.id
+        self._login()
+
+        bootstrap = self.client.get("/tools/reimbursement/api/bootstrap")
+        self.assertEqual(bootstrap.status_code, 200)
+        data = bootstrap.get_json()
+        self.assertEqual(data["customer_levels"], ["0-1", "A", "AA", "AAA"])
+        self.assertEqual(data["customers"][0]["display_name"], "示例科技")
+        period = self.client.post(
+            "/tools/reimbursement/api/periods",
+            json={
+                "name": "2026年9-10月",
+                "start_year": 2026,
+                "start_month": 9,
+                "end_year": 2026,
+                "end_month": 10,
+            },
+        ).get_json()["period"]
+        invoice = self.client.post(
+            "/tools/reimbursement/api/invoices",
+            json={
+                "period_id": period["id"],
+                "office_id": data["offices"][0]["id"],
+                "customer_id": customer_id,
+                "customer_level": "0-1",
+                "invoice_number": "LINKED-001",
+                "total_amount": 100,
+            },
+        )
+        self.assertEqual(invoice.status_code, 201)
+        saved = invoice.get_json()["invoice"]
+        self.assertEqual(saved["customer"]["display_name"], "示例科技")
+        self.assertEqual(saved["customer_level"], "AA")
+
+        with app.app_context():
+            customer = db.session.get(Customer, customer_id)
+            customer.grade = "AAA"
+            customer.short_name = "示例"
+            db.session.commit()
+        listing = self.client.get(
+            f"/tools/reimbursement/api/invoices?period_id={period['id']}"
+        ).get_json()["invoices"]
+        self.assertEqual(listing[0]["customer"]["display_name"], "示例")
+        self.assertEqual(listing[0]["customer_level"], "AAA")
+
+        rejected = self.client.post(
+            "/tools/reimbursement/api/invoices",
+            json={
+                "period_id": period["id"],
+                "office_id": data["offices"][0]["id"],
+                "customer_level": "level 1",
+            },
+        )
+        self.assertEqual(rejected.status_code, 400)
 
     def test_material_price_conversion_permissions_and_excel_export(self) -> None:
         project_id = self._seed_project()
@@ -887,6 +962,19 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertLess(home.index('id="cat-business"'), home.index("客户项目工作台"))
         self.assertIn('data-theme-option="github"', home)
         self.assertIn('data-theme-option="bright"', home)
+        theme_css = Path(app.static_folder, "css", "style.css").read_text(encoding="utf-8")
+        self.assertIn('--on-brand: #071226', theme_css)
+        self.assertIn('.site-body .modal-content', theme_css)
+        self.assertIn('.site-body .table-light', theme_css)
+        self.assertIn('html[data-theme="obsidian"] .site-body .btn-close', theme_css)
+        self.assertIn('.site-body .ze-upload-zone', theme_css)
+        self.assertIn('.site-body .ip-upload-zone', theme_css)
+        self.assertIn('.site-body #mdPreview th', theme_css)
+        reimbursement = Path(
+            app.template_folder, "tools", "reimbursement", "_body.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('html[data-theme="obsidian"] .rb-card', reimbursement)
+        self.assertIn('id="rbInvCustomer"', reimbursement)
         detail = self.client.get(f"/customer-projects/projects/{project_id}")
         self.assertEqual(detail.status_code, 200)
         html = detail.get_data(as_text=True)

@@ -267,9 +267,9 @@ EXPENSE_CATEGORIES = [
 
 CUSTOMER_LEVELS = [
     {"name": "0-1", "label": "0-1"},
-    {"name": "level 1", "label": "level 1"},
-    {"name": "level 2", "label": "level 2"},
-    {"name": "level 3", "label": "level 3"},
+    {"name": "A", "label": "A"},
+    {"name": "AA", "label": "AA"},
+    {"name": "AAA", "label": "AAA"},
 ]
 
 ENTERTAINMENT_CATEGORIES = ["餐费", "礼品", "其他"]
@@ -1772,8 +1772,8 @@ def _build_cover_file(cover_data):
 
     # Rows 3-6 (原始 rows 2-5): 数据行（4 levels，固定顺序）
     level_groups = cover_data.get("level_groups", [])
-    # 按 0-1, level 1, level 2, level 3 固定顺序排列
-    lvl_order = {"0-1": 0, "level 1": 1, "level 2": 2, "level 3": 3}
+    # 按 0-1, A, AA, AAA 固定顺序排列
+    lvl_order = {item["name"]: index for index, item in enumerate(CUSTOMER_LEVELS)}
     level_groups.sort(key=lambda lg: lvl_order.get(lg.get("level", ""), 99))
 
     row = 2

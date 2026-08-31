@@ -385,6 +385,7 @@ class ReimbursementInvoice(db.Model):
     __table_args__ = (
         Index("ix_rb_invoice_period", "period_id"),
         Index("ix_rb_invoice_category", "category_id"),
+        Index("ix_rb_invoice_customer", "customer_id"),
         Index("ix_rb_invoice_owner_status", "owner_type", "owner_id", "status"),
     )
 
@@ -407,6 +408,9 @@ class ReimbursementInvoice(db.Model):
     product_line: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     office: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        db.ForeignKey("customers.id", ondelete="SET NULL"), nullable=True
+    )
     customer_level: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     remarks: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     upload_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)

@@ -87,6 +87,32 @@
   .rb-toast { position:fixed; right:24px; bottom:24px; z-index:11000; min-width:260px; max-width:380px; background:#172033; color:#fff; padding:12px 15px; border-radius:11px; box-shadow:0 12px 35px rgba(0,0,0,.22); display:none; font-size:.84rem; }
   .rb-toast.show { display:block; animation:rbIn .18s ease-out; }
   .rb-toast.error { background:#9f2925; }
+  html:not([data-theme]) .rb-app, html[data-theme="obsidian"] .rb-app { --ink:var(--theme-ink); --muted:var(--theme-ink-muted); --line:var(--theme-line); --brand:#63d6b6; --brand-2:#173a34; }
+  html:not([data-theme]) .rb-shell, html[data-theme="obsidian"] .rb-shell { background:var(--surface-soft); }
+  html:not([data-theme]) .rb-nav-frame, html:not([data-theme]) .rb-nav, html:not([data-theme]) .rb-nav-arrow,
+  html:not([data-theme]) .rb-card, html:not([data-theme]) .rb-kpi, html:not([data-theme]) .rb-period-card, html:not([data-theme]) .rb-category-card,
+  html[data-theme="obsidian"] .rb-nav-frame, html[data-theme="obsidian"] .rb-nav, html[data-theme="obsidian"] .rb-nav-arrow,
+  html[data-theme="obsidian"] .rb-card, html[data-theme="obsidian"] .rb-kpi, html[data-theme="obsidian"] .rb-period-card, html[data-theme="obsidian"] .rb-category-card { color:var(--ink); background:var(--surface); }
+  html:not([data-theme]) .rb-nav-arrow:disabled, html[data-theme="obsidian"] .rb-nav-arrow:disabled { color:var(--ink-muted); }
+  html:not([data-theme]) .rb-nav-arrow:hover:not(:disabled), html[data-theme="obsidian"] .rb-nav-arrow:hover:not(:disabled) { background:var(--surface-strong); }
+  html:not([data-theme]) .rb-active-period, html[data-theme="obsidian"] .rb-active-period { background:linear-gradient(135deg,var(--success-soft),var(--surface)); border-color:color-mix(in srgb,var(--success) 40%,var(--line)); }
+  html:not([data-theme]) .rb-active-period .name, html[data-theme="obsidian"] .rb-active-period .name { color:var(--success); }
+  html:not([data-theme]) .rb-btn-primary, html[data-theme="obsidian"] .rb-btn-primary { color:#071a15; background:#63d6b6; }
+  html:not([data-theme]) .rb-btn-primary:hover, html[data-theme="obsidian"] .rb-btn-primary:hover { color:#071a15; background:#8ae4c9; }
+  html:not([data-theme]) .rb-btn-light, html[data-theme="obsidian"] .rb-btn-light { color:var(--ink); border-color:var(--line-strong); background:var(--surface-strong); }
+  html:not([data-theme]) .rb-btn-danger, html[data-theme="obsidian"] .rb-btn-danger { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 45%,var(--line)); background:var(--danger-soft); }
+  html:not([data-theme]) .rb-table th, html:not([data-theme]) .rb-summary-box, html:not([data-theme]) .rb-aux-table tfoot th,
+  html[data-theme="obsidian"] .rb-table th, html[data-theme="obsidian"] .rb-summary-box, html[data-theme="obsidian"] .rb-aux-table tfoot th { color:var(--ink-muted); background:var(--surface-strong); }
+  html:not([data-theme]) .rb-table td, html[data-theme="obsidian"] .rb-table td { border-color:var(--line); }
+  html:not([data-theme]) .rb-badge, html[data-theme="obsidian"] .rb-badge { color:var(--ink)!important; }
+  html:not([data-theme]) .rb-status-pending, html[data-theme="obsidian"] .rb-status-pending { color:var(--warning-ink); background:var(--warning-soft); }
+  html:not([data-theme]) .rb-status-approved, html[data-theme="obsidian"] .rb-status-approved { color:var(--success-ink); background:var(--success-soft); }
+  html:not([data-theme]) .rb-status-rejected, html[data-theme="obsidian"] .rb-status-rejected { color:var(--danger-ink); background:var(--danger-soft); }
+  html:not([data-theme]) .rb-aux-tabs button, html[data-theme="obsidian"] .rb-aux-tabs button { color:var(--ink-muted); border-color:var(--line); background:var(--surface); }
+  html:not([data-theme]) .rb-aux-tabs button.active, html[data-theme="obsidian"] .rb-aux-tabs button.active { color:var(--success); border-color:color-mix(in srgb,var(--success) 45%,var(--line)); background:var(--success-soft); }
+  html:not([data-theme]) .rb-linked-detail, html:not([data-theme]) .rb-upload,
+  html[data-theme="obsidian"] .rb-linked-detail, html[data-theme="obsidian"] .rb-upload { border-color:color-mix(in srgb,var(--success) 45%,var(--line)); background:var(--success-soft); }
+  html:not([data-theme]) .rb-period-switcher select, html[data-theme="obsidian"] .rb-period-switcher select { color:var(--ink); border-color:var(--line-strong); background:var(--surface); }
   @keyframes rbIn { from{transform:translateY(8px);opacity:0} to{transform:none;opacity:1} }
   @media(max-width:900px){ .rb-kpis{grid-template-columns:repeat(2,1fr)} .rb-grid-2{grid-template-columns:1fr} .rb-period-grid,.rb-category-grid,.rb-office-grid{grid-template-columns:repeat(2,1fr)} }
   @media(max-width:600px){ .rb-main{padding:14px} .rb-kpis{grid-template-columns:1fr 1fr;gap:9px} .rb-kpi{padding:14px}.rb-period-grid,.rb-category-grid,.rb-office-grid{grid-template-columns:1fr}.rb-topbar{padding:19px}.rb-topbar-row{align-items:flex-start;flex-direction:column}.rb-period-switcher{width:100%}.rb-period-switcher select{min-width:0;flex:1}.rb-summary-grid{grid-template-columns:1fr} }
@@ -147,7 +173,7 @@
           <button class="rb-btn rb-btn-primary ms-auto" onclick="RB.openInvoice()"><i class="bi bi-plus-lg"></i>上传发票</button>
         </div>
         <div class="rb-card">
-          <div class="rb-table-wrap"><table class="rb-table"><thead><tr><th>序号</th><th>发票号码</th><th>开票日期</th><th>开票单位</th><th>类别</th><th>价税合计</th><th>状态</th><th>操作</th></tr></thead><tbody id="rbInvoiceBody"></tbody></table></div>
+          <div class="rb-table-wrap"><table class="rb-table"><thead><tr><th>序号</th><th>发票号码</th><th>开票日期</th><th>开票单位</th><th>客户简称</th><th>客户等级</th><th>类别</th><th>价税合计</th><th>状态</th><th>操作</th></tr></thead><tbody id="rbInvoiceBody"></tbody></table></div>
           <div class="rb-card-body d-flex justify-content-between align-items-center py-2"><span class="rb-meta" id="rbPageInfo"></span><div class="d-flex gap-2"><button class="rb-btn rb-btn-light" id="rbPrev" onclick="RB.changePage(-1)">上一页</button><button class="rb-btn rb-btn-light" id="rbNext" onclick="RB.changePage(1)">下一页</button></div></div>
         </div>
       </section>
@@ -227,10 +253,11 @@
       <div class="col-md-4"><label class="form-label">金额（不含税）</label><input type="number" step="0.01" class="form-control" id="rbInvAmount"></div>
       <div class="col-md-4"><label class="form-label">税额</label><input type="number" step="0.01" class="form-control" id="rbInvTax"></div>
       <div class="col-md-4"><label class="form-label">价税合计</label><input type="number" step="0.01" class="form-control" id="rbInvTotal"></div>
-      <div class="col-md-4"><label class="form-label">产品线</label><select class="form-select" id="rbInvProduct" onchange="RB.syncProductCode()"></select></div>
+      <div class="col-md-3"><label class="form-label">产品线</label><select class="form-select" id="rbInvProduct" onchange="RB.syncProductCode()"></select></div>
       <div class="col-md-2"><label class="form-label">产品线代码</label><input class="form-control" id="rbInvProductCode" readonly title="根据所选产品线自动填充"></div>
-      <div class="col-md-3"><label class="form-label">办事处 *</label><select class="form-select" id="rbInvOffice"></select></div>
-      <div class="col-md-3"><label class="form-label">客户等级</label><select class="form-select" id="rbInvLevel"><option value="">未分类</option><option>0-1</option><option>level 1</option><option>level 2</option><option>level 3</option></select></div>
+      <div class="col-md-2"><label class="form-label">办事处 *</label><select class="form-select" id="rbInvOffice"></select></div>
+      <div class="col-md-3"><label class="form-label">关联客户</label><select class="form-select" id="rbInvCustomer" onchange="RB.syncCustomer()"><option value="">未关联客户</option></select></div>
+      <div class="col-md-2"><label class="form-label">客户等级</label><select class="form-select" id="rbInvLevel"><option value="">未分类</option><option>0-1</option><option>A</option><option>AA</option><option>AAA</option></select></div>
       <div class="col-md-6"><label class="form-label">摘要</label><input class="form-control" id="rbInvDescription"></div>
       <div class="col-md-6"><label class="form-label">备注</label><input class="form-control" id="rbInvRemarks"></div>
     </div>
@@ -289,7 +316,7 @@
 
 <script>
 const RB = {
-  state:{periods:[],categories:[],product_lines:[],offices:[],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
+  state:{periods:[],categories:[],product_lines:[],offices:[],customers:[],customer_levels:['0-1','A','AA','AAA'],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
   modal(name){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(name)); },
   csrfToken(){return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')||''},
   async api(url,options={}){ options.headers={...options.headers,'X-CSRFToken':this.csrfToken()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
@@ -398,6 +425,9 @@ const RB = {
     document.getElementById('rbInvProduct').innerHTML='<option value="">请选择产品线</option>'+this.state.product_lines.map(p=>`<option value="${p.id}" ${String(p.id)===currentProduct?'selected':''}>${this.esc(p.code)} · ${this.esc(p.name)}</option>`).join('');
     const currentOffice=document.getElementById('rbInvOffice').value;
     document.getElementById('rbInvOffice').innerHTML='<option value="">请选择办事处</option>'+this.state.offices.map(o=>`<option value="${o.id}" ${String(o.id)===currentOffice?'selected':''}>${this.esc(o.name)}</option>`).join('');
+    const currentCustomer=document.getElementById('rbInvCustomer').value;
+    document.getElementById('rbInvCustomer').innerHTML='<option value="">未关联客户</option>'+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===currentCustomer?'selected':''}>${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}</option>`).join('');
+    document.getElementById('rbInvLevel').innerHTML='<option value="">未分类</option>'+this.state.customer_levels.map(level=>`<option value="${this.esc(level)}">${this.esc(level)}</option>`).join('');
     document.getElementById('rbExportPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');document.getElementById('rbExportPeriod').value=activeId;
   },
   async loadInvoices(page=1){
@@ -405,23 +435,25 @@ const RB = {
     try{const d=await this.api('/tools/reimbursement/api/invoices?'+q);this.state.invoices=d.invoices;this.state.page=d.pagination.page;this.state.pages=d.pagination.pages;this.renderInvoices(d.pagination)}catch(e){this.toast(e.message,true)}
   },
   renderInvoices(p){
-    document.getElementById('rbInvoiceBody').innerHTML=this.state.invoices.length?this.state.invoices.map((i,n)=>`<tr><td>${(p.page-1)*p.per_page+n+1}</td><td>${this.esc(i.invoice_number||'—')}</td><td>${i.invoice_date||'—'}</td><td>${this.esc(i.vendor||'—')}</td><td>${i.category?`<span class="rb-badge" style="color:${i.category.color};background:${i.category.color}18">${this.esc(i.category.name)}</span>`:'—'}</td><td><strong>${this.money(i.total_amount)}</strong></td><td>${this.status(i)}</td><td><div class="d-flex gap-1">${i.file_url?`<button class="rb-btn rb-btn-light py-1" onclick="RB.previewInvoice(${i.id})"><i class="bi bi-eye"></i>清晰预览</button>`:''}<button class="rb-btn rb-btn-light py-1" onclick="RB.openInvoice(${i.id})">编辑</button><button class="rb-btn rb-btn-danger py-1" onclick="RB.deleteInvoice(${i.id})">删除</button></div></td></tr>`).join(''):'<tr><td colspan="8" class="rb-empty">没有符合条件的发票</td></tr>';
+    document.getElementById('rbInvoiceBody').innerHTML=this.state.invoices.length?this.state.invoices.map((i,n)=>`<tr><td>${(p.page-1)*p.per_page+n+1}</td><td>${this.esc(i.invoice_number||'—')}</td><td>${i.invoice_date||'—'}</td><td>${this.esc(i.vendor||'—')}</td><td>${this.esc(i.customer?.display_name||'—')}</td><td>${this.esc(i.customer_level||'未分类')}</td><td>${i.category?`<span class="rb-badge" style="color:${i.category.color};background:${i.category.color}18">${this.esc(i.category.name)}</span>`:'—'}</td><td><strong>${this.money(i.total_amount)}</strong></td><td>${this.status(i)}</td><td><div class="d-flex gap-1">${i.file_url?`<button class="rb-btn rb-btn-light py-1" onclick="RB.previewInvoice(${i.id})"><i class="bi bi-eye"></i>清晰预览</button>`:''}<button class="rb-btn rb-btn-light py-1" onclick="RB.openInvoice(${i.id})">编辑</button><button class="rb-btn rb-btn-danger py-1" onclick="RB.deleteInvoice(${i.id})">删除</button></div></td></tr>`).join(''):'<tr><td colspan="10" class="rb-empty">没有符合条件的发票</td></tr>';
     document.getElementById('rbPageInfo').textContent=`第 ${p.page}/${p.pages} 页，共 ${p.total} 条`;document.getElementById('rbPrev').disabled=p.page<=1;document.getElementById('rbNext').disabled=p.page>=p.pages;
   },
   changePage(delta){const p=this.state.page+delta;if(p>=1&&p<=this.state.pages)this.loadInvoices(p)},
   openInvoice(id=null){
     const i=id?this.state.invoices.find(x=>x.id===id):null;document.getElementById('rbInvoiceTitle').textContent=i?'编辑发票':'新增发票';
-    const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line_id||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office_id||this.state.offices[0]?.id||'',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
+    const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line_id||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office_id||this.state.offices[0]?.id||'',rbInvCustomer:i?.customer_id||'',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
     const categorySelect=document.getElementById('rbInvCategory');
     if(i?.category_id){
       const cat=this.state.categories.find(c=>c.id===i.category_id);
       if(cat&&['communication','welfare'].includes(cat.export_key)&&![...categorySelect.options].some(o=>o.value===String(i.category_id)))categorySelect.add(new Option(this.esc(cat.name),String(i.category_id)));
     }
     if(i&&!i.category_id&&![...categorySelect.options].some(o=>o.value===''))categorySelect.add(new Option('未分类',''));
-    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);document.getElementById('rbUploadedFile').textContent=i?.file_name?`原件已保留：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderFilePreview(i?.file_url||'',i?.file_name||'','rbInvoiceFilePreview');this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
+    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);this.syncCustomer(false);document.getElementById('rbUploadedFile').textContent=i?.file_name?`原件已保留：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderFilePreview(i?.file_url||'',i?.file_name||'','rbInvoiceFilePreview');this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
   },
   calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2);this.syncLinkedDefaults(true)},
   syncProductCode(){const id=+document.getElementById('rbInvProduct').value;const p=this.state.product_lines.find(x=>x.id===id);document.getElementById('rbInvProductCode').value=p?.code||'';this.syncLinkedDefaults(true)},
+  selectedCustomer(){const id=document.getElementById('rbInvCustomer').value;return this.state.customers.find(item=>item.id===id)||null},
+  syncCustomer(updateLinked=true){const customer=this.selectedCustomer(),level=document.getElementById('rbInvLevel');if(customer)level.value=customer.grade||'';level.disabled=!!customer;level.title=customer?'等级来自客户项目跟进系统，需在客户资料中修改':'';if(updateLinked)this.syncLinkedDefaults(true)},
   linkedCategory(){const id=+document.getElementById('rbInvCategory').value;return this.state.categories.find(c=>c.id===id)||null},
   entertainmentCategories(){return (this.state.reference?.entertainment_categories?.length)?this.state.reference.entertainment_categories:['餐费','礼品','其他']},
   categoryOptions(value=''){
@@ -441,6 +473,7 @@ const RB = {
       :[['date','日期','date',3],['location','出差地','text',3],['customer','客户名称','text',3],['expense_type','费用类型','text',3],['amount','金额','number',4],['purpose','事由/产品线','text',8]];
     fields.innerHTML=specs.map(([key,label,type,width])=>{
       if(kind==='entertainment'&&key==='category')return `<div class="col-md-${width}"><label class="form-label">${label}</label><select id="rbLink_${key}" class="form-select">${this.categoryOptions(detail?.[key]||'')}</select></div>`;
+      if(key==='customer')return `<div class="col-md-${width}"><label class="form-label">客户简称</label><input id="rbLink_${key}" class="form-control" value="${this.esc(detail?.[key]??this.selectedCustomer()?.display_name??'')}" readonly title="由关联客户自动填充"></div>`;
       return `<div class="col-md-${width}"><label class="form-label">${label}</label><input id="rbLink_${key}" class="form-control" type="${type}" ${type==='number'?'step="0.01"':''} value="${this.esc(detail?.[key]??'')}"></div>`;
     }).join('');
     this.syncLinkedDefaults(false);
@@ -448,14 +481,14 @@ const RB = {
   syncLinkedDefaults(force=false){
     const kind=this.state.activeLinkedKind;if(!kind)return;const category=this.linkedCategory();
     const defaults=kind==='entertainment'
-      ?{date:document.getElementById('rbInvDate').value,category:'餐费',place:document.getElementById('rbInvVendor').value,amount:document.getElementById('rbInvTotal').value,purpose:this.selectedProductLine()?.name||''}
-      :{date:document.getElementById('rbInvDate').value,expense_type:category?.name||'',amount:document.getElementById('rbInvTotal').value,purpose:this.selectedProductLine()?.name||''};
+      ?{date:document.getElementById('rbInvDate').value,category:'餐费',place:document.getElementById('rbInvVendor').value,customer:this.selectedCustomer()?.display_name||'',amount:document.getElementById('rbInvTotal').value,purpose:this.selectedProductLine()?.name||''}
+      :{date:document.getElementById('rbInvDate').value,customer:this.selectedCustomer()?.display_name||'',expense_type:category?.name||'',amount:document.getElementById('rbInvTotal').value,purpose:this.selectedProductLine()?.name||''};
     Object.entries(defaults).forEach(([key,value])=>{const el=document.getElementById('rbLink_'+key);if(el&&(force||!el.value))el.value=value||''});
   },
   linkedDetailPayload(){
     const kind=this.state.activeLinkedKind;if(!kind)return null;
     const keys=kind==='entertainment'?['date','category','place','customer','participants','amount','purpose','approval']:['date','location','customer','expense_type','amount','purpose'];
-    return Object.fromEntries(keys.map(key=>[key,document.getElementById('rbLink_'+key)?.value||'']));
+    return {...Object.fromEntries(keys.map(key=>[key,document.getElementById('rbLink_'+key)?.value||''])),customer_id:this.selectedCustomer()?.id||null};
   },
   async uploadFile(file){
     if(!file)return;if(file.size>20*1024*1024){this.toast('单文件不能超过 20MB',true);return}
@@ -482,7 +515,7 @@ const RB = {
   printPreview(){const frame=document.querySelector('#rbPreviewStage iframe');if(frame)frame.contentWindow?.print();else window.print()},
   selectedProductLine(){const id=+document.getElementById('rbInvProduct').value;return this.state.product_lines.find(item=>item.id===id)||null},
   selectedOffice(){const id=+document.getElementById('rbInvOffice').value;return this.state.offices.find(item=>item.id===id)||null},
-  invoicePayload(){const val=id=>document.getElementById(id).value,p=this.selectedProductLine(),o=this.selectedOffice();return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line_id:p?.id||null,product_line:p?.name||'',product_line_code:p?.code||'',office_id:o?.id||null,office:o?.name||'',customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
+  invoicePayload(){const val=id=>document.getElementById(id).value,p=this.selectedProductLine(),o=this.selectedOffice(),c=this.selectedCustomer();return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line_id:p?.id||null,product_line:p?.name||'',product_line_code:p?.code||'',office_id:o?.id||null,office:o?.name||'',customer_id:c?.id||null,customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
   async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(this.state.activeLinkedKind?(id?'发票及关联明细已更新':'发票及关联明细已生成'):(id?'发票已更新':'发票已保存'));await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   async deleteInvoice(id){if(!confirm('确定删除这张发票记录及其本地附件吗？'))return;try{await this.api('/tools/reimbursement/api/invoices/'+id,{method:'DELETE'});this.toast('发票已删除');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前查看周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${p.is_active?'<button class="rb-btn rb-btn-light" disabled>正在查看</button>':`<button class="rb-btn rb-btn-primary" onclick="RB.activatePeriod(${p.id})"><i class="bi bi-box-arrow-in-right"></i>进入本周期</button>`}<button class="rb-btn rb-btn-light" onclick="RB.printPeriod(${p.id})"><i class="bi bi-printer"></i>打印发票</button><button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
@@ -553,9 +586,9 @@ const RB = {
   renderSummary(){const s=this.state.summary;document.getElementById('rbSummaryCards').innerHTML=`<div class="rb-summary-box"><small>发票数量</small><strong>${s.invoice_count} 张</strong></div><div class="rb-summary-box"><small>税额合计</small><strong>${this.money(s.tax_amount)}</strong></div><div class="rb-summary-box"><small>价税合计</small><strong>${this.money(s.total_amount)}</strong></div>`;document.getElementById('rbSummaryBody').innerHTML=s.by_category.map(c=>`<tr><td><span class="rb-color me-2" style="background:${c.color}"></span>${this.esc(c.name)}</td><td>${c.invoice_count}</td><td>${this.money(c.amount)}</td><td>${this.money(c.tax_amount)}</td><td><strong>${this.money(c.total_amount)}</strong></td></tr>`).join('');this.renderAux()},
   showAux(kind){document.querySelectorAll('.rb-aux-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.aux===kind));document.querySelectorAll('.rb-aux-pane').forEach(p=>p.classList.remove('active'));document.getElementById('rbAux'+kind[0].toUpperCase()+kind.slice(1)).classList.add('active')},
   renderAux(){const schemas={
-    entertainment:[['date','日期','date'],['category','费用类别','text'],['place','用餐地点/名称','text'],['customer','客户名称','text'],['participants','参与人','text'],['amount','金额','number'],['purpose','产品线','product-line']],
+    entertainment:[['date','日期','date'],['category','费用类别','text'],['place','用餐地点/名称','text'],['customer_id','客户简称','customer'],['participants','参与人','text'],['amount','金额','number'],['purpose','产品线','product-line']],
     vehicle:[['date','日期','date'],['from_location','出发地','text'],['to_location','目的地','text'],['contact','联系人','text'],['km_start','起','number'],['km_end','止','number'],['km_total','公里','number'],['toll_fee','过桥费','number'],['parking_fee','停车费','number'],['product_line','产品线','product-line']],
-    travel:[['date','日期','date'],['location','出差地','text'],['customer','客户名称','text'],['expense_type','费用类型','text'],['amount','金额','number'],['purpose','产品线','product-line']]
+    travel:[['date','日期','date'],['location','出差地','text'],['customer_id','客户简称','customer'],['expense_type','费用类型','text'],['amount','金额','number'],['purpose','产品线','product-line']]
   };this.normalizeVehicleRows();Object.entries(schemas).forEach(([kind,fields])=>{
     const rows=this.state.aux[kind]||[],sum=key=>rows.reduce((total,row)=>total+(parseFloat(row[key])||0),0).toFixed(2);
     const totalKeys=kind==='entertainment'?{amount:sum('amount')}:kind==='vehicle'?{km_total:sum('km_total'),toll_fee:sum('toll_fee'),parking_fee:sum('parking_fee')}:{amount:sum('amount')};
@@ -566,6 +599,11 @@ const RB = {
         const options='<option value="">请选择产品线</option>'
           +(!known&&value?`<option value="${this.esc(value)}" selected>${this.esc(value)}（历史数据）</option>`:'')
           +this.state.product_lines.map(p=>`<option value="${this.esc(p.name)}" ${p.name===value?'selected':''}>${this.esc(p.name)}</option>`).join('');
+        return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
+      }
+      if(f[2]==='customer'){
+        const legacy=!value&&r.customer?`${this.esc(r.customer)}（历史数据，未关联）`:'未关联客户';
+        const options=`<option value="">${legacy}</option>`+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===value?'selected':''}>${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}</option>`).join('');
         return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
       }
       if(key==='category'&&kind==='entertainment')return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${this.categoryOptions(value)}</select></td>`;
@@ -587,6 +625,7 @@ const RB = {
   },
   setAux(kind,row,key,value){
     this.state.aux[kind][row][key]=value;
+    if(key==='customer_id')this.state.aux[kind][row].customer=this.state.customers.find(item=>item.id===value)?.display_name||'';
     if(kind==='vehicle'&&['km_start','km_total'].includes(key)){
       this.normalizeVehicleRows();
       this.state.aux.vehicle.forEach((item,index)=>['km_start','km_end'].forEach(field=>{const output=document.getElementById(`rbAux_vehicle_${index}_${field}`);if(output)output.value=item[field]??''}));
