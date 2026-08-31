@@ -1,9 +1,10 @@
 """Focused regression tests for runtime settings and China time behavior."""
 from __future__ import annotations
 
+import logging
 import os
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["FLASK_ENV"] = "development"
@@ -12,9 +13,9 @@ os.environ["ADMIN_EMAIL"] = "admin@test.com"
 os.environ["ADMIN_PASSWORD"] = "Admin123456"
 os.environ["SECRET_KEY"] = "runtime-settings-test-secret"
 
-from app import create_app  # noqa: E402
+from app import ChinaTimeFormatter, create_app  # noqa: E402
 from extensions import db  # noqa: E402
-from models import Tool, User, UserToolGrant  # noqa: E402
+from models import Tool, UsageLog, User, UserToolGrant, utcnow  # noqa: E402
 from utils.settings import apply_runtime_settings  # noqa: E402
 
 
@@ -84,6 +85,40 @@ class RuntimeSettingsTests(unittest.TestCase):
             data={"direction": "dt2ts", "value": "2024-01-01 08:00:00"},
         )
         self.assertEqual(response.get_json()["result"]["seconds"], 1704067200)
+
+    def test_usage_logs_store_utc_and_render_exact_china_time(self) -> None:
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        generated = utcnow()
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.assertIsNone(generated.tzinfo)
+        self.assertLessEqual(before, generated)
+        self.assertLessEqual(generated, after)
+
+        with self.app.app_context():
+            db.session.add(
+                UsageLog(
+                    ts=datetime(2024, 1, 1, 0, 15, 30),
+                    tool_id="timestamp-regression",
+                    status="success",
+                )
+            )
+            db.session.commit()
+
+        response = self.client.get("/admin/logs?tool=timestamp-regression")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"2024-01-01 08:15:30", response.data)
+        self.assertIn("中国标准时间，UTC+8".encode(), response.data)
+
+    def test_process_log_formatter_uses_explicit_china_offset(self) -> None:
+        formatter = ChinaTimeFormatter(datefmt="%Y-%m-%d %H:%M:%S%z")
+        record = logging.LogRecord(
+            "timezone-test", logging.INFO, __file__, 1, "ok", (), None
+        )
+        record.created = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(
+            formatter.formatTime(record, formatter.datefmt),
+            "2024-01-01 08:00:00+0800",
+        )
 
     def test_private_tools_require_per_user_admin_grant(self) -> None:
         self.app.config["ENFORCE_PRIVATE_TOOL_ACCESS_IN_TESTS"] = True

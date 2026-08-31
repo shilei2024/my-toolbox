@@ -8,10 +8,11 @@
 
 | ADR | 决策 |
 | --- | --- |
-| [0035](0035-shared-customer-directory-for-reimbursement.md) | 报销助手复用组织客户主数据、简称和统一客户等级 |
 | [0032](0032-customer-project-material-opportunity-and-market-scope.md) | 客户项目物料机会分类与 TAM/SAM/SOM 派生 |
 | [0033](0033-customer-project-comments-and-input-precision.md) | 客户项目留言/@ 与数量价格输入边界 |
 | [0034](0034-material-opportunity-design-win-and-lost.md) | 物料机会四类分类与 Lost 竞品口径 |
+| [0035](0035-shared-customer-directory-for-reimbursement.md) | 报销助手复用组织客户主数据、简称和统一客户等级 |
+| [0036](0036-utc-storage-and-china-time-log-display.md) | 旧版无时区字段采用 UTC 写入、按中国标准时间显示 |
 | [0001](0001-phase-1-generation-service-boundary.md) | Generation Service 边界 |
 | [0002](0002-phase-2-postgresql-ai-schema-and-cos.md) | PostgreSQL AI Schema 与腾讯云 COS |
 | [0003](0003-phase-3-provider-contract.md) | Provider Contract |

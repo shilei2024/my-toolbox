@@ -4,6 +4,7 @@
 
 ## 平台部署标准
 
+- [管理日志中国标准时间校准发布手册](log-timestamp-timezone-fix.md)
 - [报销客户关联与曜石主题更新发布手册](reimbursement-customer-link-rollout.md)
 - [客户项目物料机会分类与 TAM/SAM/SOM 发布手册](customer-project-material-opportunity-rollout.md)
 - [客户项目协作留言与输入精度发布手册](customer-project-comments-input-rollout.md)

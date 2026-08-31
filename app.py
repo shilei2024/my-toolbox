@@ -22,6 +22,7 @@ import tempfile
 import time
 import traceback
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -46,7 +47,7 @@ from extensions import csrf, db, limiter, login_manager, migrate
 from models import Setting, User
 from tools import list_enabled_tools, register_tools, sync_tool_registry
 from utils.gallery_cors import apply_gallery_cors
-from utils.helpers import china_now, get_client_ip, to_china_time, utc_today_str
+from utils.helpers import CHINA_TIMEZONE, china_now, get_client_ip, to_china_time, utc_today_str
 from utils.settings import apply_runtime_settings
 
 _ON_VERCEL = os.environ.get("VERCEL", "").strip() == "1"
@@ -307,12 +308,32 @@ def create_app() -> Flask:
 # -----------------------------------------------------------------------------
 # internals
 # -----------------------------------------------------------------------------
+class ChinaTimeFormatter(logging.Formatter):
+    """Format process logs in China Standard Time with an explicit offset."""
+
+    def formatTime(  # noqa: N802
+        self,
+        record: logging.LogRecord,
+        datefmt: str | None = None,
+    ) -> str:
+        local = datetime.fromtimestamp(record.created, CHINA_TIMEZONE)
+        return local.strftime(datefmt) if datefmt else local.isoformat(timespec="milliseconds")
+
+
 def _setup_logging(app: Flask) -> None:
     level = logging.DEBUG if app.config.get("DEBUG") else logging.INFO
+    formatter = ChinaTimeFormatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S%z",
+    )
     logging.basicConfig(
         level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[logging.StreamHandler()],
     )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    for handler in {*root_logger.handlers, *app.logger.handlers}:
+        handler.setFormatter(formatter)
 
 
 def _ensure_tool_external_url_column(app: Flask) -> None:

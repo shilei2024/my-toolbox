@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hmac
-from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
@@ -10,6 +9,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 
 from extensions import db
 from models import User
+from utils.helpers import utc_naive_now
 from .forms import LoginForm, RegisterForm
 
 auth_bp = Blueprint("auth", __name__, template_folder="../templates")
@@ -106,7 +106,7 @@ def login():
             flash("账号已被禁用，请联系管理员。", "danger")
             return render_template("login.html", form=form, next_url=next_url), 403
 
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = utc_naive_now()
         db.session.commit()
         login_user(user, remember=form.remember.data)
         flash(f"欢迎回来，{user.email}", "success")
