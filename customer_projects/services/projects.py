@@ -370,9 +370,9 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
     ):
         raise DomainError("INVALID_OWNER", "客户负责人不是当前组织的有效业务成员。")
     grade = str(data.get("grade") or "").upper().strip()
-    if grade and grade not in {"A", "B", "C", "D"}:
+    if grade and grade not in {"0-1", "A", "AA", "AAA"}:
         raise DomainError(
-            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 0-1/A/AA/AAA"}
         )
     customer = Customer(
         organization_id=membership.organization_id,
@@ -399,9 +399,9 @@ def update_customer_grade(
     if customer.organization_id != membership.organization_id or customer.deleted_at is not None:
         raise DomainError("CUSTOMER_NOT_FOUND", "客户不存在或不可访问。")
     grade = str(grade_value or "").upper().strip()
-    if grade and grade not in {"A", "B", "C", "D"}:
+    if grade and grade not in {"0-1", "A", "AA", "AAA"}:
         raise DomainError(
-            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 A/B/C/D"}
+            "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 0-1/A/AA/AAA"}
         )
     customer.grade = grade or None
     customer.version += 1

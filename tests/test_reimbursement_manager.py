@@ -101,7 +101,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             "grand_totals": {**{key: 0 for key in keys}, "entertainment": 100.5},
             "level_groups": [
                 {
-                    "level": "level 1",
+                    "level": "A",
                     "entertainment": 100.5,
                     "travel": 0,
                     "other": 0,

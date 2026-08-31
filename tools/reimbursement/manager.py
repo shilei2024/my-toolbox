@@ -12,10 +12,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request, send_file
-from sqlalchemy import case, func, or_
+from flask import Blueprint, current_app, g, has_request_context, jsonify, request, send_file
+from sqlalchemy import case, func, or_, select
 
 from extensions import db
+from customer_projects.models import Customer
 from models import (
     ReimbursementAttachment,
     ReimbursementAuxDetail,
@@ -41,6 +42,7 @@ DEFAULT_CATEGORIES = [
 ]
 DEFAULT_OFFICES = ["深圳办", "厦门办", "杭州办", "上海办", "北京办", "合肥办", "西安办"]
 STATUS_LABELS = {"pending": "待报销", "approved": "已通过", "rejected": "已驳回"}
+CUSTOMER_LEVELS = ("0-1", "A", "AA", "AAA")
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COVER_TEMPLATE = TEMPLATE_DIR / "报销封面及费用分类表_母版.xls"
 DETAIL_TEMPLATE = TEMPLATE_DIR / "应酬费、出差明细、派车单_母版.xls"
@@ -53,6 +55,55 @@ def _owner() -> tuple[str, str]:
     if current_user.is_authenticated:
         return "user", str(current_user.id)
     return "anon", ensure_anon_id()
+
+
+def _customer_directory() -> list[Any]:
+    """Return the current organization customer directory once per request."""
+    if hasattr(g, "_reimbursement_customers"):
+        return g._reimbursement_customers
+    if not has_request_context():
+        g._reimbursement_customers = []
+        return g._reimbursement_customers
+    from customer_projects.permissions import current_membership
+
+    membership = current_membership()
+    if membership is None:
+        g._reimbursement_customers = []
+        return g._reimbursement_customers
+    g._reimbursement_customers = list(
+        db.session.scalars(
+            select(Customer)
+            .where(
+                Customer.organization_id == membership.organization_id,
+                Customer.deleted_at.is_(None),
+                Customer.status == "active",
+            )
+            .order_by(func.coalesce(Customer.short_name, Customer.name), Customer.name)
+        )
+    )
+    return g._reimbursement_customers
+
+
+def _customer_dict(customer: Any) -> dict[str, Any]:
+    return {
+        "id": customer.id,
+        "name": customer.name,
+        "short_name": customer.short_name or "",
+        "display_name": customer.short_name or customer.name,
+        "grade": customer.grade or "",
+    }
+
+
+def _owned_customer(customer_id: Any) -> Any | None:
+    value = str(customer_id or "").strip()
+    if not value:
+        return None
+    return next((item for item in _customer_directory() if item.id == value), None)
+
+
+def _invoice_customer_level(invoice: ReimbursementInvoice) -> str:
+    customer = _owned_customer(invoice.customer_id)
+    return str(customer.grade or "") if customer else invoice.customer_level
 
 
 def _payload() -> dict[str, Any]:
@@ -212,6 +263,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         owner_id=invoice.owner_id,
         name=invoice.office,
     ).first()
+    customer = _owned_customer(invoice.customer_id)
     return {
         "id": invoice.id,
         "period_id": invoice.period_id,
@@ -234,7 +286,9 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "product_line_id": product_line.id if product_line else None,
         "office": invoice.office,
         "office_id": office.id if office else None,
-        "customer_level": invoice.customer_level,
+        "customer_id": customer.id if customer else None,
+        "customer": _customer_dict(customer) if customer else None,
+        "customer_level": _invoice_customer_level(invoice),
         "remarks": invoice.remarks,
         "upload_date": invoice.upload_date.isoformat() if invoice.upload_date else "",
         "linked_detail": _invoice_aux_data(invoice),
@@ -541,6 +595,10 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
     vehicle_rows = []
     for row in rows:
         value = json.loads(row.data_json or "{}")
+        customer = _owned_customer(value.get("customer_id"))
+        if customer:
+            value["customer"] = customer.short_name or customer.name
+            value["customer_level"] = customer.grade or ""
         if row.kind == "vehicle":
             value["id"] = row.id
             vehicle_rows.append(value)
@@ -614,6 +672,10 @@ def _sync_invoice_aux(
         return
 
     detail = dict(linked_detail or {})
+    customer = _owned_customer(invoice.customer_id)
+    customer_name = customer.short_name or customer.name if customer else str(detail.get("customer") or "")
+    customer_id = customer.id if customer else None
+    customer_level = customer.grade or "" if customer else invoice.customer_level
     if desired_kind == "entertainment":
         values = {
             "invoice_id": invoice.id,
@@ -621,7 +683,9 @@ def _sync_invoice_aux(
             "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
             "category": detail.get("category") or "餐费",
             "place": detail.get("place") or invoice.vendor,
-            "customer": detail.get("customer") or "",
+            "customer_id": customer_id,
+            "customer": customer_name,
+            "customer_level": customer_level,
             "participants": detail.get("participants") or "",
             "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
             "purpose": detail.get("purpose") or invoice.product_line,
@@ -633,7 +697,9 @@ def _sync_invoice_aux(
             "auto_generated": True,
             "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
             "location": detail.get("location") or "",
-            "customer": detail.get("customer") or "",
+            "customer_id": customer_id,
+            "customer": customer_name,
+            "customer_level": customer_level,
             "expense_type": detail.get("expense_type") or (category.name if category else ""),
             "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
             "purpose": detail.get("purpose") or invoice.product_line,
@@ -834,7 +900,7 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
             grand[export_key] += total
         if invoice.remarks and invoice.remarks not in group["remarks"]:
             group["remarks"].append(invoice.remarks)
-        level = invoice.customer_level or "未分类"
+        level = _invoice_customer_level(invoice) or "未分类"
         values = levels.setdefault(level, {"entertainment": 0.0, "travel": 0.0, "other": 0.0, "total": 0.0})
         if export_key == "entertainment":
             values["entertainment"] += total
@@ -1050,7 +1116,7 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
     _write_cell(source, target, cover_index, 24, 2, _excel_date(header["date"]))
 
     level_map = {item["level"]: item for item in data["level_groups"]}
-    for offset, level in enumerate(("0-1", "level 1", "level 2", "level 3")):
+    for offset, level in enumerate(CUSTOMER_LEVELS):
         row = 2 + offset
         item = level_map.get(level, {})
         for col, value in {
@@ -1273,6 +1339,8 @@ def register_routes(bp: Blueprint) -> None:
             categories=[_category_dict(item) for item in categories],
             product_lines=[_product_line_dict(item) for item in product_lines],
             offices=[_office_dict(item) for item in offices],
+            customers=[_customer_dict(item) for item in _customer_directory()],
+            customer_levels=list(CUSTOMER_LEVELS),
             recent=[_invoice_dict(item) for item in invoices],
             stats={
                 "invoice_count": int(total_count),
@@ -1741,7 +1809,16 @@ def register_routes(bp: Blueprint) -> None:
         office_error = _assign_invoice_office(invoice, data)
         if office_error:
             return office_error
-        for key in ("vendor", "description", "file_url", "file_name", "customer_level", "remarks"):
+        customer_id = str(data.get("customer_id") or "").strip()
+        customer = _owned_customer(customer_id)
+        if customer_id and customer is None:
+            return "请选择当前组织中的有效客户"
+        customer_level = str(data.get("customer_level") or "").strip().upper()
+        if customer_level and customer_level not in CUSTOMER_LEVELS:
+            return "客户等级仅支持 0-1、A、AA、AAA"
+        invoice.customer_id = customer.id if customer else None
+        invoice.customer_level = str(customer.grade or "") if customer else customer_level
+        for key in ("vendor", "description", "file_url", "file_name", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
         invoice.status = data.get("status") if data.get("status") in STATUS_LABELS else "pending"
@@ -1849,11 +1926,27 @@ def register_routes(bp: Blueprint) -> None:
         if not period:
             return jsonify(error="周期不存在"), 404
         data = _payload()
-        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
+        prepared: dict[str, list[dict[str, Any]]] = {}
         for kind in ("entertainment", "vehicle", "travel"):
             incoming_rows = [dict(row) for row in (data.get(kind) or [])]
             if kind == "vehicle":
                 incoming_rows = _normalize_vehicle_rows(incoming_rows)
+            if kind in {"entertainment", "travel"}:
+                for row in incoming_rows:
+                    customer_id = str(row.get("customer_id") or "").strip()
+                    customer = _owned_customer(customer_id)
+                    if customer_id and customer is None:
+                        return jsonify(error="明细中包含无效或无权访问的客户"), 400
+                    if customer:
+                        row["customer_id"] = customer.id
+                        row["customer"] = customer.short_name or customer.name
+                        row["customer_level"] = customer.grade or ""
+                    else:
+                        row.pop("customer_id", None)
+                        row.pop("customer_level", None)
+            prepared[kind] = incoming_rows
+        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
+        for kind, incoming_rows in prepared.items():
             for index, row in enumerate(incoming_rows):
                 value = dict(row)
                 value.pop("id", None)

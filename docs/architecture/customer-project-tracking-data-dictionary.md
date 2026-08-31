@@ -25,10 +25,12 @@
 
 | 表 | 必填字段 | 可选字段/说明 |
 | --- | --- | --- |
-| `customers` | `id`, `organization_id`, `name`, `normalized_name`, `status`, `primary_owner_user_id`, `version` | `short_name`, `customer_code`, `group_name`, `industry`, `region`, `grade`, `address`, `notes` |
+| `customers` | `id`, `organization_id`, `name`, `normalized_name`, `status`, `primary_owner_user_id`, `version` | `short_name`（报销等跨模块默认显示名）、`customer_code`, `group_name`, `industry`, `region`, `grade`（0-1/A/AA/AAA）、`address`, `notes` |
 | `customer_contacts` | `id`, `customer_id`, `name`, `version` | `department`, `title`, `email`, `phone`, `is_primary`, `notes`；审计不保存敏感值明文差异 |
 
 组织 + `normalized_name` 使用非唯一索引做重复提示，不硬阻断同名客户。软删除记录不出现在普通查询中。
+
+`reimbursement_invoices.customer_id` 可空关联 `customers.id` 并使用 `ON DELETE SET NULL`；关联记录的客户简称和等级实时取自客户主数据，`customer_level` 只兼容未关联历史记录。报销招待/出差明细 JSON 可保存同一 `customer_id`，服务端输出时重新解析简称，禁止跨组织关联。
 
 ## 项目聚合
 
