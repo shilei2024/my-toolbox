@@ -1,8 +1,9 @@
 """Lifecycle reporting built from the PostgreSQL business records."""
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from typing import Any, Mapping
 
 from sqlalchemy import exists, select
@@ -12,10 +13,98 @@ from shared.models import Organization, OrganizationMembership
 
 from customer_projects.models import Customer, CustomerProject, MaterialCompetitor, ProjectMaterial
 from customer_projects.permissions import apply_project_scope
-from customer_projects.services.projects import DomainError
+from customer_projects.services.projects import DomainError, build_market_scope
 
 
 REPORT_STAGES = ("mass_production", "lost", "archived")
+
+
+def build_market_scope_report(membership: OrganizationMembership) -> dict[str, Any]:
+    """Aggregate the existing project TAM/SAM/SOM contract for the visible portfolio."""
+    project_stmt = apply_project_scope(
+        select(CustomerProject).where(
+            CustomerProject.organization_id == membership.organization_id,
+            CustomerProject.deleted_at.is_(None),
+            CustomerProject.stage_code != "archived",
+        ),
+        membership,
+    )
+    projects = list(db.session.scalars(project_stmt.order_by(CustomerProject.updated_at.desc())))
+    project_ids = [project.id for project in projects]
+    materials = list(
+        db.session.scalars(
+            select(ProjectMaterial).where(
+                ProjectMaterial.project_id.in_(project_ids),
+                ProjectMaterial.deleted_at.is_(None),
+            )
+        )
+    ) if project_ids else []
+    material_ids = [material.id for material in materials]
+    competitors = list(
+        db.session.scalars(
+            select(MaterialCompetitor).where(
+                MaterialCompetitor.project_material_id.in_(material_ids),
+                MaterialCompetitor.deleted_at.is_(None),
+            )
+        )
+    ) if material_ids else []
+    materials_by_project: dict[str, list[ProjectMaterial]] = defaultdict(list)
+    competitors_by_material: dict[str, list[MaterialCompetitor]] = defaultdict(list)
+    for material in materials:
+        materials_by_project[material.project_id].append(material)
+    for competitor in competitors:
+        competitors_by_material[competitor.project_material_id].append(competitor)
+
+    totals = {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
+    brand_rows: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
+    )
+    category_rows: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
+    )
+    incomplete = 0
+    for project in projects:
+        project_materials = materials_by_project.get(project.id, [])
+        scope = build_market_scope(project, project_materials, competitors_by_material)
+        for key in totals:
+            totals[key] += scope[key]
+        incomplete += len(scope["incomplete_material_ids"])
+        for material in project_materials:
+            value = scope["material_values"].get(material.id)
+            if value is None:
+                continue
+            material_competitors = competitors_by_material.get(material.id, [])
+            if material.opportunity_type == "competitive_opportunity" and material_competitors:
+                priced = [row for row in material_competitors if row.quoted_price is not None]
+                winner = max(priced, key=lambda row: row.quoted_price) if priced else material_competitors[0]
+                brand = winner.brand or "未记录品牌"
+            else:
+                brand = material.promoted_brand or "未记录品牌"
+            category = material.category_code or "未记录类别"
+            keys = ["tam_usd"]
+            if material.opportunity_type != "competitive_opportunity":
+                keys.append("sam_usd")
+            if material.opportunity_type in {"design_in", "design_win"}:
+                keys.append("som_usd")
+            for key in keys:
+                brand_rows[brand][key] += value
+                category_rows[category][key] += value
+
+    def serialize(rows: dict[str, dict[str, Decimal]], label_key: str) -> list[dict[str, Any]]:
+        return [
+            {label_key: label, **values}
+            for label, values in sorted(rows.items(), key=lambda item: (-item[1]["tam_usd"], item[0]))
+        ]
+
+    return {
+        **totals,
+        "project_count": len(projects),
+        "customer_count": len({project.customer_id for project in projects}),
+        "material_count": len(materials),
+        "incomplete_material_count": incomplete,
+        "brand_breakdown": serialize(brand_rows, "brand"),
+        "category_breakdown": serialize(category_rows, "category"),
+    }
 
 
 def _parse_date(value: Any, field: str) -> date | None:
@@ -211,6 +300,7 @@ def build_lifecycle_report(
                 "id": project.id,
                 "project_code": project.project_code,
                 "name": project.name,
+                "customer_id": project.customer_id,
                 "customer_name": customers.get(project.customer_id, "未知客户"),
                 "product_name": project.product_name,
                 "stage_code": project.stage_code,

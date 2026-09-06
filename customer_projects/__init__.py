@@ -102,3 +102,36 @@ def dispatch_notifications_command(limit: int, now_value: str | None) -> None:
 
     result = dispatch_due_notifications(now=dispatch_now, limit=limit)
     click.echo(f"claimed={result['claimed']} sent={result['sent']} failed={result['failed']}")
+    if result["failed"]:
+        raise click.ClickException("one or more notifications failed; safe retry is scheduled")
+
+
+@customer_projects_bp.cli.command("notifications-check")
+@click.option("--require-live", is_flag=True, help="Require a complete live SMTP configuration.")
+def notifications_check_command(require_live: bool) -> None:
+    """Validate reminder delivery configuration without exposing secrets."""
+    from shared.notifications import notification_readiness
+
+    report = notification_readiness(require_live=require_live)
+    issues = list(report["issues"])
+    if not current_app.config.get("CUSTOMER_PROJECT_REMINDERS_ENABLED", False):
+        issues.insert(0, "CUSTOMER_PROJECT_REMINDERS_ENABLED=false")
+    ready = not issues
+    click.echo(f"adapter={report['adapter']} ready={str(ready).lower()}")
+    if not ready:
+        for issue in issues:
+            click.echo(f"- {issue}")
+        raise click.ClickException("notification configuration is not ready")
+
+
+@customer_projects_bp.cli.command("send-test-email")
+@click.option("--recipient", required=True, help="Test recipient address; never persisted.")
+def send_test_email_command(recipient: str) -> None:
+    """Send one data-free email through the configured production SMTP adapter."""
+    from shared.notifications import NotificationAdapterError, send_test_email
+
+    try:
+        send_test_email(recipient.strip())
+    except NotificationAdapterError as exc:
+        raise click.ClickException(f"test email failed: {exc.code}") from exc
+    click.echo("test email accepted by SMTP server")

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}市场规模 — 客户项目跟进{% endblock %}
+{% block description %}查看全部可见跟进客户的 TAM、SAM、SOM 及品牌、类别明细。{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <div class="cp-page-heading"><div><p class="cp-kicker">MARKET SCOPE</p><h1>TAM / SAM / SOM</h1><p>{{ market_scope.customer_count }} 个可见客户、{{ market_scope.project_count }} 个非归档项目、{{ market_scope.material_count }} 条物料。</p></div><a class="btn btn-outline-primary" href="{{ url_for('customer_projects.dashboard') }}">返回工作台</a></div>
+  <section class="cp-market-scope">
+    <article><span>TAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.tam_usd) }}</strong><small>四类机会合计，Lost 按竞品最高报价</small></article>
+    <article><span>SAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.sam_usd) }}</strong><small>Design In + Design Win + Evaluation</small></article>
+    <article><span>SOM</span><strong>USD {{ '{:,.2f}'.format(market_scope.som_usd) }}</strong><small>Design In + Design Win</small></article>
+    <p>统一口径：项目年用量 × 物料单机数量 × 单价。{% if market_scope.incomplete_material_count %}另有 {{ market_scope.incomplete_material_count }} 条物料因数量或价格缺失未计入。{% endif %}</p>
+  </section>
+  <div class="cp-two-column cp-breakdown-grid">
+    <section class="cp-panel" id="brands"><div class="cp-panel-heading"><div><p class="cp-kicker">BY BRAND</p><h2>品牌明细</h2></div></div><div class="table-responsive"><table class="table align-middle"><thead><tr><th>品牌</th><th>TAM</th><th>SAM</th><th>SOM</th></tr></thead><tbody>{% for row in market_scope.brand_breakdown %}<tr><th scope="row">{{ row.brand }}</th><td>USD {{ '{:,.2f}'.format(row.tam_usd) }}</td><td>USD {{ '{:,.2f}'.format(row.sam_usd) }}</td><td>USD {{ '{:,.2f}'.format(row.som_usd) }}</td></tr>{% else %}<tr><td colspan="4" class="text-center text-muted py-4">暂无可计算的品牌数据。</td></tr>{% endfor %}</tbody></table></div></section>
+    <section class="cp-panel" id="categories"><div class="cp-panel-heading"><div><p class="cp-kicker">BY CATEGORY</p><h2>类别明细</h2></div></div><div class="table-responsive"><table class="table align-middle"><thead><tr><th>类别</th><th>TAM</th><th>SAM</th><th>SOM</th></tr></thead><tbody>{% for row in market_scope.category_breakdown %}<tr><th scope="row">{{ row.category }}</th><td>USD {{ '{:,.2f}'.format(row.tam_usd) }}</td><td>USD {{ '{:,.2f}'.format(row.sam_usd) }}</td><td>USD {{ '{:,.2f}'.format(row.som_usd) }}</td></tr>{% else %}<tr><td colspan="4" class="text-center text-muted py-4">暂无可计算的类别数据。</td></tr>{% endfor %}</tbody></table></div></section>
+  </div>
+</section>
+{% endblock %}

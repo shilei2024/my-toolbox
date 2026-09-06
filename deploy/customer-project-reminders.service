@@ -1,0 +1,21 @@
+[Unit]
+Description=My Toolbox customer-project reminder scan and email delivery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mytoolbox
+Environment="PATH=/opt/mytoolbox/.venv/bin"
+Environment="FLASK_APP=app:create_app"
+EnvironmentFile=/opt/mytoolbox/.env
+ExecStartPre=/opt/mytoolbox/.venv/bin/flask customer-projects notifications-check
+ExecStart=/opt/mytoolbox/.venv/bin/flask customer-projects scan-reminders
+ExecStart=/opt/mytoolbox/.venv/bin/flask customer-projects dispatch-notifications --limit 100
+TimeoutStartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
