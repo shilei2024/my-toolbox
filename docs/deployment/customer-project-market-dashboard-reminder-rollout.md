@@ -91,6 +91,16 @@ sudo journalctl -u customer-project-reminders.service -f
 
 完成一次周期后退出日志跟随（`Ctrl+C`），验证：工作台金额与项目明细合计一致；品牌、类别页只包含当前账号可见项目；客户列表进入客户后才能看到“新建项目”；邮件时间为组织时区，链接使用生产 HTTPS 域名；统一后台发送心跳为正常且没有 `dead`。
 
+以下三条用于确认“自动调度”已经真正启用。`oneshot` 服务执行完成后显示 `inactive (dead)` 是正常现象；timer 必须同时显示 `enabled` 与 `active`：
+
+```bash
+sudo systemctl is-enabled customer-project-reminders.timer
+sudo systemctl is-active customer-project-reminders.timer
+systemctl list-timers customer-project-reminders.timer --no-pager
+```
+
+预期前两条分别输出 `enabled`、`active`，最后一条能看到下一次运行时间。日志出现 `scanned=0 created=0`、`claimed=0 sent=0 failed=0` 只表示当前没有到期提醒；要证明真实 SMTP 可用，仍需执行第 3 节测试邮件并确认收件箱收到邮件。
+
 ## 常见失败与恢复
 
 - `CUSTOMER_PROJECT_REMINDERS_ENABLED=false`：编辑环境文件启用扫描，再重跑自检。

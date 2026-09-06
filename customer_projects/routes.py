@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-from flask import abort, flash, redirect, render_template, request, send_file, url_for
+from flask import abort, flash, make_response, redirect, render_template, request, send_file, url_for
 from flask_login import login_required
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -179,12 +179,6 @@ def dashboard():
     day_start, day_end = local_day_bounds(
         now, organization.timezone if organization else "Asia/Shanghai"
     )
-    base = apply_project_scope(
-        select(CustomerProject).where(CustomerProject.deleted_at.is_(None)), membership
-    )
-    projects = list(
-        db.session.scalars(base.order_by(CustomerProject.next_follow_up_at.asc()).limit(12))
-    )
     active_stages = {"evaluation", "initiated", "sampling", "pilot_batch", "trial_production", "design_win"}
     def scoped_count(*conditions) -> int:
         statement = apply_project_scope(
@@ -211,35 +205,68 @@ def dashboard():
             for rule in stale_rules
         ]
     ) if stale_rules else (CustomerProject.id.is_(None))
-    counts = {
-        "overdue": scoped_count(
+    reminder_conditions = {
+        "overdue": (
             CustomerProject.stage_code.in_(active_stages),
             CustomerProject.next_follow_up_at < day_start,
         ),
-        "today": scoped_count(
+        "today": (
             CustomerProject.stage_code.in_(active_stages),
             CustomerProject.next_follow_up_at >= day_start,
             CustomerProject.next_follow_up_at < day_end,
         ),
-        "upcoming": scoped_count(
+        "upcoming": (
             CustomerProject.stage_code.in_(active_stages),
             CustomerProject.next_follow_up_at >= day_end,
             CustomerProject.next_follow_up_at < day_end + timedelta(days=7),
         ),
-        "stale": scoped_count(stale_condition),
+        "stale": (stale_condition,),
     }
+    counts = {
+        key: scoped_count(*conditions)
+        for key, conditions in reminder_conditions.items()
+    }
+    focus_labels = {
+        "overdue": "已逾期项目",
+        "today": "今日到期项目",
+        "upcoming": "7 天内到期项目",
+        "stale": "长期未更新项目",
+    }
+    focus = request.args.get("focus", "").strip()
+    if focus not in reminder_conditions:
+        focus = ""
+    project_statement = apply_project_scope(
+        select(CustomerProject).where(CustomerProject.deleted_at.is_(None)), membership
+    )
+    if focus:
+        project_statement = project_statement.where(*reminder_conditions[focus])
+        order_column = (
+            CustomerProject.last_meaningful_update_at
+            if focus == "stale"
+            else CustomerProject.next_follow_up_at
+        )
+        project_statement = project_statement.order_by(order_column.asc())
+    else:
+        project_statement = project_statement.order_by(CustomerProject.next_follow_up_at.asc())
+    projects = list(db.session.scalars(project_statement.limit(100 if focus else 12)))
     customer_names = _customer_name_map(projects)
     user_names = _user_name_map({p.primary_sales_user_id for p in projects})
     stages = _stage_map(membership.organization_id)
-    return render_template(
-        "customer_projects/dashboard.html",
-        projects=projects,
-        counts=counts,
-        customer_names=customer_names,
-        user_names=user_names,
-        stages=stages,
-        market_scope=build_market_scope_report(membership),
+    response = make_response(
+        render_template(
+            "customer_projects/dashboard.html",
+            projects=projects,
+            counts=counts,
+            customer_names=customer_names,
+            user_names=user_names,
+            stages=stages,
+            focus=focus,
+            focus_label=focus_labels.get(focus, "我的优先事项"),
+            market_scope=build_market_scope_report(membership),
+        )
     )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @customer_projects_bp.get("/market-scope")

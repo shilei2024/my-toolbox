@@ -1241,9 +1241,32 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         dashboard = self.client.get("/customer-projects/")
         dashboard_html = dashboard.get_data(as_text=True)
         self.assertEqual(dashboard.status_code, 200)
+        self.assertIn("no-store", dashboard.headers["Cache-Control"])
         self.assertIn("USD 120,000.00", dashboard_html)
+        self.assertIn("客户市场规模", dashboard_html)
+        self.assertIn("示例电子", dashboard_html)
         self.assertIn("/customer-projects/market-scope", dashboard_html)
         self.assertIn(f"/customer-projects/customers/{customer_id}", dashboard_html)
+        for focus in ("overdue", "today", "upcoming", "stale"):
+            self.assertIn(f"?focus={focus}#focus-projects", dashboard_html)
+
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            project.next_follow_up_at = datetime.now(timezone.utc) - timedelta(days=2)
+            db.session.commit()
+        overdue = self.client.get("/customer-projects/?focus=overdue")
+        overdue_html = overdue.get_data(as_text=True)
+        self.assertIn("已逾期项目", overdue_html)
+        self.assertIn(f'/customer-projects/projects/{project_id}', overdue_html)
+
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            project.next_follow_up_at = datetime.now(timezone.utc) + timedelta(days=2)
+            db.session.commit()
+        refreshed_overdue = self.client.get("/customer-projects/?focus=overdue")
+        self.assertIn("当前分类没有项目", refreshed_overdue.get_data(as_text=True))
+        upcoming = self.client.get("/customer-projects/?focus=upcoming")
+        self.assertIn(f'/customer-projects/projects/{project_id}', upcoming.get_data(as_text=True))
 
         breakdown = self.client.get("/customer-projects/market-scope")
         breakdown_html = breakdown.get_data(as_text=True)
