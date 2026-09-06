@@ -246,7 +246,6 @@
     <div class="row g-3">
       <div class="col-md-3"><label class="form-label">报销周期 *</label><select class="form-select" id="rbInvPeriod"></select></div>
       <div class="col-md-3"><label class="form-label">费用类别</label><select class="form-select" id="rbInvCategory"></select></div>
-      <div class="col-md-3"><label class="form-label">报销状态</label><select class="form-select" id="rbInvStatus"><option value="pending">待报销</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select></div>
       <div class="col-md-3"><label class="form-label">开票日期</label><input type="date" class="form-control" id="rbInvDate"></div>
       <div class="col-md-4"><label class="form-label">发票号码</label><input class="form-control" id="rbInvNumber"></div>
       <div class="col-md-8"><label class="form-label">开票单位</label><input class="form-control" id="rbInvVendor"></div>
@@ -256,10 +255,20 @@
       <div class="col-md-3"><label class="form-label">产品线</label><select class="form-select" id="rbInvProduct" onchange="RB.syncProductCode()"></select></div>
       <div class="col-md-2"><label class="form-label">产品线代码</label><input class="form-control" id="rbInvProductCode" readonly title="根据所选产品线自动填充"></div>
       <div class="col-md-2"><label class="form-label">办事处 *</label><select class="form-select" id="rbInvOffice"></select></div>
-      <div class="col-md-3"><label class="form-label">关联客户</label><select class="form-select" id="rbInvCustomer" onchange="RB.syncCustomer()"><option value="">未关联客户</option></select></div>
+      <div class="col-md-3"><label class="form-label">关联客户</label><div class="input-group"><select class="form-select" id="rbInvCustomer" onchange="RB.syncCustomer()"><option value="">未关联客户</option></select><button class="btn btn-outline-secondary d-none" id="rbAddCustomerButton" type="button" onclick="RB.openCustomerEntry()" title="客户不在原系统时立即录入"><i class="bi bi-person-plus"></i><span class="ms-1">新增</span></button></div></div>
       <div class="col-md-2"><label class="form-label">客户等级</label><select class="form-select" id="rbInvLevel"><option value="">未分类</option><option>0-1</option><option>A</option><option>AA</option><option>AAA</option></select></div>
       <div class="col-md-6"><label class="form-label">摘要</label><input class="form-control" id="rbInvDescription"></div>
       <div class="col-md-6"><label class="form-label">备注</label><input class="form-control" id="rbInvRemarks"></div>
+    </div>
+    <div class="rb-linked-detail mt-3 d-none" id="rbCustomerEntry">
+      <div class="rb-linked-title"><i class="bi bi-person-plus me-1"></i>录入原系统客户</div>
+      <div class="rb-file-note mt-1 mb-3">客户会写入统一客户资料，保存后自动选中，并可供后续发票和项目复用。</div>
+      <div class="row g-3 align-items-end">
+        <div class="col-md-5"><label class="form-label">客户名称 *</label><input class="form-control" id="rbNewCustomerName" maxlength="255"></div>
+        <div class="col-md-3"><label class="form-label">客户简称</label><input class="form-control" id="rbNewCustomerShortName" maxlength="120"></div>
+        <div class="col-md-2"><label class="form-label">客户等级</label><select class="form-select" id="rbNewCustomerGrade"><option value="">未评级</option><option>0-1</option><option>A</option><option>AA</option><option>AAA</option></select></div>
+        <div class="col-md-2 d-flex gap-2"><button class="rb-btn rb-btn-primary" type="button" onclick="RB.saveCustomer()">保存</button><button class="rb-btn rb-btn-light" type="button" onclick="RB.closeCustomerEntry()">取消</button></div>
+      </div>
     </div>
     <div class="rb-linked-detail mt-3 d-none" id="rbLinkedDetail">
       <div class="rb-linked-title"><i class="bi bi-link-45deg me-1"></i><span id="rbLinkedTitle"></span></div>
@@ -316,7 +325,7 @@
 
 <script>
 const RB = {
-  state:{periods:[],categories:[],product_lines:[],offices:[],customers:[],customer_levels:['0-1','A','AA','AAA'],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
+  state:{periods:[],categories:[],product_lines:[],offices:[],customers:[],customer_creation_enabled:false,customer_levels:['0-1','A','AA','AAA'],recent:[],stats:{},invoices:[],page:1,pages:1,summary:null,aux:{entertainment:[],vehicle:[],travel:[]},reference:null},
   modal(name){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(name)); },
   csrfToken(){return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')||''},
   async api(url,options={}){ options.headers={...options.headers,'X-CSRFToken':this.csrfToken()}; if(options.body && !(options.body instanceof FormData)){options.headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)} const r=await fetch(url,options); const type=r.headers.get('content-type')||''; const data=type.includes('json')?await r.json():r; if(!r.ok){throw Object.assign(new Error(data.error||`请求失败 (${r.status})`),{status:r.status,data})} return data; },
@@ -425,8 +434,8 @@ const RB = {
     document.getElementById('rbInvProduct').innerHTML='<option value="">请选择产品线</option>'+this.state.product_lines.map(p=>`<option value="${p.id}" ${String(p.id)===currentProduct?'selected':''}>${this.esc(p.code)} · ${this.esc(p.name)}</option>`).join('');
     const currentOffice=document.getElementById('rbInvOffice').value;
     document.getElementById('rbInvOffice').innerHTML='<option value="">请选择办事处</option>'+this.state.offices.map(o=>`<option value="${o.id}" ${String(o.id)===currentOffice?'selected':''}>${this.esc(o.name)}</option>`).join('');
-    const currentCustomer=document.getElementById('rbInvCustomer').value;
-    document.getElementById('rbInvCustomer').innerHTML='<option value="">未关联客户</option>'+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===currentCustomer?'selected':''}>${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}</option>`).join('');
+    this.renderCustomerSelector();
+    document.getElementById('rbAddCustomerButton').classList.toggle('d-none',!this.state.customer_creation_enabled);
     document.getElementById('rbInvLevel').innerHTML='<option value="">未分类</option>'+this.state.customer_levels.map(level=>`<option value="${this.esc(level)}">${this.esc(level)}</option>`).join('');
     document.getElementById('rbExportPeriod').innerHTML=this.state.periods.map(p=>`<option value="${p.id}">${this.esc(p.name)}</option>`).join('');document.getElementById('rbExportPeriod').value=activeId;
   },
@@ -441,18 +450,22 @@ const RB = {
   changePage(delta){const p=this.state.page+delta;if(p>=1&&p<=this.state.pages)this.loadInvoices(p)},
   openInvoice(id=null){
     const i=id?this.state.invoices.find(x=>x.id===id):null;document.getElementById('rbInvoiceTitle').textContent=i?'编辑发票':'新增发票';
-    const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvStatus:i?.status||'pending',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line_id||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office_id||this.state.offices[0]?.id||'',rbInvCustomer:i?.customer_id||'',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
+    const map={rbInvoiceId:i?.id||'',rbFileUrl:i?.file_url||'',rbFileName:i?.file_name||'',rbFileSize:i?.file_size||'',rbInvPeriod:i?.period_id||this.state.periods.find(p=>p.is_active)?.id||this.state.periods[0]?.id||'',rbInvCategory:i?.category_id||'',rbInvDate:i?.invoice_date||'',rbInvNumber:i?.invoice_number||'',rbInvVendor:i?.vendor||'',rbInvAmount:i?.amount||'',rbInvTax:i?.tax_amount||'',rbInvTotal:i?.total_amount||'',rbInvProduct:i?.product_line_id||'',rbInvProductCode:i?.product_line_code||'',rbInvOffice:i?.office_id||this.state.offices[0]?.id||'',rbInvCustomer:i?.customer_id||'',rbInvLevel:i?.customer_level||'',rbInvDescription:i?.description||'',rbInvRemarks:i?.remarks||''};
     const categorySelect=document.getElementById('rbInvCategory');
     if(i?.category_id){
       const cat=this.state.categories.find(c=>c.id===i.category_id);
       if(cat&&['communication','welfare'].includes(cat.export_key)&&![...categorySelect.options].some(o=>o.value===String(i.category_id)))categorySelect.add(new Option(this.esc(cat.name),String(i.category_id)));
     }
     if(i&&!i.category_id&&![...categorySelect.options].some(o=>o.value===''))categorySelect.add(new Option('未分类',''));
-    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);this.syncCustomer(false);document.getElementById('rbUploadedFile').textContent=i?.file_name?`原件已保留：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderFilePreview(i?.file_url||'',i?.file_name||'','rbInvoiceFilePreview');this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
+    Object.entries(map).forEach(([id,v])=>document.getElementById(id).value=v);this.closeCustomerEntry();this.syncCustomer(false);document.getElementById('rbUploadedFile').textContent=i?.file_name?`原件已保留：${i.file_name}`:'尚未上传文件';document.getElementById('rbInvoiceFile').value='';this.renderFilePreview(i?.file_url||'',i?.file_name||'','rbInvoiceFilePreview');this.renderLinkedDetail(i?.linked_detail||null);this.modal('rbInvoiceModal').show();
   },
   calcTotal(){const a=parseFloat(document.getElementById('rbInvAmount').value)||0,t=parseFloat(document.getElementById('rbInvTax').value)||0;document.getElementById('rbInvTotal').value=(a+t).toFixed(2);this.syncLinkedDefaults(true)},
   syncProductCode(){const id=+document.getElementById('rbInvProduct').value;const p=this.state.product_lines.find(x=>x.id===id);document.getElementById('rbInvProductCode').value=p?.code||'';this.syncLinkedDefaults(true)},
   selectedCustomer(){const id=document.getElementById('rbInvCustomer').value;return this.state.customers.find(item=>item.id===id)||null},
+  renderCustomerSelector(selectedId=null){const select=document.getElementById('rbInvCustomer'),current=selectedId??select.value;select.innerHTML='<option value="">未关联客户</option>'+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===current?'selected':''}>${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}</option>`).join('')},
+  openCustomerEntry(){if(!this.state.customer_creation_enabled){this.toast('当前账号无权录入客户',true);return}document.getElementById('rbCustomerEntry').classList.remove('d-none');document.getElementById('rbNewCustomerName').focus()},
+  closeCustomerEntry(){const box=document.getElementById('rbCustomerEntry');if(box)box.classList.add('d-none');['rbNewCustomerName','rbNewCustomerShortName','rbNewCustomerGrade'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''})},
+  async saveCustomer(){const value=id=>document.getElementById(id).value.trim(),name=value('rbNewCustomerName');if(!name){this.toast('请填写客户名称',true);return}try{const data=await this.api('/tools/reimbursement/api/customers',{method:'POST',body:{name,short_name:value('rbNewCustomerShortName'),grade:value('rbNewCustomerGrade')}});this.state.customers.push(data.customer);this.state.customers.sort((a,b)=>a.display_name.localeCompare(b.display_name,'zh-CN'));this.renderCustomerSelector(data.customer.id);this.syncCustomer(true);this.closeCustomerEntry();this.toast('客户已录入并自动选中')}catch(e){this.toast(e.message,true)}},
   syncCustomer(updateLinked=true){const customer=this.selectedCustomer(),level=document.getElementById('rbInvLevel');if(customer)level.value=customer.grade||'';level.disabled=!!customer;level.title=customer?'等级来自客户项目跟进系统，需在客户资料中修改':'';if(updateLinked)this.syncLinkedDefaults(true)},
   linkedCategory(){const id=+document.getElementById('rbInvCategory').value;return this.state.categories.find(c=>c.id===id)||null},
   entertainmentCategories(){return (this.state.reference?.entertainment_categories?.length)?this.state.reference.entertainment_categories:['餐费','礼品','其他']},
@@ -515,7 +528,7 @@ const RB = {
   printPreview(){const frame=document.querySelector('#rbPreviewStage iframe');if(frame)frame.contentWindow?.print();else window.print()},
   selectedProductLine(){const id=+document.getElementById('rbInvProduct').value;return this.state.product_lines.find(item=>item.id===id)||null},
   selectedOffice(){const id=+document.getElementById('rbInvOffice').value;return this.state.offices.find(item=>item.id===id)||null},
-  invoicePayload(){const val=id=>document.getElementById(id).value,p=this.selectedProductLine(),o=this.selectedOffice(),c=this.selectedCustomer();return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,status:val('rbInvStatus'),invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line_id:p?.id||null,product_line:p?.name||'',product_line_code:p?.code||'',office_id:o?.id||null,office:o?.name||'',customer_id:c?.id||null,customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
+  invoicePayload(){const val=id=>document.getElementById(id).value,p=this.selectedProductLine(),o=this.selectedOffice(),c=this.selectedCustomer();return {period_id:+val('rbInvPeriod'),category_id:val('rbInvCategory')?+val('rbInvCategory'):null,invoice_date:val('rbInvDate'),invoice_number:val('rbInvNumber'),vendor:val('rbInvVendor'),amount:val('rbInvAmount'),tax_amount:val('rbInvTax'),total_amount:val('rbInvTotal'),product_line_id:p?.id||null,product_line:p?.name||'',product_line_code:p?.code||'',office_id:o?.id||null,office:o?.name||'',customer_id:c?.id||null,customer_level:val('rbInvLevel'),description:val('rbInvDescription'),remarks:val('rbInvRemarks'),file_url:val('rbFileUrl'),file_name:val('rbFileName'),file_size:val('rbFileSize'),linked_detail:this.linkedDetailPayload()}},
   async saveInvoice(){const id=document.getElementById('rbInvoiceId').value;try{await this.api('/tools/reimbursement/api/invoices'+(id?'/'+id:''),{method:id?'PUT':'POST',body:this.invoicePayload()});this.modal('rbInvoiceModal').hide();this.toast(this.state.activeLinkedKind?(id?'发票及关联明细已更新':'发票及关联明细已生成'):(id?'发票已更新':'发票已保存'));await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   async deleteInvoice(id){if(!confirm('确定删除这张发票记录及其本地附件吗？'))return;try{await this.api('/tools/reimbursement/api/invoices/'+id,{method:'DELETE'});this.toast('发票已删除');await this.reload();this.loadInvoices(this.state.page)}catch(e){this.toast(e.message,true)}},
   renderPeriods(){document.getElementById('rbPeriodGrid').innerHTML=this.state.periods.length?this.state.periods.map(p=>`<div class="rb-period-card ${p.is_active?'active':''}"><div class="d-flex justify-content-between"><div class="title">${this.esc(p.name)}</div>${p.is_active?'<span class="rb-badge rb-status-approved">当前查看周期</span>':''}</div><div class="rb-meta">${p.start_year}年${p.start_month}月 — ${p.end_year}年${p.end_month}月</div><div class="d-flex justify-content-between mt-3"><span>${p.invoice_count} 张</span><strong>${this.money(p.total_amount)}</strong></div><div class="rb-card-actions">${p.is_active?'<button class="rb-btn rb-btn-light" disabled>正在查看</button>':`<button class="rb-btn rb-btn-primary" onclick="RB.activatePeriod(${p.id})"><i class="bi bi-box-arrow-in-right"></i>进入本周期</button>`}<button class="rb-btn rb-btn-light" onclick="RB.printPeriod(${p.id})"><i class="bi bi-printer"></i>打印发票</button><button class="rb-btn rb-btn-light" onclick="RB.openPeriod(${p.id})">编辑</button><button class="rb-btn rb-btn-danger" onclick="RB.deletePeriod(${p.id})">删除</button></div></div>`).join(''):'<div class="rb-empty">尚未创建报销周期</div>'},
@@ -603,7 +616,7 @@ const RB = {
       }
       if(f[2]==='customer'){
         const legacy=!value&&r.customer?`${this.esc(r.customer)}（历史数据，未关联）`:'未关联客户';
-        const options=`<option value="">${legacy}</option>`+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===value?'selected':''}>${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}</option>`).join('');
+        const options=`<option value="">${legacy}</option>`+this.state.customers.map(c=>`<option value="${this.esc(c.id)}" ${c.id===value?'selected':''}>${this.esc(c.display_name)}</option>`).join('');
         return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${options}</select></td>`;
       }
       if(key==='category'&&kind==='entertainment')return `<td><select id="rbAux_${kind}_${ri}_${key}" class="form-select">${this.categoryOptions(value)}</select></td>`;

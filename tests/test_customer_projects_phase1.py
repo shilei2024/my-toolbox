@@ -41,7 +41,7 @@ from customer_projects.services.projects import (  # noqa: E402
     local_day_bounds,
 )
 from extensions import db  # noqa: E402
-from models import User  # noqa: E402
+from models import ReimbursementInvoice, User  # noqa: E402
 from shared.models import AuditEvent, Organization, OrganizationMembership  # noqa: E402
 
 
@@ -516,6 +516,23 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(saved["customer_level"], "AA")
 
         with app.app_context():
+            stored_invoice = db.session.get(ReimbursementInvoice, saved["id"])
+            stored_invoice.status = "approved"
+            db.session.commit()
+        updated_without_status = self.client.put(
+            f"/tools/reimbursement/api/invoices/{saved['id']}",
+            json={
+                "period_id": period["id"],
+                "office_id": data["offices"][0]["id"],
+                "customer_id": customer_id,
+                "invoice_number": "LINKED-001",
+                "total_amount": 100,
+            },
+        )
+        self.assertEqual(updated_without_status.status_code, 200)
+        self.assertEqual(updated_without_status.get_json()["invoice"]["status"], "approved")
+
+        with app.app_context():
             customer = db.session.get(Customer, customer_id)
             customer.grade = "AAA"
             customer.short_name = "示例"
@@ -535,6 +552,39 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             },
         )
         self.assertEqual(rejected.status_code, 400)
+
+    def test_reimbursement_can_create_and_select_shared_customer(self) -> None:
+        self._login()
+
+        bootstrap = self.client.get("/tools/reimbursement/api/bootstrap").get_json()
+        self.assertTrue(bootstrap["customer_creation_enabled"])
+
+        created = self.client.post(
+            "/tools/reimbursement/api/customers",
+            json={"name": "上海新客户有限公司", "short_name": "上海新客", "grade": "AA"},
+        )
+
+        self.assertEqual(created.status_code, 201)
+        customer = created.get_json()["customer"]
+        self.assertEqual(customer["display_name"], "上海新客")
+        self.assertEqual(customer["grade"], "AA")
+        refreshed = self.client.get("/tools/reimbursement/api/bootstrap").get_json()
+        self.assertIn(customer["id"], {item["id"] for item in refreshed["customers"]})
+
+        invalid = self.client.post(
+            "/tools/reimbursement/api/customers",
+            json={"name": "", "grade": "AA"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.get_json()["field_errors"], {"name": "必填"})
+
+        self.client.post("/logout")
+        self._login("fae@test.com")
+        forbidden = self.client.post(
+            "/tools/reimbursement/api/customers",
+            json={"name": "无权录入客户"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_material_price_conversion_permissions_and_excel_export(self) -> None:
         project_id = self._seed_project()

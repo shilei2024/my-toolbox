@@ -523,7 +523,7 @@ def ocr():
     接收 JSON: {"file_id": "...", "image_base64": "..."}
 
     优先级：file_id（原始文件，质量最高）> image_base64（Vercel 兼容降级）
-    OCR 策略：百度增值税发票识别 → 百度通用 OCR → PaddleOCR 本地识别 → 模拟降级
+    OCR 策略：百度增值税发票识别 → 百度通用票据文字降级 → 腾讯云 → PaddleOCR 本地识别
     """
     data = request.get_json(silent=True) or {}
     img_bytes = None
@@ -654,7 +654,9 @@ def ocr():
         ocr_errors.append(f"PaddleOCR: {e}")
 
     # --- 策略 4: 模拟降级（success=false，前端据此提示手动填写） ---
-    note = "、".join(ocr_errors)[:400] or "未配置 OCR 服务或识别失败"
+    if ocr_errors:
+        current_app.logger.info("OCR providers exhausted: %s", " | ".join(ocr_errors))
+    note = "暂未识别出可自动填写的信息，请确认票面完整、图片清晰，或手动填写"
     return jsonify(
         success=False,
         data={
@@ -851,10 +853,19 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
         current_app.logger.warning("Baidu token: %s", e)
         raise RuntimeError(f"百度: {e}") from e
 
-    # Step 2: 增值税发票识别（页×版本穷举）
+    # Step 2: 增值税发票识别（页×版本穷举）。模板不匹配表示它可能是
+    # 火车票等其他报销票据，必须继续通用 OCR，而不是中断整条降级链。
     for raw in img_list:
         for ver in _preprocess_for_ocr(raw):
-            words = _baidu_vat_call(ver, token)
+            try:
+                words = _baidu_vat_call(ver, token)
+            except RuntimeError as exc:
+                if re.search(r"\b282103\b", str(exc)):
+                    current_app.logger.info(
+                        "Baidu VAT template did not match; continuing with general OCR"
+                    )
+                    break
+                raise
             if words:
                 r = _parse_vat(words)
                 if r.get("invoice_number") or r.get("total_amount"):
@@ -1054,9 +1065,10 @@ def _parse_general(words_list: list) -> dict:
                             return val
         return ""
 
-    return {
+    result = {
         "invoice_number": _first([
             r"发票号码[：:\s]*([A-Za-z0-9\-]{8,30})",
+            r"(?:车票号|票号|编号)[：:\s]*([A-Za-z0-9\-]{6,30})",
             r"No[\.\s]*([A-Za-z0-9\-]{8,30})",
             r"号码[：:\s]*([A-Za-z0-9\-]{8,30})",
             r"发票代码[：:\s]*(\d{10,12})\s*[,\s]+\s*(\d{8,10})",  # 发票代码 + 发票号码
@@ -1094,6 +1106,7 @@ def _parse_general(words_list: list) -> dict:
             r"小写[金额]?\s*[¥￥]?\s*([\d,]+\.\d{2})",
             r"[¥￥]\s*([\d,]+\.\d{2})",  # ¥符号后金额
             r"金额[合計]?[计]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})",
+            r"(?:票价|票款)[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})",
         ]),
         "description": _first([
             r"[货貨]物[或及].*?[名称稱][：:\s]*(.{1,60})",
@@ -1103,6 +1116,17 @@ def _parse_general(words_list: list) -> dict:
             r"[*＊](\S{2,20})[*＊]",  # *餐费* 等
         ])[:80],
     }
+    train_markers = (
+        "铁路电子客票",
+        "限乘当日当次车",
+        "仅供报销使用",
+        "候车室",
+        "检票口",
+    )
+    if any(marker in text_nospace for marker in train_markers):
+        result["seller_name"] = result["seller_name"] or "中国铁路"
+        result["description"] = result["description"] or "火车票"
+    return result
 
 
 def _paddle_ocr_invoice(filepath: Path) -> dict | None:

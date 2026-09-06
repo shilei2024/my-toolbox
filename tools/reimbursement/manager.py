@@ -94,6 +94,22 @@ def _customer_dict(customer: Any) -> dict[str, Any]:
     }
 
 
+def _customer_creation_membership() -> Any | None:
+    """Return an organization membership that may own a newly created customer."""
+    if not has_request_context():
+        return None
+    from customer_projects.permissions import current_membership, module_available
+
+    if not module_available():
+        return None
+    membership = current_membership()
+    if membership is None or not membership.roles.intersection(
+        {"organization_admin", "business_manager", "sales"}
+    ):
+        return None
+    return membership
+
+
 def _owned_customer(customer_id: Any) -> Any | None:
     value = str(customer_id or "").strip()
     if not value:
@@ -1340,6 +1356,7 @@ def register_routes(bp: Blueprint) -> None:
             product_lines=[_product_line_dict(item) for item in product_lines],
             offices=[_office_dict(item) for item in offices],
             customers=[_customer_dict(item) for item in _customer_directory()],
+            customer_creation_enabled=_customer_creation_membership() is not None,
             customer_levels=list(CUSTOMER_LEVELS),
             recent=[_invoice_dict(item) for item in invoices],
             stats={
@@ -1350,6 +1367,33 @@ def register_routes(bp: Blueprint) -> None:
                 "period_name": active_period.name if active_period else "",
             },
         )
+
+    @bp.post("/api/customers")
+    def create_customer_from_invoice():
+        membership = _customer_creation_membership()
+        if membership is None:
+            return jsonify(error="当前账号无权录入客户，请联系组织管理员"), 403
+
+        from customer_projects.services.projects import DomainError, create_customer
+
+        data = _payload()
+        try:
+            customer = create_customer(
+                {
+                    "name": data.get("name"),
+                    "short_name": data.get("short_name"),
+                    "grade": data.get("grade"),
+                },
+                membership,
+            )
+            db.session.commit()
+        except DomainError as exc:
+            db.session.rollback()
+            return jsonify(error=exc.message, field_errors=exc.field_errors), 400
+
+        if hasattr(g, "_reimbursement_customers"):
+            delattr(g, "_reimbursement_customers")
+        return jsonify(success=True, customer=_customer_dict(customer)), 201
 
     @bp.post("/api/periods")
     def create_period():
@@ -1821,7 +1865,10 @@ def register_routes(bp: Blueprint) -> None:
         for key in ("vendor", "description", "file_url", "file_name", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
-        invoice.status = data.get("status") if data.get("status") in STATUS_LABELS else "pending"
+        if data.get("status") in STATUS_LABELS:
+            invoice.status = data["status"]
+        elif not invoice.status:
+            invoice.status = "pending"
         return None
 
     @bp.post("/api/invoices")

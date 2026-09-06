@@ -967,6 +967,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         detail = generated.sheet_by_name("应酬费明细表")
         self.assertEqual(detail.cell_value(1, 0), "员工姓名：测试员工")
         self.assertEqual(detail.cell_value(3, 2), "更早地点")
+        self.assertEqual(detail.cell_value(3, 3), "客户B")
         self.assertEqual(detail.cell_value(3, 5), 50)
         self.assertEqual(detail.cell_value(4, 2), "测试餐厅")
         self.assertEqual(detail.cell_value(12, 0), "合计")
@@ -1136,6 +1137,19 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("categoryOptions(value)", template)
         self.assertIn("（历史数据）", template)
         self.assertIn("礼品", template)
+        self.assertNotIn('id="rbInvStatus"', template)
+        self.assertNotIn("status:val('rbInvStatus')", template)
+        self.assertIn('id="rbAddCustomerButton"', template)
+        self.assertIn("/tools/reimbursement/api/customers", template)
+        self.assertIn("customer_creation_enabled", template)
+        self.assertEqual(
+            template.count("${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}"),
+            1,
+        )
+        self.assertIn(
+            "${this.esc(c.display_name)}</option>`).join('')",
+            template,
+        )
         self.assertEqual(
             template.count("['purpose','产品线','product-line']"),
             2,
