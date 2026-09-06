@@ -33,7 +33,7 @@
   </div>
   <section class="cp-panel">
     <div class="cp-panel-heading"><div><h2>项目明细</h2><p>{{ report.metadata.definition }}</p></div><small>生成于 {{ report.metadata.generated_at|china_time('%Y-%m-%d %H:%M') }}</small></div>
-    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>项目</th><th>客户</th><th>产品</th><th>状态</th><th>失败原因</th><th>更新时间</th></tr></thead><tbody>{% for item in report.projects %}<tr><td><a href="{{ url_for('customer_projects.project_detail', project_id=item.id) }}">{{ item.project_code }} · {{ item.name }}</a></td><td>{{ item.customer_name }}</td><td>{{ item.product_name or '未记录' }}</td><td>{{ stages.get(item.stage_code, item.stage_code) }}</td><td>{{ item.close_reason_code or '—' }}</td><td>{{ item.updated_at|china_time('%Y-%m-%d %H:%M') }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">当前筛选没有生命周期记录。</td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>项目</th><th>客户</th><th>产品</th><th>状态</th><th>失败原因</th><th>更新时间</th></tr></thead><tbody>{% for item in report.projects %}<tr><td><a href="{{ url_for('customer_projects.customer_detail', customer_id=item.customer_id) }}">{{ item.project_code }} · {{ item.name }}</a></td><td>{{ item.customer_name }}</td><td>{{ item.product_name or '未记录' }}</td><td>{{ stages.get(item.stage_code, item.stage_code) }}</td><td>{{ item.close_reason_code or '—' }}</td><td>{{ item.updated_at|china_time('%Y-%m-%d %H:%M') }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-muted py-4">当前筛选没有生命周期记录。</td></tr>{% endfor %}</tbody></table></div>
   </section>
 </section>
 {% endblock %}

@@ -76,7 +76,7 @@ from .services.projects import (
     update_customer_grade,
     update_material_commercial,
 )
-from .services.reports import REPORT_STAGES, build_lifecycle_report
+from .services.reports import REPORT_STAGES, build_lifecycle_report, build_market_scope_report
 from .services.imports import (
     MAX_IMPORT_BYTES,
     ProjectImportError,
@@ -118,6 +118,41 @@ def _project_or_404(project_id: str, membership: OrganizationMembership) -> Cust
     if project is None or not can_view_project(membership, project):
         abort(404)
     return project
+
+
+def _accessible_customer_statement(membership: OrganizationMembership):
+    statement = select(Customer).where(
+        Customer.organization_id == membership.organization_id,
+        Customer.deleted_at.is_(None),
+    )
+    if membership.roles.intersection(ADMIN_ROLES):
+        return statement
+    accessible_projects = apply_project_scope(
+        select(CustomerProject.customer_id).where(CustomerProject.deleted_at.is_(None)),
+        membership,
+    )
+    return statement.where(
+        or_(
+            Customer.primary_owner_user_id == membership.user_id,
+            Customer.id.in_(accessible_projects),
+        )
+    )
+
+
+def _customer_or_404(customer_id: str, membership: OrganizationMembership) -> Customer:
+    customer = db.session.scalar(
+        _accessible_customer_statement(membership).where(Customer.id == customer_id)
+    )
+    if customer is None:
+        abort(404)
+    return customer
+
+
+def _can_manage_customer(customer: Customer, membership: OrganizationMembership) -> bool:
+    return bool(
+        membership.roles.intersection(ADMIN_ROLES)
+        or customer.primary_owner_user_id == membership.user_id
+    )
 
 
 def _handle_domain_error(exc: DomainError, endpoint: str, **values: str):
@@ -203,6 +238,18 @@ def dashboard():
         customer_names=customer_names,
         user_names=user_names,
         stages=stages,
+        market_scope=build_market_scope_report(membership),
+    )
+
+
+@customer_projects_bp.get("/market-scope")
+@login_required
+@module_required
+def market_scope_report():
+    membership = _membership()
+    return render_template(
+        "customer_projects/market_scope.html",
+        market_scope=build_market_scope_report(membership),
     )
 
 
@@ -214,7 +261,10 @@ def _customer_name_map(projects: list[CustomerProject]) -> dict[str, str]:
     ids = {p.customer_id for p in projects}
     if not ids:
         return {}
-    return {row.id: row.name for row in db.session.scalars(select(Customer).where(Customer.id.in_(ids)))}
+    return {
+        row.id: row.short_name or row.name
+        for row in db.session.scalars(select(Customer).where(Customer.id.in_(ids)))
+    }
 
 
 def _user_name_map(ids: set[int]) -> dict[int, str]:
@@ -399,15 +449,10 @@ def customers():
             customer = create_customer(request.form.to_dict(), membership)
             db.session.commit()
             flash(f"客户“{customer.name}”已创建。", "success")
-            return redirect(url_for("customer_projects.customers"))
+            return redirect(url_for("customer_projects.customer_detail", customer_id=customer.id))
         except DomainError as exc:
             return _handle_domain_error(exc, "customer_projects.customers")
-    statement = select(Customer).where(
-        Customer.organization_id == membership.organization_id,
-        Customer.deleted_at.is_(None),
-    )
-    if not membership.roles.intersection(ADMIN_ROLES):
-        statement = statement.where(Customer.primary_owner_user_id == membership.user_id)
+    statement = _accessible_customer_statement(membership)
     rows = list(db.session.scalars(statement.order_by(Customer.name).limit(100)))
     customer_ids = [row.id for row in rows]
     contacts = list(
@@ -423,7 +468,46 @@ def customers():
     contacts_by_customer: dict[str, list[CustomerContact]] = {customer_id: [] for customer_id in customer_ids}
     for contact in contacts:
         contacts_by_customer.setdefault(contact.customer_id, []).append(contact)
-    return render_template("customer_projects/customers.html", customers=rows, contacts_by_customer=contacts_by_customer)
+    return render_template(
+        "customer_projects/customers.html",
+        customers=rows,
+        contacts_by_customer=contacts_by_customer,
+        manageable_customer_ids={
+            customer.id for customer in rows if _can_manage_customer(customer, membership)
+        },
+    )
+
+
+@customer_projects_bp.get("/customers/<string:customer_id>")
+@login_required
+@module_required
+def customer_detail(customer_id: str):
+    membership = _membership()
+    customer = _customer_or_404(customer_id, membership)
+    projects_stmt = apply_project_scope(
+        select(CustomerProject).where(
+            CustomerProject.customer_id == customer.id,
+            CustomerProject.deleted_at.is_(None),
+        ),
+        membership,
+    )
+    projects = list(db.session.scalars(projects_stmt.order_by(CustomerProject.updated_at.desc())))
+    contacts = list(
+        db.session.scalars(
+            select(CustomerContact).where(
+                CustomerContact.customer_id == customer.id,
+                CustomerContact.deleted_at.is_(None),
+            ).order_by(CustomerContact.is_primary.desc(), CustomerContact.name)
+        )
+    )
+    return render_template(
+        "customer_projects/customer_detail.html",
+        customer=customer,
+        projects=projects,
+        contacts=contacts,
+        stages=_stage_map(membership.organization_id),
+        can_write=can_write(membership) and _can_manage_customer(customer, membership),
+    )
 
 
 @customer_projects_bp.post("/customers/<string:customer_id>/grade")
@@ -432,23 +516,14 @@ def customers():
 def customer_update_grade(customer_id: str):
     membership = _membership()
     require_write(membership)
-    customer = db.session.scalar(
-        select(Customer).where(
-            Customer.id == customer_id,
-            Customer.organization_id == membership.organization_id,
-            Customer.deleted_at.is_(None),
-        )
-    )
-    if customer is None or (
-        not membership.roles.intersection(ADMIN_ROLES)
-        and customer.primary_owner_user_id != membership.user_id
-    ):
-        abort(404)
+    customer = _customer_or_404(customer_id, membership)
+    if not _can_manage_customer(customer, membership):
+        abort(403)
     try:
         update_customer_grade(customer, request.form.get("grade"), membership)
         db.session.commit()
         flash("客户评级已更新。", "success")
-        return redirect(url_for("customer_projects.customers"))
+        return redirect(url_for("customer_projects.customer_detail", customer_id=customer.id))
     except DomainError as exc:
         return _handle_domain_error(exc, "customer_projects.customers")
 
@@ -459,25 +534,16 @@ def customer_update_grade(customer_id: str):
 def customer_add_contact(customer_id: str):
     membership = _membership()
     require_write(membership)
-    customer = db.session.scalar(
-        select(Customer).where(
-            Customer.id == customer_id,
-            Customer.organization_id == membership.organization_id,
-            Customer.deleted_at.is_(None),
-        )
-    )
-    if customer is None or (
-        not membership.roles.intersection(ADMIN_ROLES)
-        and customer.primary_owner_user_id != membership.user_id
-    ):
-        abort(404)
+    customer = _customer_or_404(customer_id, membership)
+    if not _can_manage_customer(customer, membership):
+        abort(403)
     try:
         data = request.form.to_dict()
         data["is_primary"] = request.form.get("is_primary") == "on"
         add_contact(customer, data, membership)
         db.session.commit()
         flash("联系人已添加。", "success")
-        return redirect(url_for("customer_projects.customers"))
+        return redirect(url_for("customer_projects.customer_detail", customer_id=customer.id))
     except DomainError as exc:
         return _handle_domain_error(exc, "customer_projects.customers")
 
@@ -488,6 +554,13 @@ def customer_add_contact(customer_id: str):
 def project_new():
     membership = _membership()
     require_write(membership)
+    customer_id = str(request.form.get("customer_id") or request.args.get("customer_id") or "").strip()
+    if not customer_id:
+        flash("请先进入客户详情，再为该客户新建项目。", "warning")
+        return redirect(url_for("customer_projects.customers"))
+    customer = _customer_or_404(customer_id, membership)
+    if not _can_manage_customer(customer, membership):
+        abort(403)
     if request.method == "POST":
         try:
             project = create_project(
@@ -497,11 +570,9 @@ def project_new():
             flash(f"项目 {project.project_code} 已创建。", "success")
             return redirect(url_for("customer_projects.project_detail", project_id=project.id))
         except DomainError as exc:
-            return _handle_domain_error(exc, "customer_projects.project_new")
-    customer_stmt = select(Customer).where(Customer.organization_id == membership.organization_id, Customer.deleted_at.is_(None))
-    if not membership.roles.intersection(ADMIN_ROLES):
-        customer_stmt = customer_stmt.where(Customer.primary_owner_user_id == membership.user_id)
-    customers = list(db.session.scalars(customer_stmt.order_by(Customer.name)))
+            return _handle_domain_error(
+                exc, "customer_projects.project_new", customer_id=customer.id
+            )
     members = list(
         db.session.execute(
             select(User, OrganizationMembership)
@@ -516,7 +587,7 @@ def project_new():
     )
     return render_template(
         "customer_projects/project_new.html",
-        customers=customers,
+        customer=customer,
         members=members,
         stages=_stage_map(membership.organization_id),
         idempotency_key=str(uuid.uuid4()),

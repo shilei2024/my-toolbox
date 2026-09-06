@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from unittest.mock import patch
 
 os.environ["FLASK_ENV"] = "production"
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -31,6 +32,7 @@ from shared.models import (  # noqa: E402
 )
 from shared.business_calendar import add_workdays, upsert_business_day_override  # noqa: E402
 from shared.notifications import dispatch_due_notifications  # noqa: E402
+from shared.notifications import notification_readiness  # noqa: E402
 
 
 class CustomerProjectReminderTest(unittest.TestCase):
@@ -131,6 +133,12 @@ class CustomerProjectReminderTest(unittest.TestCase):
             rows = list(db.session.scalars(db.select(NotificationOutbox)))
             self.assertEqual({row.event_type for row in rows}, {"followup_pre_due", "followup_due"})
             self.assertTrue(all(row.object_id == project_id for row in rows))
+            self.assertTrue(
+                all(row.template_data["next_follow_up_at"].startswith("2026-08-28 17:00") for row in rows)
+            )
+            self.assertTrue(
+                all("/customer-projects/customers/" in row.template_data["project_url"] for row in rows)
+            )
             self.assertEqual(db.session.query(NotificationDelivery).count(), 4)
             self.assertNotIn("inactive@test.com", {row.recipient_address for row in db.session.scalars(db.select(NotificationDelivery))})
 
@@ -286,6 +294,60 @@ class CustomerProjectReminderTest(unittest.TestCase):
         )
         self.assertEqual(dispatched.exit_code, 0)
         self.assertIn("claimed=0 sent=0 failed=0", dispatched.output)
+
+    def test_live_smtp_preflight_and_test_message_use_production_path(self) -> None:
+        class FakeSMTP:
+            messages = []
+            ehlo_count = 0
+
+            def __init__(self, host, port, timeout):
+                self.connection = (host, port, timeout)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def ehlo(self):
+                type(self).ehlo_count += 1
+
+            def starttls(self, context):
+                self.context = context
+
+            def login(self, username, password):
+                self.credentials = (username, password)
+
+            def send_message(self, message):
+                type(self).messages.append(message)
+
+        app.config.update(
+            CUSTOMER_PROJECT_REMINDERS_ENABLED=True,
+            CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=True,
+            NOTIFICATION_ADAPTER="smtp",
+            SMTP_HOST="smtp.test",
+            SMTP_PORT=587,
+            SMTP_SECURITY="starttls",
+            SMTP_USERNAME="mailer@test.com",
+            SMTP_PASSWORD="test-secret",
+            SMTP_FROM="项目提醒 <mailer@test.com>",
+            SMTP_TIMEOUT_SECONDS=10,
+            APP_BASE_URL="https://toolbox.test",
+        )
+        with app.app_context():
+            self.assertTrue(notification_readiness(require_live=True)["ready"])
+        runner = app.test_cli_runner()
+        check = runner.invoke(args=["customer-projects", "notifications-check", "--require-live"])
+        self.assertEqual(check.exit_code, 0)
+        with patch("shared.notifications.smtplib.SMTP", FakeSMTP):
+            sent = runner.invoke(
+                args=["customer-projects", "send-test-email", "--recipient", "ops@test.com"]
+            )
+        self.assertEqual(sent.exit_code, 0)
+        self.assertIn("accepted by SMTP", sent.output)
+        self.assertEqual(len(FakeSMTP.messages), 1)
+        self.assertEqual(FakeSMTP.messages[0]["To"], "ops@test.com")
+        self.assertEqual(FakeSMTP.ehlo_count, 2)
 
     def test_project_override_and_member_email_opt_out(self) -> None:
         with app.app_context():

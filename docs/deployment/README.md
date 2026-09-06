@@ -24,6 +24,7 @@
 
 - [客户项目跟进 Phase 1 迁移、发布与回滚计划](customer-project-tracking-phase-1-rollout.md)（核心代码已实现；真实 staging 与生产门禁仍未关闭）
 - [客户项目 Phase 2 提醒闭环部署与回滚](customer-project-tracking-phase-2-reminders.md)（默认 dry-run；真实 SMTP 需独立审批）
+- [客户项目市场工作台与真实邮件提醒腾讯云发布](customer-project-market-dashboard-reminder-rollout.md)（无迁移；安装 systemd timer 后才会自动发信）
 - [客户项目 Phase 3 生命周期发布与回滚](customer-project-tracking-phase-3-lifecycle.md)（无迁移；先在 staging 验证历史保留与权限范围）
 - [客户项目 Phase 4 工作日历与受控导入](customer-project-tracking-phase-4-calendar-import.md)（只加表迁移；导入先预览且仅可条件撤销）
 - [客户项目 Phase 4 受控导出](customer-project-tracking-phase-4-controlled-export.md)（组织角色策略、规模上限、价格列和文件摘要审计）

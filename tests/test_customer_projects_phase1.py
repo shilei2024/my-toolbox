@@ -1215,6 +1215,55 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         html = page.get_data(as_text=True)
         self.assertIn('data-annual-value="144000.00"', html)
 
+    def test_dashboard_market_scope_drills_down_and_project_creation_is_customer_first(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            project = db.session.get(CustomerProject, project_id)
+            customer = db.session.get(Customer, project.customer_id)
+            customer.short_name = "示例电子"
+            material = ProjectMaterial(
+                organization_id=self.org_id,
+                project_id=project_id,
+                opportunity_type="design_in",
+                category_code="Power IC",
+                promoted_brand="Mavis",
+                promoted_mpn="MPX-1",
+                machine_quantity=Decimal("2"),
+                unit_price_usd=Decimal("0.5"),
+                idempotency_key="dashboard-scope",
+                created_by_user_id=self.sales_id,
+                updated_by_user_id=self.sales_id,
+            )
+            db.session.add(material)
+            db.session.commit()
+            customer_id = customer.id
+        self._login()
+        dashboard = self.client.get("/customer-projects/")
+        dashboard_html = dashboard.get_data(as_text=True)
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn("USD 120,000.00", dashboard_html)
+        self.assertIn("/customer-projects/market-scope", dashboard_html)
+        self.assertIn(f"/customer-projects/customers/{customer_id}", dashboard_html)
+
+        breakdown = self.client.get("/customer-projects/market-scope")
+        breakdown_html = breakdown.get_data(as_text=True)
+        self.assertEqual(breakdown.status_code, 200)
+        self.assertIn("Mavis", breakdown_html)
+        self.assertIn("Power IC", breakdown_html)
+        self.assertIn("USD 120,000.00", breakdown_html)
+
+        direct_new = self.client.get("/customer-projects/projects/new")
+        self.assertEqual(direct_new.status_code, 302)
+        self.assertTrue(direct_new.location.endswith("/customer-projects/customers"))
+        customer_new = self.client.get(
+            f"/customer-projects/projects/new?customer_id={customer_id}"
+        )
+        self.assertEqual(customer_new.status_code, 200)
+        self.assertIn('name="customer_id"', customer_new.get_data(as_text=True))
+        customer_page = self.client.get(f"/customer-projects/customers/{customer_id}")
+        self.assertEqual(customer_page.status_code, 200)
+        self.assertIn("车载控制器", customer_page.get_data(as_text=True))
+
     def test_lost_transition_requires_promoted_material_info(self) -> None:
         project_id = self._seed_project()
         self._login()

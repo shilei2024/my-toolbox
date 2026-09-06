@@ -11,8 +11,21 @@
       <h1>今天先推进什么？</h1>
       <p>把到期动作、停滞风险和最近变化放在同一张工作台上。</p>
     </div>
-    <a class="btn btn-light cp-primary-action" href="{{ url_for('customer_projects.project_new') }}"><i class="bi bi-plus-lg"></i> 新建项目</a>
+    <a class="btn btn-light cp-primary-action" href="{{ url_for('customer_projects.customers') }}"><i class="bi bi-buildings"></i> 选择客户</a>
   </header>
+
+  <section class="cp-panel">
+    <div class="cp-panel-heading">
+      <div><p class="cp-kicker">MARKET SCOPE</p><h2>全部跟进客户市场规模</h2><p>{{ market_scope.customer_count }} 个客户 · {{ market_scope.project_count }} 个非归档项目</p></div>
+      <a href="{{ url_for('customer_projects.market_scope_report') }}">按品牌、类别查看 <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <a class="cp-market-scope cp-market-scope--link" href="{{ url_for('customer_projects.market_scope_report') }}" aria-label="查看 TAM、SAM、SOM 品牌和类别明细">
+      <article><span>TAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.tam_usd) }}</strong><small>全部机会规模</small></article>
+      <article><span>SAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.sam_usd) }}</strong><small>可服务机会规模</small></article>
+      <article><span>SOM</span><strong>USD {{ '{:,.2f}'.format(market_scope.som_usd) }}</strong><small>可获得机会规模</small></article>
+      {% if market_scope.incomplete_material_count %}<p>另有 {{ market_scope.incomplete_material_count }} 条物料因数量或价格缺失未计入。</p>{% endif %}
+    </a>
+  </section>
 
   <div class="cp-metric-grid" aria-label="项目提醒摘要">
     <article class="cp-metric is-danger"><span>已逾期</span><strong>{{ counts.overdue }}</strong><small>需要立即确认下一步</small></article>
@@ -24,12 +37,12 @@
   <section class="cp-panel">
     <div class="cp-panel-heading">
       <div><p class="cp-kicker">PRIORITIES</p><h2>我的优先事项</h2></div>
-      <a href="{{ url_for('customer_projects.projects') }}">查看全部 <i class="bi bi-arrow-right"></i></a>
+      <a href="{{ url_for('customer_projects.customers') }}">按客户查看 <i class="bi bi-arrow-right"></i></a>
     </div>
     {% if projects %}
       <div class="cp-project-list">
         {% for project in projects %}
-          <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
+          <a class="cp-project-row" href="{{ url_for('customer_projects.customer_detail', customer_id=project.customer_id) }}">
             <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
             <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
             <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>

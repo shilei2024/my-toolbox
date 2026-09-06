@@ -40,7 +40,7 @@ flask customer-projects dispatch-notifications --limit 100
 
 ## 外部调度
 
-dry-run 验收通过后设置 `CUSTOMER_PROJECT_REMINDERS_ENABLED=true`，由服务器 cron 或 systemd timer 每 10 分钟依次执行扫描和发送命令。不要把命令放进 Flask/Gunicorn worker，也不要启动 APScheduler 业务线程。每次命令必须记录退出码和时间，但不得记录邮件正文、完整收件地址或 SMTP 异常原文。
+dry-run 验收通过后设置 `CUSTOMER_PROJECT_REMINDERS_ENABLED=true`，使用仓库中的 `deploy/customer-project-reminders.service` 与 `deploy/customer-project-reminders.timer` 每 10 分钟依次执行配置自检、扫描和发送。完整安装与腾讯云验证命令见[市场工作台与真实邮件提醒发布手册](customer-project-market-dashboard-reminder-rollout.md)。不要把命令放进 Flask/Gunicorn worker，也不要启动 APScheduler 业务线程。每次命令必须记录退出码和时间，但不得记录邮件正文、完整收件地址或 SMTP 异常原文。
 
 ## SMTP 小流量启用
 

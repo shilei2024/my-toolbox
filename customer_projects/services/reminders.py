@@ -135,6 +135,19 @@ def _emit(
     raw_key = f"customer-projects:{project.id}:{event_type}:{cycle_key}:v{policy.version}:o{override_version}"
     key = "cp:" + hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     customer = db.session.get(Customer, project.customer_id)
+    organization = db.session.get(Organization, project.organization_id)
+    try:
+        display_tz = ZoneInfo((organization.timezone if organization else None) or "Asia/Shanghai")
+    except (KeyError, ValueError):
+        display_tz = ZoneInfo("Asia/Shanghai")
+    stage = db.session.scalar(
+        select(ProjectStatusCatalog).where(
+            ProjectStatusCatalog.organization_id == project.organization_id,
+            ProjectStatusCatalog.code == project.stage_code,
+        )
+    )
+    def format_local(value: datetime) -> str:
+        return _aware(value).astimezone(display_tz).strftime("%Y-%m-%d %H:%M %Z")
     base_url = str(current_app.config.get("APP_BASE_URL", "")).rstrip("/")
     outbox = NotificationOutbox(
         organization_id=project.organization_id,
@@ -153,12 +166,12 @@ def _emit(
             "reminder_label": REMINDER_LABELS[event_type],
             "project_code": project.project_code,
             "project_name": project.name,
-            "customer_name": customer.name if customer else "—",
-            "stage_code": project.stage_code,
+            "customer_name": (customer.short_name or customer.name) if customer else "—",
+            "stage_code": stage.display_name if stage else project.stage_code,
             "next_action": project.next_action,
-            "next_follow_up_at": _aware(project.next_follow_up_at).isoformat(),
-            "last_meaningful_update_at": _aware(project.last_meaningful_update_at).isoformat(),
-            "project_url": f"{base_url}/customer-projects/projects/{project.id}",
+            "next_follow_up_at": format_local(project.next_follow_up_at),
+            "last_meaningful_update_at": format_local(project.last_meaningful_update_at),
+            "project_url": f"{base_url}/customer-projects/customers/{project.customer_id}#project-{project.id}",
         }
     )
     try:

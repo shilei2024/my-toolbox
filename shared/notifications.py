@@ -6,6 +6,7 @@ import ssl
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from email.utils import parseaddr
 
 from flask import current_app
 from sqlalchemy import select, update
@@ -18,6 +19,48 @@ class NotificationAdapterError(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+def notification_readiness(*, require_live: bool = False) -> dict[str, object]:
+    """Return a secret-free readiness report for operators and systemd preflight."""
+    adapter = str(current_app.config.get("NOTIFICATION_ADAPTER", "dry-run")).strip().lower()
+    issues: list[str] = []
+    if adapter not in {"dry-run", "smtp"}:
+        issues.append("NOTIFICATION_ADAPTER must be dry-run or smtp")
+    if require_live and adapter != "smtp":
+        issues.append("NOTIFICATION_ADAPTER must be smtp for live delivery")
+    if adapter == "smtp" or require_live:
+        if not current_app.config.get("CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED", False):
+            issues.append("CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED=false")
+        if not str(current_app.config.get("SMTP_HOST", "")).strip():
+            issues.append("SMTP_HOST is empty")
+        sender = str(current_app.config.get("SMTP_FROM", "")).strip()
+        if not _valid_mail_address(sender):
+            issues.append("SMTP_FROM is invalid")
+        if str(current_app.config.get("SMTP_SECURITY", "starttls")).lower() not in {"starttls", "ssl"}:
+            issues.append("SMTP_SECURITY must be starttls or ssl")
+        username = str(current_app.config.get("SMTP_USERNAME", ""))
+        password = str(current_app.config.get("SMTP_PASSWORD", ""))
+        if bool(username) != bool(password):
+            issues.append("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
+        try:
+            if int(current_app.config.get("SMTP_PORT", 0)) not in range(1, 65536):
+                raise ValueError
+            if int(current_app.config.get("SMTP_TIMEOUT_SECONDS", 0)) not in range(1, 121):
+                raise ValueError
+        except (TypeError, ValueError):
+            issues.append("SMTP_PORT or SMTP_TIMEOUT_SECONDS is invalid")
+    base_url = str(current_app.config.get("APP_BASE_URL", "")).strip()
+    if (adapter == "smtp" or require_live) and not base_url.startswith("https://"):
+        issues.append("APP_BASE_URL must be the public HTTPS site URL")
+    return {"ready": not issues, "adapter": adapter, "issues": issues}
+
+
+def _valid_mail_address(value: str) -> bool:
+    if not value or any(char in value for char in ("\r", "\n")):
+        return False
+    address = parseaddr(value)[1]
+    return bool(address and "@" in address and address.rsplit("@", 1)[1])
 
 
 def cancel_pending_notifications(module_code: str, object_type: str, object_id: str) -> int:
@@ -76,6 +119,57 @@ def _render_message(outbox: NotificationOutbox) -> tuple[str, str]:
     return subject[:255], body
 
 
+def _smtp_send(recipient: str, subject: str, body: str) -> None:
+    host = str(current_app.config.get("SMTP_HOST", "")).strip()
+    sender = str(current_app.config.get("SMTP_FROM", "")).strip()
+    if not host or not sender:
+        raise NotificationAdapterError("SMTP_NOT_CONFIGURED")
+    mode = str(current_app.config.get("SMTP_SECURITY", "starttls")).lower()
+    if mode not in {"starttls", "ssl"}:
+        raise NotificationAdapterError("SMTP_SECURITY_INVALID")
+    if not _valid_mail_address(sender) or not _valid_mail_address(recipient):
+        raise NotificationAdapterError("INVALID_MAIL_ADDRESS")
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(body)
+    port = int(current_app.config.get("SMTP_PORT", 587))
+    timeout = int(current_app.config.get("SMTP_TIMEOUT_SECONDS", 10))
+    try:
+        client_cls = smtplib.SMTP_SSL if mode == "ssl" else smtplib.SMTP
+        with client_cls(host, port, timeout=timeout) as client:
+            if mode == "starttls":
+                client.ehlo()
+                client.starttls(context=ssl.create_default_context())
+                client.ehlo()
+            username = str(current_app.config.get("SMTP_USERNAME", ""))
+            password = str(current_app.config.get("SMTP_PASSWORD", ""))
+            if bool(username) != bool(password):
+                raise NotificationAdapterError("SMTP_CREDENTIALS_INCOMPLETE")
+            if username and password:
+                client.login(username, password)
+            client.send_message(message)
+    except NotificationAdapterError:
+        raise
+    except (OSError, smtplib.SMTPException, ValueError) as exc:
+        raise NotificationAdapterError("SMTP_DELIVERY_FAILED") from exc
+
+
+def send_test_email(recipient: str) -> None:
+    """Send an operator-requested message through the exact production SMTP path."""
+    readiness = notification_readiness(require_live=True)
+    if not readiness["ready"]:
+        raise NotificationAdapterError("NOTIFICATION_NOT_READY")
+    if not _valid_mail_address(recipient):
+        raise NotificationAdapterError("INVALID_MAIL_ADDRESS")
+    _smtp_send(
+        recipient,
+        "[客户项目提醒] SMTP 配置测试",
+        "客户项目提醒服务已成功连接 SMTP 并发送此测试邮件。\n\n此邮件不包含客户或项目数据。",
+    )
+
+
 def _deliver(outbox: NotificationOutbox, delivery: NotificationDelivery) -> str:
     adapter = str(current_app.config.get("NOTIFICATION_ADAPTER", "dry-run")).strip().lower()
     if adapter == "dry-run":
@@ -84,34 +178,8 @@ def _deliver(outbox: NotificationOutbox, delivery: NotificationDelivery) -> str:
         raise NotificationAdapterError("ADAPTER_NOT_SUPPORTED")
     if not current_app.config.get("CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED", False):
         raise NotificationAdapterError("LIVE_DELIVERY_DISABLED")
-    host = str(current_app.config.get("SMTP_HOST", "")).strip()
-    sender = str(current_app.config.get("SMTP_FROM", "")).strip()
-    if not host or not sender:
-        raise NotificationAdapterError("SMTP_NOT_CONFIGURED")
-    mode = str(current_app.config.get("SMTP_SECURITY", "starttls")).lower()
-    if mode not in {"starttls", "ssl"}:
-        raise NotificationAdapterError("SMTP_SECURITY_INVALID")
-    if any(char in sender + delivery.recipient_address for char in ("\r", "\n")):
-        raise NotificationAdapterError("INVALID_MAIL_ADDRESS")
-    message = EmailMessage()
-    message["From"] = sender
-    message["To"] = delivery.recipient_address
-    message["Subject"], body = _render_message(outbox)
-    message.set_content(body)
-    port = int(current_app.config.get("SMTP_PORT", 587))
-    timeout = int(current_app.config.get("SMTP_TIMEOUT_SECONDS", 10))
-    try:
-        client_cls = smtplib.SMTP_SSL if mode == "ssl" else smtplib.SMTP
-        with client_cls(host, port, timeout=timeout) as client:
-            if mode == "starttls":
-                client.starttls(context=ssl.create_default_context())
-            username = str(current_app.config.get("SMTP_USERNAME", ""))
-            password = str(current_app.config.get("SMTP_PASSWORD", ""))
-            if username:
-                client.login(username, password)
-            client.send_message(message)
-    except (OSError, smtplib.SMTPException, ValueError) as exc:
-        raise NotificationAdapterError("SMTP_DELIVERY_FAILED") from exc
+    subject, body = _render_message(outbox)
+    _smtp_send(delivery.recipient_address, subject, body)
     return f"smtp:{uuid.uuid4()}"
 
 
