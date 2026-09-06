@@ -55,6 +55,12 @@ def build_market_scope_report(membership: OrganizationMembership) -> dict[str, A
     for competitor in competitors:
         competitors_by_material[competitor.project_material_id].append(competitor)
 
+    customer_ids = {project.customer_id for project in projects}
+    customers = {
+        customer.id: customer
+        for customer in db.session.scalars(select(Customer).where(Customer.id.in_(customer_ids)))
+    } if customer_ids else {}
+
     totals = {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
     brand_rows: dict[str, dict[str, Decimal]] = defaultdict(
         lambda: {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
@@ -62,12 +68,18 @@ def build_market_scope_report(membership: OrganizationMembership) -> dict[str, A
     category_rows: dict[str, dict[str, Decimal]] = defaultdict(
         lambda: {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
     )
+    customer_rows: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: {"tam_usd": Decimal("0.00"), "sam_usd": Decimal("0.00"), "som_usd": Decimal("0.00")}
+    )
+    customer_project_counts: Counter[str] = Counter()
     incomplete = 0
     for project in projects:
         project_materials = materials_by_project.get(project.id, [])
         scope = build_market_scope(project, project_materials, competitors_by_material)
         for key in totals:
             totals[key] += scope[key]
+            customer_rows[project.customer_id][key] += scope[key]
+        customer_project_counts[project.customer_id] += 1
         incomplete += len(scope["incomplete_material_ids"])
         for material in project_materials:
             value = scope["material_values"].get(material.id)
@@ -96,12 +108,30 @@ def build_market_scope_report(membership: OrganizationMembership) -> dict[str, A
             for label, values in sorted(rows.items(), key=lambda item: (-item[1]["tam_usd"], item[0]))
         ]
 
+    def customer_label(customer_id: str) -> str:
+        customer = customers.get(customer_id)
+        if customer is None:
+            return "未知客户"
+        return customer.short_name or customer.name
+
     return {
         **totals,
         "project_count": len(projects),
         "customer_count": len({project.customer_id for project in projects}),
         "material_count": len(materials),
         "incomplete_material_count": incomplete,
+        "customer_breakdown": [
+            {
+                "customer_id": customer_id,
+                "customer_name": customer_label(customer_id),
+                "project_count": customer_project_counts[customer_id],
+                **values,
+            }
+            for customer_id, values in sorted(
+                customer_rows.items(),
+                key=lambda item: (-item[1]["tam_usd"], customer_label(item[0]).casefold()),
+            )
+        ],
         "brand_breakdown": serialize(brand_rows, "brand"),
         "category_breakdown": serialize(category_rows, "category"),
     }
