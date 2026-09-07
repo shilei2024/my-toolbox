@@ -14,6 +14,31 @@
     ["competitive_opportunity", "Lost", "被竞品占据的机会，仅记录竞品信息"],
   ];
   const lostType = "competitive_opportunity";
+  let brandNames = [];
+  try {
+    brandNames = JSON.parse(root.dataset.cpBrandOptions || "[]");
+  } catch (_error) {
+    brandNames = [];
+  }
+  const promotedBrandSelect = (selected = "") => {
+    const select = document.createElement("select");
+    select.className = "form-select";
+    select.name = "promoted_brand";
+    select.required = true;
+    select.setAttribute("aria-label", "推广品牌");
+    const prompt = document.createElement("option");
+    prompt.value = "";
+    prompt.textContent = "选择推广品牌 *";
+    select.append(prompt);
+    brandNames.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      option.selected = name === selected;
+      select.append(option);
+    });
+    return select;
+  };
 
   /**
    * 根据机会类型切换推广物料输入的必填与可见性：
@@ -21,9 +46,11 @@
    */
   const applyOpportunityFormMode = (form, type) => {
     const isLost = type === lostType;
-    form.querySelectorAll('input[name="promoted_brand"], input[name="promoted_mpn"]').forEach((input) => {
+    form.querySelectorAll('[name="promoted_brand"], input[name="promoted_mpn"]').forEach((input) => {
       input.required = !isLost;
-      input.placeholder = isLost ? "Lost 机会可不填推广品牌" : input.placeholder;
+      if (input instanceof HTMLInputElement) {
+        input.placeholder = isLost ? "Lost 机会可不填推广品牌" : input.placeholder;
+      }
     });
     form.querySelectorAll(
       'select[name="currency"], input[name="unit_price"], [data-price-preview]'
@@ -253,11 +280,7 @@
     const supplement = document.createElement("div");
     supplement.className = "cp-switch-supplement";
     supplement.hidden = true;
-    const brandInput = document.createElement("input");
-    brandInput.className = "form-control";
-    brandInput.name = "promoted_brand";
-    brandInput.maxLength = 120;
-    brandInput.placeholder = "推广品牌 *";
+    const brandInput = promotedBrandSelect();
     const mpnInput = document.createElement("input");
     mpnInput.className = "form-control";
     mpnInput.name = "promoted_mpn";
@@ -386,21 +409,16 @@
     const groups = document.createElement("div");
     groups.className = "cp-material-groups";
     opportunityTypes.forEach(([type, label, description]) => {
+      const rows = materials.filter((item) => item.dataset.opportunityType === type);
+      if (!rows.length) return;
       const group = document.createElement("section");
       group.className = "cp-material-group";
       group.dataset.opportunityGroup = type;
-      const rows = materials.filter((item) => item.dataset.opportunityType === type);
       group.innerHTML = `<header><div><h3>${label}</h3><p>${description}</p></div><span>${rows.length} 条</span></header>`;
-      if (rows.length) rows.forEach((item) => group.append(item));
-      else {
-        const empty = document.createElement("p");
-        empty.className = "cp-group-empty";
-        empty.textContent = "暂无此类物料";
-        group.append(empty);
-      }
+      rows.forEach((item) => group.append(item));
       groups.append(group);
     });
-    materialPanel.insertBefore(groups, addBlock);
+    if (groups.childElementCount) materialPanel.insertBefore(groups, addBlock);
   }
 
   const priceForms = Array.from(root.querySelectorAll("[data-price-form]"));

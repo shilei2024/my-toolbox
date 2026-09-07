@@ -41,7 +41,7 @@ from customer_projects.services.projects import (  # noqa: E402
     local_day_bounds,
 )
 from extensions import db  # noqa: E402
-from models import ReimbursementInvoice, User  # noqa: E402
+from models import ReimbursementInvoice, ReimbursementProductLine, User  # noqa: E402
 from shared.models import AuditEvent, Organization, OrganizationMembership  # noqa: E402
 
 
@@ -143,6 +143,84 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         with app.app_context():
             self.assertEqual(db.session.query(CustomerProject).count(), 1)
             self.assertEqual(db.session.query(ProjectStageEvent).count(), 1)
+
+    def test_manager_can_create_and_transition_to_mass_production_with_reason_only(self) -> None:
+        existing_project_id = self._seed_project()
+        with app.app_context():
+            customer_id = db.session.get(CustomerProject, existing_project_id).customer_id
+
+        self._login("manager@test.com")
+        form = self.client.get(
+            f"/customer-projects/projects/new?customer_id={customer_id}"
+        )
+        self.assertEqual(form.status_code, 200)
+        self.assertIn('<option value="mass_production">量产</option>', form.get_data(as_text=True))
+
+        created = self.client.post(
+            "/api/v1/customer-projects/projects",
+            json={
+                "customer_id": customer_id,
+                "name": "历史量产项目",
+                "product_name": "量产控制器",
+                "annual_usage": "80000",
+                "stage_code": "mass_production",
+                "primary_sales_user_id": self.sales_id,
+                "next_action": "维护量产信息",
+                "next_follow_up_at": (
+                    datetime.now(timezone.utc) + timedelta(days=30)
+                ).isoformat(),
+            },
+            headers={"Idempotency-Key": "create-mass-production"},
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["data"]["stage_code"], "mass_production")
+
+        transitioned = self.client.post(
+            f"/api/v1/customer-projects/projects/{existing_project_id}/stage-transitions",
+            json={
+                "to_stage_code": "mass_production",
+                "reason": "客户确认已进入量产",
+                "project_version": 1,
+            },
+            headers={"Idempotency-Key": "reason-only-production"},
+        )
+        self.assertEqual(transitioned.status_code, 201)
+        with app.app_context():
+            project = db.session.get(CustomerProject, existing_project_id)
+            self.assertEqual(project.stage_code, "mass_production")
+            self.assertIsNone(project.actual_mass_production_at)
+            self.assertIsNone(project.close_notes)
+
+    def test_sales_cannot_bypass_mass_production_approval_during_creation(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            customer_id = db.session.get(CustomerProject, project_id).customer_id
+        self._login()
+        form = self.client.get(
+            f"/customer-projects/projects/new?customer_id={customer_id}"
+        ).get_data(as_text=True)
+        self.assertNotIn('<option value="mass_production">', form)
+        response = self.client.post(
+            "/api/v1/customer-projects/projects",
+            json={
+                "customer_id": customer_id,
+                "name": "绕过审批项目",
+                "product_name": "测试产品",
+                "annual_usage": "1",
+                "stage_code": "mass_production",
+                "primary_sales_user_id": self.sales_id,
+                "next_action": "测试",
+                "next_follow_up_at": (
+                    datetime.now(timezone.utc) + timedelta(days=1)
+                ).isoformat(),
+            },
+            headers={"Idempotency-Key": "mass-production-permission"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.get_json()["error"]["field_errors"]["stage_code"],
+            "量产状态仅业务经理或组织管理员可创建",
+        )
 
     def test_optimistic_lock_returns_409_without_overwrite(self) -> None:
         project_id = self._seed_project()
@@ -1029,11 +1107,39 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         html = detail.get_data(as_text=True)
         self.assertIn("新增跟进", html)
-        self.assertIn("尚未添加推广物料", html)
+        self.assertNotIn("尚未添加推广物料", html)
+        self.assertIn("添加推广物料", html)
+        self.assertNotIn("暂无此类物料", html)
         self.assertIn("编辑项目基础信息", html)
         self.assertIn("data-project-title", html)
         self.assertIn("data-project-edit", html)
         self.assertNotIn("cp-form-panel cp-sticky", html)
+
+    def test_material_brand_uses_reimbursement_directory_names_only(self) -> None:
+        project_id = self._seed_project()
+        with app.app_context():
+            db.session.add(
+                ReimbursementProductLine(
+                    owner_type="user",
+                    owner_id=str(self.sales_id),
+                    name="自定义品牌",
+                    code="RB-77",
+                    sort_order=10,
+                )
+            )
+            db.session.commit()
+        self._login()
+        html = self.client.get(
+            f"/customer-projects/projects/{project_id}"
+        ).get_data(as_text=True)
+        self.assertIn('name="promoted_brand"', html)
+        self.assertIn('<option value="自定义品牌">自定义品牌</option>', html)
+        self.assertNotIn("RB-77 · 自定义品牌", html)
+        script = Path(
+            app.static_folder, "customer_projects", "customer-projects.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("if (!rows.length) return;", script)
+        self.assertNotIn("暂无此类物料", script)
 
     def test_local_day_bounds_use_organization_timezone(self) -> None:
         start, end = local_day_bounds(
