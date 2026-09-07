@@ -42,7 +42,7 @@
 | `name` / `normalized_name` | varchar(255) | 名称必填，规范名用于重复提示 |
 | `product_name` | varchar(255) | 新建项目必填；旧项目迁移后可空，首次编辑时补齐 |
 | `annual_usage` | numeric(18,4) | 兼容保留既有列类型；新建/编辑/导入时必须是大于 0 的整数，单位固定为 PCS |
-| `stage_code` | 稳定代码 | 引用启用的阶段字典 |
+| `stage_code` | 稳定代码 | 引用启用的阶段字典；业务经理/组织管理员新建项目时可直接选择 `mass_production` |
 | `assessment_grade` | A/B/C/D | 可空 |
 | `probability_band` | 10/30/50/70/90 | 可配置显示，不做自动预测 |
 | `primary_sales_user_id` | users.id | 必须是有效组织成员 |
@@ -64,7 +64,7 @@
 | 表 | 核心字段 | 关键规则 |
 | --- | --- | --- |
 | `project_members` | `project_id`, `user_id`, `role_code`, `is_primary`, `joined_at`, `left_at`, `notification_preferences` | 项目 + 用户 + 职责唯一；至少一名主业务 |
-| `project_materials` | `project_id`, `opportunity_type`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | `opportunity_type` 支持 Design In（design_in）、Design Win（design_win）、Evaluation（matched_opportunity）、Lost（competitive_opportunity），四类可互转；Lost 仅记录竞品信息，不要求推广品牌/型号，转出时必须补齐；`machine_quantity` 新写入值为非负整数 PCS；单价最多 5 位小数并去尾零展示；价格与汇率保存快照；TAM/SAM/SOM 实时派生（Lost 按竞品最高报价）；编辑/删除使用对象版本和软删除；项目 + 幂等键唯一 |
+| `project_materials` | `project_id`, `opportunity_type`, `category_code`, `promoted_brand`, `promoted_mpn`, `mpn_pending`, `customer_part_number`, `application_position`, `machine_quantity`, `estimated_quantity`, `quantity_period`, `unit_code`, `target_price`, `currency`, `fx_rate_usd_cny`, `unit_price_usd`, `unit_price_cny_tax_included`, `price_updated_by_user_id`, `price_updated_at`, `technical_status`, `commercial_status`, `expected_mass_production_at`, `is_primary`, `idempotency_key`, `version` | `opportunity_type` 支持 Design In（design_in）、Design Win（design_win）、Evaluation（matched_opportunity）、Lost（competitive_opportunity），四类可互转；Lost 仅记录竞品信息，不要求推广品牌/型号，转出时必须补齐；`promoted_brand` 保存名称快照，页面选择来自当前用户的报销助手产品线/品牌目录；`machine_quantity` 新写入值为非负整数 PCS；单价最多 5 位小数并去尾零展示；价格与汇率保存快照；TAM/SAM/SOM 实时派生（Lost 按竞品最高报价）；编辑/删除使用对象版本和软删除；项目 + 幂等键唯一 |
 | `material_competitors` | `project_material_id`, `brand`, `mpn`, `distributor`, `model_pending`, `incumbent_status`, `quoted_price`, `strengths`, `weaknesses`, `confidence_level`, `observed_at`, `idempotency_key`, `version` | 品牌/型号/代理商至少一项，或明确待确认；报价最多 5 位小数；编辑/删除使用对象版本，删除带原因并软删除；物料 + 幂等键唯一 |
 | `project_activities` | `project_id`, `activity_type`, `occurred_at`, `summary`, `details`, `customer_feedback`, `risk`, `decision`, `next_action`, `next_follow_up_at`, `is_meaningful`, `created_by_user_id` | 追加式记录；业务活动不可覆盖 |
 | `project_comments` | `project_id`, `body`, `idempotency_key`, `created_by_user_id`, `created_at` | 追加式纯文本留言；正文最多 4000 字；项目 + 幂等键唯一；不修改项目版本或提醒快照 |

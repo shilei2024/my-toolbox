@@ -125,9 +125,8 @@
 .cp-material-group { padding: 0 16px 8px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .cp-material-group > header { min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
 .cp-material-group > header h3 { margin: 0; font-size: 16px; }
-.cp-material-group > header p, .cp-group-empty { margin: 3px 0 0; color: var(--ink-muted); font-size: 12px; }
+.cp-material-group > header p { margin: 3px 0 0; color: var(--ink-muted); font-size: 12px; }
 .cp-material-group > header span { padding: 4px 9px; border-radius: 999px; color: var(--cp-blue); background: var(--brand-blue-soft); font-size: 12px; font-weight: 800; }
-.cp-group-empty { padding: 18px 0 10px; text-align: center; }
 .cp-opportunity-badge { padding: 4px 8px; flex: 0 0 auto; border-radius: 999px; font-size: 11px; font-weight: 800; }
 .cp-opportunity-badge.is-switchable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .cp-opportunity-badge.is-switchable:hover, .cp-opportunity-badge.is-switchable:focus-visible { outline: 2px solid var(--cp-blue); outline-offset: 1px; }

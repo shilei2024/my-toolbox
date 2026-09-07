@@ -478,8 +478,12 @@ def create_project(data: dict[str, Any], membership: OrganizationMembership, ide
         fields["annual_usage"] = "必须大于 0"
     if not customer_id:
         fields["customer_id"] = "必填"
-    if stage not in ACTIVE_STAGES:
+    if stage not in ACTIVE_STAGES and stage != "mass_production":
         fields["stage_code"] = "无效阶段"
+    if stage == "mass_production" and not membership.roles.intersection(
+        {"organization_admin", "business_manager"}
+    ):
+        fields["stage_code"] = "量产状态仅业务经理或组织管理员可创建"
     if not next_action:
         fields["next_action"] = "必填"
     if not data.get("next_follow_up_at"):
@@ -836,12 +840,12 @@ def transition_stage(project: CustomerProject, data: dict[str, Any], membership:
         raise DomainError("VALIDATION_ERROR", "阶段变更原因必填。", field_errors={"reason": "必填"})
     values: dict[str, Any] = {"stage_code": target, "version": expected_version + 1, "updated_by_user_id": membership.user_id, "updated_at": datetime.now(timezone.utc)}
     if target == "mass_production":
-        material_count = db.session.scalar(select(func.count()).select_from(ProjectMaterial).where(ProjectMaterial.project_id == project.id, ProjectMaterial.deleted_at.is_(None))) or 0
         production_date = parse_date(data.get("actual_mass_production_at") or data.get("expected_mass_production_at"))
-        if material_count < 1 or production_date is None or not str(data.get("close_notes") or "").strip():
-            raise DomainError("MASS_PRODUCTION_REQUIREMENTS", "量产需要至少一条物料、量产日期和结果说明。")
-        values["actual_mass_production_at"] = production_date
-        values["close_notes"] = str(data["close_notes"]).strip()[:8000]
+        notes = str(data.get("close_notes") or "").strip()
+        if production_date is not None:
+            values["actual_mass_production_at"] = production_date
+        if notes:
+            values["close_notes"] = notes[:8000]
     elif target == "lost":
         code = str(data.get("close_reason_code") or "").strip()
         notes = str(data.get("close_notes") or "").strip()

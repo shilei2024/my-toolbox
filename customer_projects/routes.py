@@ -7,13 +7,13 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 from flask import abort, flash, make_response, redirect, render_template, request, send_file, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from sqlalchemy import func, or_, select
 
 from extensions import db
-from models import User
+from models import ReimbursementProductLine, User
 from shared.models import AuditEvent, Organization, OrganizationMembership
 from shared.notifications import cancel_pending_notifications
 
@@ -105,6 +105,34 @@ def _membership() -> OrganizationMembership:
     if membership is None:
         abort(403)
     return membership
+
+
+def _reimbursement_brand_names() -> list[str]:
+    """Return the current user's reimbursement brand directory as display names.
+
+    Project materials keep a name snapshot rather than a cross-user foreign key:
+    reimbursement reference rows are user-owned and may be renamed or deleted.
+    """
+    rows = list(
+        db.session.scalars(
+            select(ReimbursementProductLine.name)
+            .where(
+                ReimbursementProductLine.owner_type == "user",
+                ReimbursementProductLine.owner_id == str(current_user.id),
+            )
+            .order_by(
+                ReimbursementProductLine.sort_order,
+                ReimbursementProductLine.name,
+            )
+        )
+    )
+    if not rows:
+        # Match the reimbursement assistant's first-use directory without
+        # writing reference rows during a customer-project page request.
+        from tools.reimbursement import PRODUCT_LINES
+
+        rows = [item["name"] for item in PRODUCT_LINES]
+    return list(dict.fromkeys(name.strip() for name in rows if name and name.strip()))
 
 
 def _project_or_404(project_id: str, membership: OrganizationMembership) -> CustomerProject:
@@ -617,6 +645,7 @@ def project_new():
         customer=customer,
         members=members,
         stages=_stage_map(membership.organization_id),
+        can_manage=bool(membership.roles.intersection(ADMIN_ROLES)),
         idempotency_key=str(uuid.uuid4()),
     )
 
@@ -720,6 +749,7 @@ def project_detail(project_id: str):
         customer=customer,
         materials=materials,
         materials_by_opportunity=materials_by_opportunity,
+        reimbursement_brand_names=_reimbursement_brand_names(),
         material_opportunity_types=MATERIAL_OPPORTUNITY_TYPES,
         market_scope=market_scope,
         competitors_by_material=competitors_by_material,

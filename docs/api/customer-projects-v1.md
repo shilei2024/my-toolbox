@@ -25,7 +25,7 @@
 | POST | `/trash/projects/{project_id}/restore` | 管理员恢复软删除项目 | 组织与角色校验 |
 | GET | `/reports/lifecycle` | 当前量产/失败/归档快照和明细 | 与项目列表相同的数据范围 |
 
-项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的整数 `annual_usage`（PCS），兼容迁移前的旧项目记录可暂时返回 `null`。
+项目更新允许修改名称、产品名称、项目年用量、评估等级、概率档位、下一步、下次跟进时间、预计定点日期和预计量产日期；仍必须通过 `If-Match` 携带当前版本。新建项目要求 `product_name` 和大于 0 的整数 `annual_usage`（PCS），并允许业务经理或组织管理员直接选择 `mass_production`；其他写权限成员不能通过 API 绕过该权限。兼容迁移前的旧项目记录可暂时返回 `null`。
 
 客户/联系人在 Phase 1 通过服务端页面提供；其稳定 JSON CRUD 和通知查询 API 仍属后续切片。未实现端点不返回伪成功。
 
@@ -91,7 +91,7 @@ If-Match: "7"
 
 价格写入只允许组织管理员、业务经理、`sales` 和 `pm`；FAE 可以更新 `machine_quantity`，也可以查看折算结果，但提交 `unit_price` 返回 403。汇率服务不可用且无缓存时，价格不保存并返回 422；客户端预览只用于展示，最终结果以服务端计算为准。
 
-物料 PATCH 还可更新 `category_code`、`promoted_brand`、`promoted_mpn`、`mpn_pending`、`customer_part_number`、`application_position`、`technical_status`、`commercial_status`、`expected_mass_production_at`、`is_primary` 和 `notes`。竞争方案 PATCH 可更新创建时的业务字段以及 `quoted_price`、优劣势、置信度和观察日期。两类更新都必须携带当前 ETag；DELETE 必须同时携带 ETag 和非空 `reason`，仅写入软删除状态与审计，不物理清除历史。
+物料 PATCH 还可更新 `category_code`、`promoted_brand`、`promoted_mpn`、`mpn_pending`、`customer_part_number`、`application_position`、`technical_status`、`commercial_status`、`expected_mass_production_at`、`is_primary` 和 `notes`。服务端继续接受品牌名称字符串；服务端页面的品牌选择来自当前用户报销助手目录并保存名称快照。竞争方案 PATCH 可更新创建时的业务字段以及 `quoted_price`、优劣势、置信度和观察日期。两类更新都必须携带当前 ETag；DELETE 必须同时携带 ETag 和非空 `reason`，仅写入软删除状态与审计，不物理清除历史。项目进入 `mass_production` 时只要求非空 `reason`，实际量产日期与结果说明为可选信息。
 
 页面端提供 `GET /customer-projects/projects/export.xlsx`，按当前用户的数据范围以及 `q`、`stage` 筛选导出项目、客户评级、物料数量和双币单价。该页面导出写入审计事件；当前不作为稳定 JSON API 承诺。
 
