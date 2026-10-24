@@ -7,7 +7,7 @@
 > 2. **Gallery Web（Vercel）**：`/gallery` 全新页面 + 新增 `/api/gallery/facets` 代理。
 > 3. **主站 Flask（腾讯云服务器）**：统一后台的策展上传与编辑入口，宿主机 `mytoolbox.service`。
 >
-> 发布顺序：先备份、迁移并部署 Generation Service，确认 API 健康；再更新腾讯云主站 Flask 并验收后台；最后合并 PR，由 Vercel 发布 Gallery Web。前端早于服务端发布会使 facets 与策展接口暂时不可用。
+> 发布顺序：先备份、迁移并部署 Generation Service，确认 API 健康；再更新腾讯云主站 Flask 并验收后台；最后合并剩余 PR。画廊前端的 PR #99 已先行合并并在 Vercel 生产部署；后端未更新时 facets 和列表接口无法正常工作。腾讯云适配 PR #100 保持待合并，直到服务器更新和验收完成。
 
 ## 0. 变更清单
 
@@ -61,40 +61,50 @@ curl.exe https://gallery.mindfulpenpal.com/api/gallery/facets
 
 ## 3. Generation Service（腾讯云服务器）
 
-假设代码目录 `/opt/mindfulpenpal`，环境文件 `/etc/mindfulpenpal.production.env`。
+已核对的生产布局：Generation Service 的 Compose 文件位于 `/opt/mindfulpenpal/deploy/docker-compose.production.yml`；Flask 主站位于 `/opt/mytoolbox`，由 `mytoolbox.service` 运行；PostgreSQL 运行在宿主机。环境文件分别为 `/etc/mindfulpenpal.production.env` 与 `/opt/mytoolbox/.env`。两个工作树不可混用，主站工作树有未提交的 Caddy 配置修改，更新时必须保留。
 
 ### 3.1 备份
 
+先确认运行中的 `api` 容器实际连接 `mindfulpenpal` 宿主机数据库，再确认 `ai.images`、`public.schema_migrations` 存在且磁盘空间足够。不要从其他项目的 PostgreSQL 容器导出数据。
+
+```bash
+umask 077
+release_backup_dir="/root/gallery-release-$(date +%Y%m%d-%H%M%S)"
+install -d -m 700 "$release_backup_dir"
+sudo -u postgres pg_dump -Fc -d mindfulpenpal > "$release_backup_dir/mindfulpenpal.dump"
+pg_restore --list "$release_backup_dir/mindfulpenpal.dump" > "$release_backup_dir/mindfulpenpal.contents"
+cp -p /etc/mindfulpenpal.production.env "$release_backup_dir/generation.env"
+cp -p /opt/mytoolbox/.env "$release_backup_dir/mytoolbox.env"
+git -C /opt/mytoolbox diff --binary -- services/generation-service/deploy/Caddyfile.production > "$release_backup_dir/mytoolbox-caddy.patch"
+git -C /opt/mytoolbox rev-parse HEAD > "$release_backup_dir/mytoolbox.commit"
+git -C /opt/mindfulpenpal rev-parse HEAD > "$release_backup_dir/generation.commit"
+docker inspect --format '{{.Config.Image}} {{.Image}}' mindfulpenpal-ai-production-api-1 > "$release_backup_dir/generation.image"
+ls -lh "$release_backup_dir/mindfulpenpal.dump" "$release_backup_dir/mindfulpenpal.contents"
+```
+
+任一步失败即停止；备份目录只允许 root 访问，不要把 `.env` 或数据库备份传到聊天、Git 或公开存储。本次迁移是**加列 + 加索引**，不删除现有数据；备份用于满足“发布前可恢复”的要求。
+
+### 3.2 更新 Generation Service 工作树并构建本地镜像
+
 ```bash
 cd /opt/mindfulpenpal
-# 托管 PostgreSQL / Redis：先在云控制台创建一次手动备份（或在控制台导出快照）。
-# 本机容器数据库（local-infra）：
-docker compose --env-file /etc/mindfulpenpal.production.env \
-  -f deploy/docker-compose.production.yml --profile local-infra exec -T postgres \
-  pg_dump -U mavis mindfulpenpal > /opt/mindfulpenpal/backup-$(date +%F-%H%M).sql
+git status --short --branch                 # 确认没有跟踪文件修改
+git fetch origin main
+git merge-base --is-ancestor HEAD origin/main  # 非 0 时停止，不强行覆盖
+git merge --ff-only origin/main
+release_sha="$(git rev-parse --short HEAD)"
+docker build -t "mindfulpenpal/generation-service:gallery-$release_sha" services/generation-service
+docker image inspect --format '{{.Id}}' "mindfulpenpal/generation-service:gallery-$release_sha"
 ```
 
-> 本次迁移是**加列 + 加索引**，不删除任何数据；备份用于满足“发布前可恢复”的硬性要求。
-
-### 3.2 拉取已评审的功能分支并构建镜像
-
-```bash
-git fetch origin feat/gallery-showcase-curation
-git checkout --detach FETCH_HEAD
-export RELEASE_SHA="$(git rev-parse --short HEAD)"
-
-# 构建并推送（registry 地址以 .env 中的 GENERATION_IMAGE 为准）
-docker build -t "$GENERATION_REGISTRY/mindfulpenpal-generation:$RELEASE_SHA" services/generation-service
-docker push "$GENERATION_REGISTRY/mindfulpenpal-generation:$RELEASE_SHA"
-docker inspect --format='{{index .RepoDigests 0}}' "$GENERATION_REGISTRY/mindfulpenpal-generation:$RELEASE_SHA"
-```
-
-把输出的 digest 写入 `/etc/mindfulpenpal.production.env` 的 `GENERATION_IMAGE`（同时更新 `POSTGRES_MIGRATION_IMAGE`，两者使用同一镜像）：
+当前服务器使用本地 `mindfulpenpal/generation-service:0.9.7` 镜像，没有已确认的镜像仓库。把新构建的固定 tag 写入 `/etc/mindfulpenpal.production.env` 的 `GENERATION_IMAGE` 和 `POSTGRES_MIGRATION_IMAGE`（两者使用同一镜像）；不要改动其余密钥或连接串：
 
 ```
-GENERATION_IMAGE=<registry>/mindfulpenpal-generation@sha256:<digest>
-POSTGRES_MIGRATION_IMAGE=<registry>/mindfulpenpal-generation@sha256:<digest>
+GENERATION_IMAGE=mindfulpenpal/generation-service:gallery-<release_sha>
+POSTGRES_MIGRATION_IMAGE=mindfulpenpal/generation-service:gallery-<release_sha>
 ```
+
+更新前记录旧镜像名称与 image ID；发布时不复用旧 tag，便于回滚。编辑完环境文件后执行 `docker compose ... config --images`，确认解析出的生产与迁移镜像均为新 tag，再运行迁移。
 
 ### 3.3 执行迁移
 
@@ -108,7 +118,7 @@ docker compose --env-file /etc/mindfulpenpal.production.env \
 验证列已存在：
 
 ```bash
-psql "$DATABASE_URL" -c "\d+ ai.images" | grep -E "origin|curated_by_user_id"
+sudo -u postgres psql -d mindfulpenpal -Atqc "SELECT column_name FROM information_schema.columns WHERE table_schema='ai' AND table_name='images' AND column_name IN ('origin','curated_by_user_id') ORDER BY column_name;"
 ```
 
 ### 3.4 滚动重启
@@ -176,8 +186,8 @@ curl -s "https://gallery.mindfulpenpal.com/api/gallery?sort=popular&limit=3" | h
 ## 6. 回滚
 
 1. **Vercel**：Gallery Web 在 Deployments 中选择上一个成功的 `main` 构建 → “Promote to Production”。
-2. **腾讯云主站**：恢复上一版主站发布包/代码（依据实际发布方式），重启 `mytoolbox.service` 并验证登录、后台和首页。
-3. **Generation Service**：把 `GENERATION_IMAGE` / `POSTGRES_MIGRATION_IMAGE` 改回上一个 digest，执行
+2. **腾讯云主站**：恢复上一版主站提交，保留原有未提交的 Caddy 配置修改，重启 `mytoolbox.service` 并验证登录、后台和首页。
+3. **Generation Service**：把 `GENERATION_IMAGE` / `POSTGRES_MIGRATION_IMAGE` 改回备份目录 `generation.image` 记录的旧 tag，执行
    `docker compose ... --profile production up -d --no-build`。
 4. **数据库**：迁移只加列，无需回滚即可与旧代码共存；确认要彻底回退时执行：
 
