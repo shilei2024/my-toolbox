@@ -37,7 +37,7 @@ cd ../.. && python -m unittest tests.test_admin_gallery_routes tests.test_galler
 - `GALLERY_INTERNAL_HMAC_SECRET`（≥32 字节）在腾讯云主站、Generation Service 与 Vercel Gallery Web 中一致；
 - 主站 `MAX_UPLOAD_MB` 和入口代理的请求体上限至少为 16 MB（15 MB 原图加 multipart 表单开销；仓库默认分别为 25 MB 和 30M）；Flask 发往 Generation Service 的 base64 JSON 约 20 MB，由内部路由的 24 MB 上限接收；
 - `COS_*`、`GALLERY_ASSET_HOSTS`、`COS_CDN_BASE_URL` 已配置（策展图复用同一存储与 CDN）；
-- `GENERATION_IMAGE` 指向镜像 digest（迁移与 api 共用同一镜像源）。
+- `GENERATION_IMAGE` 指向本次构建的固定 tag；`POSTGRES_MIGRATION_IMAGE` 保持现有 PostgreSQL 客户端镜像（迁移脚本依赖 `psql`，不可改成 Node 服务镜像）。
 
 ## 2. Gallery Web（Vercel；在第 3 节服务端验证通过后执行）
 
@@ -97,14 +97,13 @@ docker build -t "mindfulpenpal/generation-service:gallery-$release_sha" services
 docker image inspect --format '{{.Id}}' "mindfulpenpal/generation-service:gallery-$release_sha"
 ```
 
-当前服务器使用本地 `mindfulpenpal/generation-service:0.9.7` 镜像，没有已确认的镜像仓库。把新构建的固定 tag 写入 `/etc/mindfulpenpal.production.env` 的 `GENERATION_IMAGE` 和 `POSTGRES_MIGRATION_IMAGE`（两者使用同一镜像）；不要改动其余密钥或连接串：
+当前服务器使用本地 `mindfulpenpal/generation-service:0.9.7` 镜像，没有已确认的镜像仓库。只把新构建的固定 tag 写入 `/etc/mindfulpenpal.production.env` 的 `GENERATION_IMAGE`；`POSTGRES_MIGRATION_IMAGE` 必须保留原值，因为迁移容器需要 `psql`。不要改动其余密钥或连接串：
 
 ```
 GENERATION_IMAGE=mindfulpenpal/generation-service:gallery-<release_sha>
-POSTGRES_MIGRATION_IMAGE=mindfulpenpal/generation-service:gallery-<release_sha>
 ```
 
-更新前记录旧镜像名称与 image ID；发布时不复用旧 tag，便于回滚。编辑完环境文件后执行 `docker compose ... config --images`，确认解析出的生产与迁移镜像均为新 tag，再运行迁移。
+更新前记录旧镜像名称与 image ID；发布时不复用旧 tag，便于回滚。编辑完环境文件后执行 `docker compose ... config --images`，确认生产服务解析为新 tag，而迁移镜像仍为原来的 PostgreSQL 客户端镜像，再运行迁移。
 
 ### 3.3 执行迁移
 
@@ -187,7 +186,7 @@ curl -s "https://gallery.mindfulpenpal.com/api/gallery?sort=popular&limit=3" | h
 
 1. **Vercel**：Gallery Web 在 Deployments 中选择上一个成功的 `main` 构建 → “Promote to Production”。
 2. **腾讯云主站**：恢复上一版主站提交，保留原有未提交的 Caddy 配置修改，重启 `mytoolbox.service` 并验证登录、后台和首页。
-3. **Generation Service**：把 `GENERATION_IMAGE` / `POSTGRES_MIGRATION_IMAGE` 改回备份目录 `generation.image` 记录的旧 tag，执行
+3. **Generation Service**：只把 `GENERATION_IMAGE` 改回备份目录 `generation.image` 记录的旧 tag，执行
    `docker compose ... --profile production up -d --no-build`。
 4. **数据库**：迁移只加列，无需回滚即可与旧代码共存；确认要彻底回退时执行：
 
