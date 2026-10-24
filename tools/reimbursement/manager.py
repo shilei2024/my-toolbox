@@ -363,6 +363,59 @@ def _seed_offices(owner_type: str, owner_id: str) -> list[ReimbursementOffice]:
     )
 
 
+def _sync_product_line_renames(
+    owner_type: str, owner_id: str, rows: list[ReimbursementProductLine]
+) -> list[ReimbursementProductLine]:
+    """Apply ERP product-line renames once per owner; safe to call on every read.
+
+    产品线 79 由 ERP 从“物料分组”更名为“先楫”。目录行、发票、应酬/派车/出差
+    明细保存的都是名称文本，必须一起纠正，否则汇总和导出封面会因为名称匹配
+    不到产品线清单而落到“未匹配”分组。全部条件都基于旧名称，纠正后不再命中。
+    """
+    from . import PRODUCT_LINE_RENAMES
+
+    pending = [
+        (item.name, PRODUCT_LINE_RENAMES[item.name])
+        for item in rows
+        if item.name in PRODUCT_LINE_RENAMES
+    ]
+    if not pending:
+        return rows
+
+    existing = {item.name for item in rows}
+    changed = False
+    for old_name, new_name in pending:
+        if new_name in existing and new_name != old_name:
+            # 目标名称已被另一条目录行占用：保留现状，交给用户在产品线管理中处理，
+            # 避免触发 (owner, name) 唯一约束。
+            current_app.logger.warning(
+                "reimbursement product line rename skipped, target exists: %s -> %s",
+                old_name,
+                new_name,
+            )
+            continue
+        for item in rows:
+            if item.name == old_name:
+                item.name = new_name
+        updated = ReimbursementInvoice.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, product_line=old_name
+        ).update({"product_line": new_name}, synchronize_session=False)
+        _replace_aux_product_line(owner_type, owner_id, old_name, new_name)
+        existing.discard(old_name)
+        existing.add(new_name)
+        changed = True
+        current_app.logger.info(
+            "reimbursement product line renamed: %s -> %s (%d invoices)",
+            old_name,
+            new_name,
+            updated,
+        )
+
+    if changed:
+        db.session.commit()
+    return rows
+
+
 def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementProductLine]:
     rows = (
         ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
@@ -374,7 +427,7 @@ def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementPro
     if rows:
         legacy_pairs = {(item["name"], item["code"]) for item in _LEGACY_PRODUCT_LINES}
         if not any((item.name, item.code) in legacy_pairs for item in rows):
-            return rows
+            return _sync_product_line_renames(owner_type, owner_id, rows)
 
         # 旧目录只在首次访问时替换一次。发票保存的是品牌名称和编号文本，
         # 因此替换目录行不会改写或破坏历史报销数据。

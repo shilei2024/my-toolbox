@@ -437,6 +437,62 @@ class ReimbursementManagerTests(unittest.TestCase):
             rows_again = _seed_product_lines("anon", "legacy-product-test")
             self.assertEqual(rows_again[0].name, "自定义品牌")
 
+    def test_product_line_79_is_renamed_to_xianji(self):
+        """ERP renamed product line 79; the seeded catalog must use the new label."""
+        self.assertEqual(PRODUCT_LINES[78]["code"], "79")
+        self.assertEqual(PRODUCT_LINES[78]["name"], "先楫")
+
+    def test_product_line_79_rename_propagates_to_directory_and_records(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            db.session.add(
+                ReimbursementProductLine(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    name="物料分组",
+                    code="79",
+                    office="",
+                    sort_order=790,
+                )
+            )
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    period_id=1,
+                    product_line="物料分组",
+                    product_line_code="79",
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    period_id=1,
+                    kind="entertainment",
+                    data_json=json.dumps({"purpose": "物料分组", "amount": "100"}),
+                )
+            )
+            db.session.commit()
+
+            rows = _seed_product_lines("anon", "rename-79")
+            self.assertEqual([(item.code, item.name) for item in rows], [("79", "先楫")])
+
+            invoice = ReimbursementInvoice.query.filter_by(owner_id="rename-79").one()
+            self.assertEqual((invoice.product_line, invoice.product_line_code), ("先楫", "79"))
+            aux = ReimbursementAuxDetail.query.filter_by(owner_id="rename-79").one()
+            self.assertEqual(json.loads(aux.data_json)["purpose"], "先楫")
+
+            # Idempotent: a later read must not rewrite anything again.
+            again = _seed_product_lines("anon", "rename-79")
+            self.assertEqual([(item.code, item.name) for item in again], [("79", "先楫")])
+
     def test_product_line_crud_updates_and_migrates_linked_invoices(self):
         app = Flask(__name__)
         app.config.update(

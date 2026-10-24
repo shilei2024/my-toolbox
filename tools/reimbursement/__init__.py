@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -229,7 +230,7 @@ PRODUCT_LINE_NAMES = [
     "泰凌微",
     "威富锐",
     "维晟",
-    "物料分组",
+    "先楫",
     "矽杰微",
     "爻火微",
     "移柯",
@@ -243,6 +244,15 @@ PRODUCT_LINES = [
     {"name": name, "code": f"{index:02d}", "office": ""}
     for index, name in enumerate(PRODUCT_LINE_NAMES, start=1)
 ]
+
+# ERP 侧产品线更名记录：旧名称 → 新名称。
+# 产品线 79 原为“物料分组”，已由 ERP 更名为“先楫”。已存在的产品线目录行
+# 与历史发票保存的都是名称文本，所以目录首次被访问时需要一次性纠正，否则
+# 汇总/导出封面会因为名称对不上而把该产品线落到“未匹配”分组。
+# 该映射是幂等的：纠正完成后不再匹配任何行。
+PRODUCT_LINE_RENAMES = {
+    "物料分组": "先楫",
+}
 
 OFFICES = [
     "深圳办", "厦门办", "杭州办", "上海办", "北京办",
@@ -393,7 +403,9 @@ def upload():
     file_id = uuid.uuid4().hex[:12]
     safe_name = f"{file_id}{ext}"
     filepath = upload_dir / safe_name
-    f.save(str(filepath))
+    # 一次读取即落盘 + 落库：避免先 save() 再 read_bytes() 多读一遍磁盘。
+    raw_bytes = f.stream.read()
+    filepath.write_bytes(raw_bytes)
     owner_type, owner_id = _rb_owner()
     attachment = ReimbursementAttachment(
         owner_type=owner_type,
@@ -401,13 +413,14 @@ def upload():
         stored_name=safe_name,
         original_name=Path(f.filename).name,
         mime_type=f.mimetype or "application/octet-stream",
-        file_size=filepath.stat().st_size,
-        content=filepath.read_bytes(),
+        file_size=len(raw_bytes),
+        content=raw_bytes,
     )
     db.session.add(attachment)
     db.session.commit()
 
-    # PDF → 生成缩略图 PNG + 高清预览图 + 返回 base64（Vercel 兼容）
+    # PDF 只渲染一次 200px 缩略图供列表使用。此前还会额外渲染 1600px 预览图
+    # 并写盘，但前端一律用原件 iframe 展示，那份渲染是纯耗时（扫描版 PDF 尤甚）。
     preview_filename = safe_name
     full_preview_filename = safe_name
     thumb_b64 = ""  # 缩略图 base64，前端直接显示不依赖服务器文件系统
@@ -419,7 +432,6 @@ def upload():
             doc = fitz.open(str(filepath))
             try:
                 page = doc[0]
-
                 zoom = 200 / page.rect.height
                 mat = fitz.Matrix(zoom, zoom)
                 pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
@@ -427,13 +439,6 @@ def upload():
                 pix.save(str(upload_dir / thumb_name))
                 preview_filename = thumb_name
                 thumb_b64 = b64.b64encode(pix.tobytes("png")).decode("ascii")
-
-                full_zoom = 1600 / page.rect.height
-                full_mat = fitz.Matrix(full_zoom, full_zoom)
-                full_pix = page.get_pixmap(matrix=full_mat, colorspace=fitz.csRGB)
-                full_name = f"{file_id}_full.png"
-                full_pix.save(str(upload_dir / full_name))
-                full_preview_filename = full_name
             finally:
                 doc.close()
         except Exception:
@@ -515,7 +520,7 @@ def preview(filename):
 
 
 @tool_bp.post("/ocr")
-@limiter.limit(lambda: "10/minute")
+@limiter.limit(lambda: "30/minute")
 @require_usage("reimbursement")
 def ocr():
     """
@@ -524,6 +529,9 @@ def ocr():
 
     优先级：file_id（原始文件，质量最高）> image_base64（Vercel 兼容降级）
     OCR 策略：百度增值税发票识别 → 百度通用票据文字降级 → 腾讯云 → PaddleOCR 本地识别
+
+    前端只传 file_id：附件已在 /upload 落库，重复上传 base64 会让图片在弱网上行
+    通道上多走一遍（体积还放大 33%），这是单张票据识别慢最主要的来源。
     """
     data = request.get_json(silent=True) or {}
     img_bytes = None
@@ -672,6 +680,68 @@ def ocr():
 # ---------------------------------------------------------------------------
 # OCR 核心：从字节到结果（Vercel 兼容，无文件系统依赖）
 # ---------------------------------------------------------------------------
+#
+# 性能约束（一次识别最坏情况会串行发起多张图片 × 多个预处理版本的上行请求）：
+#   1. 每个 HTTP 调用都重建 TCP/TLS 连接，在到 aip.baidubce.com 的链路上要
+#      多付 100–200 ms，因此按线程复用 keep-alive 会话。
+#   2. 百度 access_token 有效期 30 天，每次请求重新换取纯属浪费，进程内缓存。
+#   3. 图片预处理改为惰性生成：识别成功立即返回，不再为未使用的增强版本
+#      付出 PIL 编码与上传时间。
+_HTTP_LOCAL = threading.local()
+_BAIDU_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+_BAIDU_TOKEN_LOCK = threading.Lock()
+_PADDLE_LOCK = threading.Lock()
+
+
+def _http() -> requests.Session:
+    """每线程复用的 keep-alive 会话。"""
+    session = getattr(_HTTP_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        _HTTP_LOCAL.session = session
+    return session
+
+
+def _baidu_access_token(api_key: str, secret_key: str) -> str:
+    """获取百度 OCR access_token，进程内缓存到接近过期为止。"""
+    cache_key = f"{api_key}:{secret_key}"
+    now = time.time()
+    cached = _BAIDU_TOKEN_CACHE.get(cache_key)
+    if cached and cached[1] > now:
+        return cached[0]
+
+    with _BAIDU_TOKEN_LOCK:
+        cached = _BAIDU_TOKEN_CACHE.get(cache_key)
+        if cached and cached[1] > now:
+            return cached[0]
+        try:
+            resp = _http().get(
+                "https://aip.baidubce.com/oauth/2.0/token",
+                params={
+                    "grant_type": "client_credentials",
+                    "client_id": api_key,
+                    "client_secret": secret_key,
+                },
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(f"Baidu token HTTP {resp.status_code}")
+            data = resp.json()
+            token = data.get("access_token")
+            if not token:
+                raise RuntimeError(
+                    f"Baidu token error: {data.get('error') or data.get('error_description') or 'unknown'}"
+                )
+        except Exception as e:
+            current_app.logger.warning("Baidu token: %s", e)
+            raise RuntimeError(f"百度: {e}") from e
+
+        # 提前 5 分钟过期，避免请求途中 token 失效。
+        expires_in = int(data.get("expires_in") or 2_592_000)
+        _BAIDU_TOKEN_CACHE[cache_key] = (token, now + max(60, expires_in - 300))
+        return token
+
+
 def _tencent_ocr_from_bytes(img_bytes: bytes, secret_id: str, secret_key: str, region: str = "ap-shanghai") -> dict | None:
     """Tencent Cloud VAT invoice OCR (TC3-HMAC-SHA256, no extra SDK).
 
@@ -694,7 +764,7 @@ def _tencent_ocr_from_bytes(img_bytes: bytes, secret_id: str, secret_key: str, r
         payload=payload,
         timestamp=timestamp,
     )
-    resp = requests.post(
+    resp = _http().post(
         "https://ocr.tencentcloudapi.com",
         data=payload.encode("utf-8"),
         headers={
@@ -798,14 +868,16 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
             import fitz
             doc = fitz.open(stream=img_bytes, filetype="pdf")
             try:
-                for page_num in range(min(len(doc), 3)):
+                # 增值税发票都是单页；多页票据（如清单）保留 2 页兜底即可，
+                # 每多渲染一页就多一次上行识别请求。
+                for page_num in range(min(len(doc), 2)):
                     page = doc[page_num]
                     mat = fitz.Matrix(300 / 72, 300 / 72)
                     pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
                     jpg = pix.tobytes("jpg")
                     if not jpg.startswith(b"\xff\xd8"):
                         raise ValueError("PDF page did not render to JPEG")
-                    if len(jpg) > 2_500_000:
+                    if len(jpg) > 1_800_000:
                         mat2 = fitz.Matrix(200 / 72, 200 / 72)
                         pix2 = page.get_pixmap(matrix=mat2, colorspace=fitz.csRGB)
                         jpg = pix2.tobytes("jpg")
@@ -817,18 +889,19 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
             # Never send raw PDF bytes as an image to the OCR API.
             return None
     else:
-        # 非 PDF：大图片适度压缩，小图片保持原样
-        if len(img_bytes) > 4_000_000:
+        # 非 PDF：大图片适度压缩，小图片保持原样。长途上行才是慢的主因，
+        # 2.5 MB 以上的原图先降到 2600 px 长边（发票识别精度不受影响）。
+        if len(img_bytes) > 2_500_000:
             try:
                 from PIL import Image
                 img = Image.open(_io.BytesIO(img_bytes))
                 w, h = img.size
-                if max(w, h) > 3000:
-                    img = img.resize((int(w * 3000 / max(w, h)), int(h * 3000 / max(w, h))), Image.LANCZOS)
+                if max(w, h) > 2600:
+                    img = img.resize((int(w * 2600 / max(w, h)), int(h * 2600 / max(w, h))), Image.LANCZOS)
                 buf = _io.BytesIO()
                 img.convert("RGB").save(buf, format="JPEG", quality=90)
                 img_list = [buf.getvalue()]
-            except:
+            except Exception:
                 img_list = [img_bytes]
         else:
             img_list = [img_bytes]
@@ -836,25 +909,12 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
     if not img_list:
         return None
 
-    # Step 1: 获取 token
-    try:
-        resp = requests.get(
-            "https://aip.baidubce.com/oauth/2.0/token",
-            params={"grant_type": "client_credentials", "client_id": api_key, "client_secret": secret_key},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Baidu token HTTP {resp.status_code}")
-        data = resp.json()
-        token = data.get("access_token")
-        if not token:
-            raise RuntimeError(f"Baidu token error: {data.get('error') or data.get('error_description') or 'unknown'}")
-    except Exception as e:
-        current_app.logger.warning("Baidu token: %s", e)
-        raise RuntimeError(f"百度: {e}") from e
+    # Step 1: 获取 token（进程内缓存，正常路径无网络往返）
+    token = _baidu_access_token(api_key, secret_key)
 
     # Step 2: 增值税发票识别（页×版本穷举）。模板不匹配表示它可能是
     # 火车票等其他报销票据，必须继续通用 OCR，而不是中断整条降级链。
+    template_miss = False
     for raw in img_list:
         for ver in _preprocess_for_ocr(raw):
             try:
@@ -864,6 +924,7 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
                     current_app.logger.info(
                         "Baidu VAT template did not match; continuing with general OCR"
                     )
+                    template_miss = True
                     break
                 raise
             if words:
@@ -871,10 +932,12 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
                 if r.get("invoice_number") or r.get("total_amount"):
                     return r
 
-    # Step 3: 通用 OCR 降级
+    # Step 3: 通用 OCR 降级。模板已明确不匹配时只用原图 + 一个增强版本：
+    # 该票不是增值税发票，堆叠全部变体基本不会带来更多结构化字段。
+    variants = 2 if template_miss else None
     best, best_cnt = None, 0
     for raw in img_list:
-        for ver in _preprocess_for_ocr(raw):
+        for ver in _preprocess_for_ocr(raw, limit=variants):
             words_list = _baidu_gen_call(ver, token)
             if words_list and len(words_list) > 2:
                 r = _parse_general(words_list)
@@ -889,14 +952,32 @@ def _baidu_ocr_from_bytes(img_bytes: bytes, api_key: str, secret_key: str) -> di
 # ---------------------------------------------------------------------------
 # 图片预处理
 # ---------------------------------------------------------------------------
-def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
-    """生成多个预处理版本：原图 / 灰度增强 / 强对比度。"""
+def _encode_variant(img) -> bytes:
+    """把增强后的灰度图编码为 PNG。
+
+    发票多为白底文字/线条，PNG 的无损压缩比 JPEG 更小且不引入块状噪声，
+    识别率与旧实现保持一致；体积问题由惰性生成解决（用不到就不编码）。
+    """
     import io as _io
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG", optimize=False)
+    return buf.getvalue()
+
+
+def _preprocess_for_ocr(img_bytes: bytes, limit: int | None = None):
+    """惰性生成预处理版本：原图 → 灰度增强 → 强对比度。
+
+    生成器保证识别成功后不会继续编码后面的版本；旧实现一次性生成三个
+    PNG（大图每张编码上百毫秒、体积数 MB），是本链路主要的隐性耗时。
+    """
+    import io as _io
+    yield img_bytes
+    if limit is not None and limit <= 1:
+        return
     try:
         from PIL import Image, ImageEnhance, ImageFilter
     except ImportError:
-        return [img_bytes]
-    results = [img_bytes]
+        return
     try:
         img = Image.open(_io.BytesIO(img_bytes))
         w, h = img.size
@@ -908,12 +989,13 @@ def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
         gray = img.convert("L")
         enhancer = ImageEnhance.Contrast(gray)
         gray_enh = enhancer.enhance(2.0).filter(ImageFilter.SHARPEN)
-        buf = _io.BytesIO(); gray_enh.save(buf, format="PNG"); results.append(buf.getvalue())
+        yield _encode_variant(gray_enh)
+        if limit is not None and limit <= 2:
+            return
         strong = enhancer.enhance(3.0)
-        buf2 = _io.BytesIO(); strong.save(buf2, format="PNG"); results.append(buf2.getvalue())
+        yield _encode_variant(strong)
     except Exception:
-        pass
-    return results
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -921,12 +1003,13 @@ def _preprocess_for_ocr(img_bytes: bytes) -> list[bytes]:
 # ---------------------------------------------------------------------------
 def _baidu_vat_call(img_bytes: bytes, access_token: str) -> dict | None:
     """增值税发票识别 → words_result 或 None。"""
-    import base64; from urllib.parse import quote
+    import base64
     b64 = base64.b64encode(img_bytes).decode("ascii")
-    body = f"image={quote(b64, safe='')}".encode("utf-8")
-    resp = __import__("requests").post(
+    resp = _http().post(
         f"https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice?access_token={access_token}",
-        data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=20,
+        data={"image": b64},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=20,
     )
     data = resp.json()
     if data.get("error_code"):
@@ -938,12 +1021,13 @@ def _baidu_vat_call(img_bytes: bytes, access_token: str) -> dict | None:
 
 def _baidu_gen_call(img_bytes: bytes, access_token: str) -> list | None:
     """通用 OCR → words_result 列表。"""
-    import base64; from urllib.parse import quote
+    import base64
     b64 = base64.b64encode(img_bytes).decode("ascii")
-    body = f"image={quote(b64, safe='')}".encode("utf-8")
-    resp = __import__("requests").post(
+    resp = _http().post(
         f"https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token={access_token}",
-        data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15,
+        data={"image": b64},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15,
     )
     data = resp.json()
     if data.get("error_code"):
@@ -1129,16 +1213,31 @@ def _parse_general(words_list: list) -> dict:
     return result
 
 
+_PADDLE_ENGINE = None
+
+
+def _paddle_engine():
+    """进程内单例；PaddleOCR 初始化要加载检测/识别/方向模型，耗时以秒计。"""
+    global _PADDLE_ENGINE
+    if _PADDLE_ENGINE is not None:
+        return _PADDLE_ENGINE
+    with _PADDLE_LOCK:
+        if _PADDLE_ENGINE is None:
+            from paddleocr import PaddleOCR  # noqa: PLC0415
+
+            _PADDLE_ENGINE = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+    return _PADDLE_ENGINE
+
+
 def _paddle_ocr_invoice(filepath: Path) -> dict | None:
     """本地 PaddleOCR 识别（需提前安装 paddleocr）。"""
     try:
-        from paddleocr import PaddleOCR
+        ocr_engine = _paddle_engine()
     except ImportError:
         current_app.logger.warning("PaddleOCR not installed")
         return None
 
     try:
-        ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
         result = ocr_engine.ocr(str(filepath), cls=True)
 
         # 提取所有文本行
