@@ -5,9 +5,9 @@
 > 涉及三个部署面：
 > 1. **Generation Service（腾讯云服务器）**：数据库迁移 `0025`、新的 `/v1/gallery/facets` 与 `/v1/admin/curated-images*` 接口。
 > 2. **Gallery Web（Vercel）**：`/gallery` 全新页面 + 新增 `/api/gallery/facets` 代理。
-> 3. **主站 Flask（Vercel）**：统一后台的策展上传与编辑入口。
+> 3. **主站 Flask（腾讯云服务器）**：统一后台的策展上传与编辑入口，宿主机 `mytoolbox.service`。
 >
-> 发布顺序：先备份、迁移并部署 Generation Service，确认 API 健康；再合并/发布两个 Vercel 项目。前端早于服务端发布会使 facets 与策展接口暂时不可用。
+> 发布顺序：先备份、迁移并部署 Generation Service，确认 API 健康；再更新腾讯云主站 Flask 并验收后台；最后合并 PR，由 Vercel 发布 Gallery Web。前端早于服务端发布会使 facets 与策展接口暂时不可用。
 
 ## 0. 变更清单
 
@@ -20,7 +20,7 @@
 | `services/generation-service/src/admin/*` | 策展作品增删改查（审计 + 软删除） | 重建 api 镜像 |
 | `services/generation-service/src/gallery/curated-image-service.ts` | sharp 转码 + COS 上传 + 补偿删除 | 同上 |
 | `services/generation-service/src/gallery/*` | `mediaType` / `sort` / facets | 同上 |
-| `templates/admin/gallery.html`、`admin/gallery_admin.py`、`utils/gallery_admin_client.py` | 后台“策展上传”页签 | 主站部署（Vercel my-toolbox） |
+| `templates/admin/gallery.html`、`admin/gallery_admin.py`、`utils/gallery_admin_client.py` | 后台“策展上传”页签 | 腾讯云主站 `mytoolbox.service` 重启 |
 
 ## 1. 前置检查
 
@@ -34,14 +34,15 @@ cd ../.. && python -m unittest tests.test_admin_gallery_routes tests.test_galler
 
 生产环境变量确认（服务器 `/etc/mindfulpenpal.production.env`）：
 
-- `GALLERY_INTERNAL_HMAC_SECRET`（≥32 字节）在服务器与 Vercel 两个项目完全一致；
+- `GALLERY_INTERNAL_HMAC_SECRET`（≥32 字节）在腾讯云主站、Generation Service 与 Vercel Gallery Web 中一致；
+- 主站 `MAX_UPLOAD_MB` 和入口代理的请求体上限至少为 16 MB（15 MB 原图加 multipart 表单开销；仓库默认分别为 25 MB 和 30M）；Flask 发往 Generation Service 的 base64 JSON 约 20 MB，由内部路由的 24 MB 上限接收；
 - `COS_*`、`GALLERY_ASSET_HOSTS`、`COS_CDN_BASE_URL` 已配置（策展图复用同一存储与 CDN）；
 - `GENERATION_IMAGE` 指向镜像 digest（迁移与 api 共用同一镜像源）。
 
-## 2. Gallery Web 与主站（Vercel；在第 3 节服务端验证通过后执行）
+## 2. Gallery Web（Vercel；在第 3 节服务端验证通过后执行）
 
 1. 第 3 节的迁移、服务端部署及健康检查通过后，合并 PR 到 `main`；
-2. Vercel `my-toolbox-gallery` 项目（Root Directory `apps/gallery-web`，Production Branch `main`）和主站 `my-toolbox` 项目自动构建；
+2. Vercel `my-toolbox-gallery` 项目（Root Directory `apps/gallery-web`，Production Branch `main`）自动构建；
 3. 构建完成后验证：
 
 ```powershell
@@ -128,6 +129,21 @@ docker compose --env-file /etc/mindfulpenpal.production.env \
 
 预期出现 `gallery.api_started`，无 `unhandledRejection` / `migration` 错误。
 
+### 3.5 更新主站 Flask
+
+主站与 Generation Service 可能使用不同代码目录。仓库内 `deploy/mytoolbox.service` 的示例工作目录为 `/opt/mytoolbox`；登录服务器后先用 `systemctl cat mytoolbox.service` 核实实际 `WorkingDirectory`、`EnvironmentFile` 和代码发布方式，再按现有发布流程把同一已评审提交发布到主站目录。不要把 Generation Service 的 `/opt/mindfulpenpal` 目录直接当作主站目录。
+
+```bash
+sudo systemctl cat mytoolbox.service
+sudo systemctl status mytoolbox.service --no-pager
+# 核对当前版本、配置与备份后，按服务器既有发布方式更新主站代码。
+sudo systemctl restart mytoolbox.service
+sudo systemctl status mytoolbox.service --no-pager
+curl -fsS -o /dev/null -w '%{http_code}\n' https://mindfulpenpal.com/admin/gallery
+```
+
+预期：服务状态 `active (running)`；未登录时后台页面重定向到登录页（通常为 302），登录管理员后可见“策展上传”。若生产代理或主站仍将请求体限制在 16 MB 以下，应先调整配置并验证，再允许上传 15 MB 图片。
+
 ## 4. 功能验收
 
 1. **后台**：登录主站 → `/admin/gallery` → “策展上传”页签，上传一张 PNG 并填写提示词（含换行与参数），提交。
@@ -152,17 +168,18 @@ curl -s "https://gallery.mindfulpenpal.com/api/gallery?sort=popular&limit=3" | h
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 后台提示“策展图片保存失败” | COS 凭证/桶配置错误，或图片格式不被 sharp 识别 | 检查 `COS_*` 与 api 日志 `admin.curated_image_*`；确认是 JPEG/PNG/WebP |
-| 后台提示 `GALLERY_INTERNAL_HMAC_SECRET` 未配置 | Vercel 与服务器密钥不一致 | 两侧配置同一 ≥32 字节密钥后重新部署 |
+| 后台提示 `GALLERY_INTERNAL_HMAC_SECRET` 未配置 | 腾讯云主站与 Generation Service 密钥不一致 | 两侧配置同一 ≥32 字节密钥后重启服务 |
 | `/gallery` 骨架不消失 | facets 或列表接口 503 | `curl /api/gallery/facets` 看错误码；通常是 api 容器未 healthy |
-| 上传 413 | 主站 Vercel Function 请求体超过 4.5 MB，或图片超过后台 4 MB 上限 | 压缩图片至 4 MB 以下；大文件需另行设计直传 COS，不要单纯调高 `MAX_UPLOAD_MB` |
+| 上传 413 | 腾讯云代理或 Flask 请求体上限低于 15 MB 加表单开销，或原始图片超过 15 MB | 核对主站 `MAX_UPLOAD_MB` 与代理 `client_max_body_size` 是否均至少 16 MB；超过 15 MB 的原图先压缩 |
 | 模型筛选没有新模型 | 影子上游缓存 | 缓存随 `PUBLIC_FEED_NAMESPACE` 版本号失效；等待 TTL 或重新发布一次 |
 
 ## 6. 回滚
 
-1. **Vercel**：Gallery Web 与主站 Flask 两个项目分别在 Deployments 中选择上一个成功的 `main` 构建 → “Promote to Production”。
-2. **服务器**：把 `GENERATION_IMAGE` / `POSTGRES_MIGRATION_IMAGE` 改回上一个 digest，执行
+1. **Vercel**：Gallery Web 在 Deployments 中选择上一个成功的 `main` 构建 → “Promote to Production”。
+2. **腾讯云主站**：恢复上一版主站发布包/代码（依据实际发布方式），重启 `mytoolbox.service` 并验证登录、后台和首页。
+3. **Generation Service**：把 `GENERATION_IMAGE` / `POSTGRES_MIGRATION_IMAGE` 改回上一个 digest，执行
    `docker compose ... --profile production up -d --no-build`。
-3. **数据库**：迁移只加列，无需回滚即可与旧代码共存；确认要彻底回退时执行：
+4. **数据库**：迁移只加列，无需回滚即可与旧代码共存；确认要彻底回退时执行：
 
 ```sql
 DROP INDEX IF EXISTS ai.ix_ai_images_curated_created;
@@ -173,4 +190,4 @@ ALTER TABLE ai.images
 
 执行前先把 `origin='curated'` 的作品软删除，避免变成“无来源”的普通作品。
 
-4. **存储**：策展对象都在 COS `curated/` 前缀下，可按前缀清理，不影响生成作品。
+5. **存储**：策展对象都在 COS `curated/` 前缀下，可按前缀清理，不影响生成作品。
