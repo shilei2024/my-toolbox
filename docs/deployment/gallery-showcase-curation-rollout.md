@@ -179,6 +179,7 @@ curl -s "https://gallery.mindfulpenpal.com/api/gallery?sort=popular&limit=3" | h
 | 后台提示“策展图片保存失败” | COS 凭证/桶配置错误，或图片格式不被 sharp 识别 | 检查 `COS_*` 与 api 日志 `admin.curated_image_*`；确认是 JPEG/PNG/WebP |
 | 后台提示 `GALLERY_INTERNAL_HMAC_SECRET` 未配置 | 腾讯云主站与 Generation Service 密钥不一致 | 两侧配置同一 ≥32 字节密钥后重启服务 |
 | `/gallery` 骨架不消失 | facets 或列表接口 503 | `curl /api/gallery/facets` 看错误码；通常是 api 容器未 healthy |
+| facets 与单页筛选正常，但多页作品列表 500 | 旧版公开列表游标范围使用可能含大写字母的 base64url 哈希，签发下一页游标时被校验拒绝 | 部署含十六进制游标范围修复的 Generation Service 镜像；验证 `/api/gallery?limit=1` 返回 `nextCursor`，再用该游标请求下一页 |
 | 上传 413 | 腾讯云代理或 Flask 请求体上限低于 15 MB 加表单开销，或原始图片超过 15 MB | 核对主站 `MAX_UPLOAD_MB` 与代理 `client_max_body_size` 是否均至少 16 MB；超过 15 MB 的原图先压缩 |
 | 模型筛选没有新模型 | 影子上游缓存 | 缓存随 `PUBLIC_FEED_NAMESPACE` 版本号失效；等待 TTL 或重新发布一次 |
 

@@ -202,7 +202,9 @@ function requireUser(viewer: ViewerContext): number {
 }
 
 function publicScope(filters: GalleryFilters): string {
-  return `public:${hashKey(filters).slice(0, 20)}`;
+  // Cursor scopes accept lowercase ASCII only; base64url hashes may contain
+  // uppercase letters and reject every page that needs a next cursor.
+  return `public:${createHash("sha256").update(JSON.stringify(filters)).digest("hex").slice(0, 20)}`;
 }
 
 function hashKey(value: unknown): string {
