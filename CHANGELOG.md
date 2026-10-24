@@ -9,6 +9,7 @@
 - 后台“AI 作图 → 策展上传”支持上传图片 + 提示词并直接发布：提示词按原样保存（保留换行与参数段落）并在画廊公开展示；可改标题/提示词/模型/标签/可见性，可下线。
 - 策展作品复用 `ai.images` 全链路（审核、可见性、点赞收藏、SEO、下载），新增 `origin='curated'` 与 `curated_by_user_id`；图片经 sharp 摆正、剥离 EXIF，生成原图 + 1600px 预览 + 720px 缩略图写入 COS `curated/` 前缀，写库失败自动回收对象。
 - 迁移 `0025_curated_gallery.sql` 仅加列与部分索引，向后兼容；发布与回滚步骤见 `docs/deployment/gallery-showcase-curation-rollout.md`，取舍见 ADR-0039。
+- 为满足生产依赖审计，Gallery Web 升级至 Next.js 16.4.3 并固定修复版 `sharp`、`source-map-js`；Generation Service 的 `sharp` 升级至 0.35.5。
 
 ## 0.9.45 · 产品线 79 更名与发票 OCR 提速 / 2026-10-24
 
