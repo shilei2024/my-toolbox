@@ -189,6 +189,21 @@ function isPDFType(file) {
 function isZipType(file) {
   return file.type === 'application/zip' || file.type === 'application/x-zip-compressed' || file.name.toLowerCase().endsWith('.zip');
 }
+
+// 解压包里的运费单（trans）与申请表（apply）不是发票，默认不勾选；
+// 需要报销时仍可在结果卡片上手动勾选。直接选择的单个文件不受影响，
+// 按完整单词匹配，避免误伤 transaction 这类同前缀词。
+const IP_DEFAULT_DESELECT_WORDS = new Set(['trans', 'apply']);
+const IP_DEFAULT_DESELECT_SUFFIXED = /^(?:trans|apply)\d+$/;
+function isDefaultDeselectedFromArchive(file) {
+  if (!file || !file._invoiceSource) return false;
+  const base = String(file.name || '').replace(/\.[^.]+$/, '').toLowerCase();
+  return base
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .some(word => IP_DEFAULT_DESELECT_WORDS.has(word) || IP_DEFAULT_DESELECT_SUFFIXED.test(word));
+}
+
 function escapeHTML(value) {
   return String(value || '').replace(/[&<>'"]/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
@@ -446,6 +461,7 @@ async function processFiles(btn) {
     const filesToAdd = [...localFiles, ...extractedFiles];
     const existing = new Set(STATE.files.map(f => f.key));
     let added = 0;
+    let deselectedByRule = 0;
 
     for (let i = 0; i < filesToAdd.length; i++) {
       const file = filesToAdd[i];
@@ -459,10 +475,11 @@ async function processFiles(btn) {
         key: dedupeKey,
         type: isPDFType(file) ? 'pdf' : (isImageType(file) ? 'image' : 'unknown'),
         source: file._invoiceSource || '',
-        _selected: true,
+        _selected: !isDefaultDeselectedFromArchive(file),
         dataUrl: null,
         blobUrl: null,
       };
+      if (!entry._selected) deselectedByRule++;
 
       if (entry.type === 'image') {
         // 生成缩略图 dataURL + 保存完整文件 blobUrl
@@ -486,13 +503,16 @@ async function processFiles(btn) {
     STATE.queue = archiveResult.failedItems;
     if (STATE.files.length > 0) renderResult();
     renderQueue();
+    const deselectedHint = deselectedByRule > 0
+      ? `；其中 ${deselectedByRule} 个非发票文件（trans/apply）已默认取消勾选`
+      : '';
     if (archiveResult.warnings.length) {
       const prefix = added > 0 ? `已加入 ${added} 个发票文件；` : '';
       showArchiveErrors(archiveResult.warnings);
       showToast(prefix + archiveResult.warnings.join('；'), 'warn');
     } else if (added > 0) {
       clearArchiveErrors();
-      showToast(`已加入 ${added} 个发票文件`, 'info');
+      showToast(`已加入 ${added} 个发票文件${deselectedHint}`, 'info');
     }
     if (STATE.files.length === 0 && STATE.queue.length === 0) {
       throw new Error('没有找到可用的 PDF 或图片发票');
@@ -755,7 +775,7 @@ function renderResult() {
       <span class="badge bg-success">${selectedCount}/${total} 个文件</span>
       <span class="text-muted">${formatSize(totalSize)}</span>
       <label class="ms-auto me-2 small" style="cursor:pointer;user-select:none;">
-        <input type="checkbox" id="ipSelectAll" data-action="toggle-all" checked
+        <input type="checkbox" id="ipSelectAll" data-action="toggle-all" ${selectedCount === total ? 'checked' : ''}
                style="accent-color:var(--ip-primary);"> 全选
       </label>
       <div class="btn-group btn-group-sm">
@@ -811,6 +831,8 @@ function renderResult() {
   el.innerHTML = html;
   el.classList.remove('hidden');
   document.getElementById('ipEmpty').classList.add('hidden');
+  const selectAll = document.getElementById('ipSelectAll');
+  if (selectAll) selectAll.indeterminate = selectedCount > 0 && selectedCount < total;
 }
 
 // ============== 打印引擎 ==============
