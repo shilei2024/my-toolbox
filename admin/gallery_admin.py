@@ -34,8 +34,9 @@ from utils.gallery_admin_client import (
 
 from . import admin_bp
 
-# The main-site admin runs as a Vercel Function with a 4.5 MB request limit.
-CURATED_MAX_FILE_MB = 4
+# Match the Generation Service's decoded-image limit. The Flask site runs on
+# the Tencent host, where the reverse proxy and app request limits are higher.
+CURATED_MAX_FILE_MB = 15
 CURATED_UPLOAD_TYPES = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",

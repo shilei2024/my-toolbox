@@ -32,7 +32,7 @@
 - **新建 `gallery_showcase_items` 表**：能完全隔离生成链路，但详情、点赞、收藏、SEO、下载、审核都要复制一套逻辑，与平台“共享基础设施”原则冲突。策展作品与生成作品在公开语义上完全一致，因此合并存储更合适。
 - **只做前端视觉改造，不做上传**：改动最小，但运营无法补充官方精选，用户提出的“上传图片和提示词”需求无法满足。
 - **Flask 直传 COS**：少一次服务跳转，但会把 COS 凭证带到 Web 层，违反“浏览器/Web 层不接触存储凭证”的边界。
-- **multipart 直传 Generation Service**：需要新增 `@fastify/multipart` 依赖并处理流式校验；当前后台是低频人工操作，主站 [Vercel Function 的请求上限为 4.5 MB](https://vercel.com/docs/functions/limitations#request-body-size)，因此后台文件限制为 4 MB。Generation Service 内部仍设置 15 MB 上限及 24 MB 按路由 bodyLimit。
+- **multipart 直传 Generation Service**：需要新增 `@fastify/multipart` 依赖并处理流式校验；当前后台是低频人工操作，主站 Flask 运行在腾讯云服务器，因此先复用现有签名 JSON 通道。后台与 Generation Service 均限制原始图片为 15 MB，base64 后由内部路由的 24 MB bodyLimit 接收。
 - **保留 CSS 瀑布流**：实现简单，但参考站点的视觉核心是“逐行对齐的图片墙”，瀑布流会破坏横向对齐的节奏。
 
 ## Future Impact
@@ -57,14 +57,14 @@
 ## Security
 
 - 上传仅允许 `admin` 角色：Flask 侧 `@admin_required`，服务端再次校验签名上下文中的 `role=admin` 与 `userId`（双保险，不信任前端）。
-- 文件按魔数 + sharp 解析双重校验，仅接受 JPEG/PNG/WebP；后台上传上限 4 MB，内部 API 硬上限 15 MB；EXIF 与自定义元数据被剥离，避免泄露设备/软件信息。
+- 文件按魔数 + sharp 解析双重校验，仅接受 JPEG/PNG/WebP；后台及内部 API 的原始图片上限均为 15 MB；EXIF 与自定义元数据被剥离，避免泄露设备/软件信息。
 - 提示词按纯文本存储与 `pre` 渲染，不解析 HTML；标签 slug 清洗后入库。
 - 所有写操作写入 `ai.audit_logs`（actor=admin），下线走软删除 + 延迟回收，可追溯、可恢复。
 - 上传接口只暴露在带 HMAC 签名的内部上下文中，公网不能直接调用。
 
 ## Rollback Plan
 
-1. 前端与后台：Gallery Web、主站 Flask 两个 Vercel 项目分别回滚到前一个成功部署；`/gallery` 恢复旧版作品库布局，后台策展上传入口消失。
+1. 前端与后台：Gallery Web 在 Vercel 回滚到前一个成功部署；腾讯云主站 Flask 恢复前一版代码并重启 `mytoolbox.service`。`/gallery` 恢复旧版作品库布局，后台策展上传入口消失。
 2. 服务端：回滚 Generation Service 镜像/代码并重启 `api` 容器；新增路由消失，旧的画廊接口行为不变。
 3. 数据库：`0025_curated_gallery.sql` 只做加列与加索引，向后兼容；回滚代码后旧版本会忽略 `origin`/`curated_by_user_id`，已发布的策展作品仍能正常展示与审核。若必须彻底回退，可执行：
    ```sql
