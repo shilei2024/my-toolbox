@@ -51,7 +51,8 @@ class TencentOcrTest(unittest.TestCase):
                 ]
             }
         }
-        with mock.patch("tools.reimbursement.requests.post", return_value=FakeResponse(payload)) as post:
+        with mock.patch("tools.reimbursement._http") as http:
+            http.return_value.post.return_value = FakeResponse(payload)
             result = _tencent_ocr_from_bytes(b"fake-image-bytes", "test-id", "test-key")
         self.assertIsNotNone(result)
         self.assertEqual(result["invoice_number"], "12345678")
@@ -61,13 +62,14 @@ class TencentOcrTest(unittest.TestCase):
         self.assertEqual(result["tax_amount"], "10.00")
         self.assertEqual(result["total_amount"], "100.00")
         self.assertEqual(result["description"], "云服务")
-        headers = post.call_args.kwargs["headers"]
+        headers = http.return_value.post.call_args.kwargs["headers"]
         self.assertEqual(headers["X-TC-Action"], "VatInvoiceOCR")
         self.assertIn("TC3-HMAC-SHA256 Credential=", headers["Authorization"])
 
     def test_ocr_error_raises_without_leaking_response_body(self) -> None:
         payload = {"Response": {"Error": {"Code": "AuthFailure", "Message": "secret"}}}
-        with mock.patch("tools.reimbursement.requests.post", return_value=FakeResponse(payload, status=403)):
+        with mock.patch("tools.reimbursement._http") as http:
+            http.return_value.post.return_value = FakeResponse(payload, status=403)
             with self.assertRaises(RuntimeError) as ctx:
                 _tencent_ocr_from_bytes(b"x", "test-id", "test-key")
         self.assertNotIn("secret", str(ctx.exception))
