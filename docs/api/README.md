@@ -12,8 +12,9 @@
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | `/api/gallery` | 公开 Gallery 列表 |
-| GET | `/api/gallery/:slug` | 作品详情 |
+| GET | `/api/gallery` | 公开 Gallery 列表（支持 `q`、`tag`、`workflow`、`orientation`、`mediaType`、`sort=latest\|popular`、`cursor`、`limit`） |
+| GET | `/api/gallery/facets` | 画廊筛选聚合（模型分布、图片/视频数量） |
+| GET | `/api/gallery/:slug` | 作品详情（含提示词与生成参数） |
 | GET | `/api/me/images` | 当前用户作品 |
 | GET | `/api/me/favorites` | 当前用户收藏 |
 | PUT/DELETE | `/api/images/:id/favorite` | 收藏切换 |
@@ -32,7 +33,8 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 内网健康检查 |
-| GET | `/v1/gallery`、`/v1/gallery/:slug` | Gallery 查询 |
+| GET | `/v1/gallery`、`/v1/gallery/facets`、`/v1/gallery/:slug` | Gallery 查询与筛选聚合 |
+| GET/POST/PATCH/DELETE | `/v1/admin/curated-images`、`/v1/admin/curated-images/:id` | 策展作品上传、编辑、下线（仅 admin，带签名上下文与审计） |
 | GET | `/v1/seo/images` | Sitemap/SEO 内部数据源 |
 | GET | `/v1/me/images`、`/v1/me/favorites` | 用户私有查询 |
 | PUT/DELETE | `/v1/images/:id/favorite`、`like` | 用户行为 |

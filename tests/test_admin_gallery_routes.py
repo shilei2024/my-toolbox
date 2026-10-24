@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import unittest
 from unittest import mock
@@ -91,12 +92,40 @@ FAKE_DASHBOARD = {
 }
 
 
+FAKE_CURATED = {
+    "id": "666e4567-e89b-42d3-a456-426614174000",
+    "slug": "curated-demo",
+    "title": "策展示例",
+    "description": "",
+    "prompt": "柔和的逆光，安静的室内\n--ar 3:2",
+    "negativePrompt": "blurry",
+    "model": "gpt-image-1",
+    "tags": ["人像", "胶片"],
+    "width": 1024,
+    "height": 1536,
+    "mediaType": "image",
+    "promptVisibility": "public",
+    "thumbnailUrl": "https://assets.example.com/curated.webp",
+    "publishedAt": "2026-10-24T02:00:00.000Z",
+    "createdAt": "2026-10-24T02:00:00.000Z",
+    "updatedAt": "2026-10-24T02:00:00.000Z",
+}
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+
 class AdminGalleryRoutesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = create_app()
         cls.app.config["WTF_CSRF_ENABLED"] = False
         cls.app.config["TESTING"] = True
+        cls._curated_list = mock.patch(
+            "admin.gallery_admin.gallery_list_curated_images",
+            return_value={"items": [FAKE_CURATED]},
+        )
+        cls._curated_list.start()
+        cls.addClassCleanup(cls._curated_list.stop)
         cls.admin = cls.app.test_client()
         response = cls.admin.post(
             "/login",
@@ -167,6 +196,94 @@ class AdminGalleryRoutesTests(unittest.TestCase):
             sort_order=15,
             expected_updated_at="2026-08-05T00:00:00.000Z",
         )
+
+    def test_gallery_page_renders_curated_upload_panel(self):
+        with mock.patch("admin.gallery_admin.gallery_admin_dashboard", return_value=FAKE_DASHBOARD):
+            response = self.admin.get("/admin/gallery")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn("策展上传", body)
+        self.assertIn("发布策展作品", body)
+        self.assertIn("策展示例", body)
+        self.assertIn("--ar 3:2", body)
+
+    def test_curated_upload_posts_data_url_and_preserves_prompt(self):
+        prompt = "  柔和的逆光，安静的室内\n--ar 3:2\n"
+        with mock.patch("admin.gallery_admin.gallery_create_curated_image", return_value=FAKE_CURATED) as create:
+            response = self.admin.post(
+                "/admin/gallery/curated",
+                data={
+                    "prompt": prompt,
+                    "model": "gpt-image-1",
+                    "title": "策展示例",
+                    "tags": "人像，胶片",
+                    "prompt_visibility": "public",
+                    "image": (io.BytesIO(PNG_BYTES), "demo.png"),
+                },
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 302)
+        kwargs = create.call_args.kwargs
+        self.assertEqual(kwargs["prompt"], prompt)
+        self.assertEqual(kwargs["model"], "gpt-image-1")
+        self.assertEqual(kwargs["tags"], ["人像", "胶片"])
+        self.assertTrue(kwargs["image_base64"].startswith("data:image/png;base64,"))
+        self.assertEqual(create.call_args.args[0], 1)
+
+    def test_curated_upload_rejects_non_image_and_mismatched_signature(self):
+        with mock.patch("admin.gallery_admin.gallery_create_curated_image") as create:
+            wrong_type = self.admin.post(
+                "/admin/gallery/curated",
+                data={"prompt": "x", "model": "m", "image": (io.BytesIO(b"hello"), "demo.gif")},
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+            renamed = self.admin.post(
+                "/admin/gallery/curated",
+                data={"prompt": "x", "model": "m", "image": (io.BytesIO(b"not a png"), "demo.png")},
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        self.assertEqual(wrong_type.status_code, 302)
+        self.assertEqual(renamed.status_code, 302)
+        create.assert_not_called()
+
+    def test_curated_upload_requires_prompt(self):
+        with mock.patch("admin.gallery_admin.gallery_create_curated_image") as create:
+            response = self.admin.post(
+                "/admin/gallery/curated",
+                data={"prompt": "   ", "model": "m", "image": (io.BytesIO(PNG_BYTES), "demo.png")},
+                content_type="multipart/form-data",
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 302)
+        create.assert_not_called()
+
+    def test_curated_delete_and_update_call_signed_client(self):
+        image_id = FAKE_CURATED["id"]
+        with mock.patch("admin.gallery_admin.gallery_delete_curated_image") as delete:
+            response = self.admin.post("/admin/gallery/curated/" + image_id + "/delete", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        delete.assert_called_once_with(1, image_id)
+
+        with mock.patch("admin.gallery_admin.gallery_update_curated_image", return_value=FAKE_CURATED) as update:
+            response = self.admin.post(
+                "/admin/gallery/curated/" + image_id + "/update",
+                data={"prompt": "新的提示词", "tags": "人像, 新标签", "prompt_visibility": "hidden"},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 302)
+        update.assert_called_once_with(1, image_id, {"prompt": "新的提示词", "tags": ["人像", "新标签"], "promptVisibility": "hidden"})
+
+    def test_curated_list_failure_degrades_gracefully(self):
+        with mock.patch("admin.gallery_admin.gallery_admin_dashboard", return_value=FAKE_DASHBOARD), mock.patch(
+            "admin.gallery_admin.gallery_list_curated_images",
+            side_effect=GalleryAdminError("service_unavailable", "策展列表暂时不可用", 503),
+        ):
+            response = self.admin.get("/admin/gallery")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("策展作品列表读取失败", response.get_data(as_text=True))
 
     def test_non_admin_cannot_access_gallery_admin(self):
         client = self.app.test_client()

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { AdminService } from "../src/admin/admin-service.ts";
 import type { AdminRepository } from "../src/admin/repository.ts";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem } from "../src/admin/types.ts";
+import type { AdminCuratedImageItem, AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem } from "../src/admin/types.ts";
 import { NoopGalleryCache } from "../src/gallery/cache.ts";
 import { GalleryCursorCodec } from "../src/gallery/cursor.ts";
 import { GalleryError } from "../src/gallery/errors.ts";
@@ -79,6 +79,14 @@ class FakeAdminRepository implements AdminRepository {
   async updateProvider(_id: string, command: { status: "active" | "disabled"; priority: number }): Promise<AdminProviderItem> { return { ...dashboard().providers[0]!, status: command.status, priority: command.priority }; }
   async updateProviderModel(_id: string, command: { tier: "free" | "member" }): Promise<AdminProviderModelItem> { return { ...dashboard().providers[0]!.models[0]!, tier: command.tier }; }
   async updateWorkflow(_id: string, command: { isEnabled: boolean; sortOrder: number }): Promise<AdminWorkflowItem> { return { ...dashboard().workflows[0]!, isEnabled: command.isEnabled, sortOrder: command.sortOrder }; }
+  async createCuratedImage(): Promise<AdminCuratedImageItem> { return curatedItem(); }
+  async updateCuratedImage(): Promise<AdminCuratedImageItem> { return curatedItem(); }
+  async listCuratedImages(): Promise<readonly AdminCuratedImageItem[]> { return [curatedItem()]; }
+  async deleteCuratedImage(): Promise<{ slug: string }> { return { slug: "curated-one" }; }
+}
+
+function curatedItem(): AdminCuratedImageItem {
+  return { id: IMAGE_ID, slug: "curated-one", title: "Curated", description: "", prompt: "a quiet portrait", negativePrompt: "", model: "gpt-image-1", tags: ["portrait"], width: 1024, height: 1024, mediaType: "image", promptVisibility: "public", thumbnailUrl: "https://assets.example.test/curated.webp", publishedAt: UPDATED_AT, createdAt: UPDATED_AT, updatedAt: UPDATED_AT };
 }
 
 function dashboard(): AdminDashboard {
@@ -99,6 +107,7 @@ function authHeaders(value: { context: string; signature: string }): Record<stri
 function galleryService(): GalleryService { return new GalleryService({ repository: new FakeGalleryRepository(), cursor: new GalleryCursorCodec(SECRET), cache: new NoopGalleryCache(), logger: silentLogger, cacheTtlSeconds: 30, deletionRetentionSeconds: 86400 }); }
 class FakeGalleryRepository implements GalleryRepository {
   async listPublic() { return { items: [summary()] }; }
+  async facets() { return { total: 1, media: { image: 1, video: 0 }, workflows: [{ name: "portrait", count: 1 }] }; }
   async listOwned() { return { items: [summary()] }; }
   async listFavorites() { return { items: [summary()] }; }
   async listSeoImages() { return { items: [] }; }

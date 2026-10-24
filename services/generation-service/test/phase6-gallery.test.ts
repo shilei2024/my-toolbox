@@ -148,6 +148,7 @@ class FakeGalleryRepository implements GalleryRepository {
   failedDeletions: Array<{ imageId: string; error: string }> = [];
 
   async listPublic() { this.publicReads += 1; return { items: [summary()] }; }
+  async facets() { return { total: 1, media: { image: 1, video: 0 }, workflows: [{ name: "portrait", count: 1 }] }; }
   async listOwned() { return { items: [summary()] }; }
   async listFavorites() { return { items: [summary()] }; }
   async findBySlug(): Promise<GalleryImageDetail> { return detail(); }

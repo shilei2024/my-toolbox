@@ -27,14 +27,23 @@ export interface GalleryFilters {
   readonly orientation?: "portrait" | "square" | "landscape";
 }
 
-/** BFF 请求参数：q 为搜索词，tag/workflow/orientation 为筛选，cursor/limit 为分页。 */
+/** BFF 请求参数：q 为搜索词，tag/workflow/orientation/mediaType 为筛选，cursor/limit 为分页。 */
 export interface GalleryQuery {
   readonly q?: string;
   readonly tag?: string;
   readonly workflow?: string;
   readonly orientation?: "portrait" | "square" | "landscape";
+  readonly mediaType?: "image" | "video";
+  readonly sort?: "latest" | "popular";
   readonly cursor?: string;
   readonly limit?: number;
+}
+
+/** 画廊顶部筛选面板的聚合数据（模型分布、图片/视频构成）。 */
+export interface GalleryFacets {
+  readonly total: number;
+  readonly media: { readonly image: number; readonly video: number };
+  readonly workflows: readonly { readonly name: string; readonly count: number }[];
 }
 
 export interface ImageAssetView {

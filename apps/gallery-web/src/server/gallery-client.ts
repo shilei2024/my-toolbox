@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHmac } from "node:crypto";
-import type { GalleryImageDetail, GalleryPageData, GalleryQuery, ViewerContext } from "@/lib/gallery-types";
+import type { GalleryFacets, GalleryImageDetail, GalleryPageData, GalleryQuery, ViewerContext } from "@/lib/gallery-types";
 import type { TaskPage } from "@/lib/task-types";
 
 export class GalleryClientError extends Error {
@@ -24,6 +24,10 @@ const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
 
 export async function getPublicGallery(query: GalleryQuery, viewer: ViewerContext): Promise<GalleryPageData> {
   return serviceRequest<GalleryPageData>(`/v1/gallery${queryString(query)}`, viewer);
+}
+
+export async function getGalleryFacets(viewer: ViewerContext): Promise<GalleryFacets> {
+  return serviceRequest<GalleryFacets>("/v1/gallery/facets", viewer);
 }
 
 export async function getGalleryDetail(slug: string, viewer: ViewerContext): Promise<GalleryImageDetail> {
@@ -116,6 +120,8 @@ function queryString(query: GalleryQuery): string {
   if (query.tag) params.set("tag", query.tag);
   if (query.workflow) params.set("workflow", query.workflow);
   if (query.orientation) params.set("orientation", query.orientation);
+  if (query.mediaType) params.set("mediaType", query.mediaType);
+  if (query.sort) params.set("sort", query.sort);
   const result = params.toString();
   return result ? `?${result}` : "";
 }

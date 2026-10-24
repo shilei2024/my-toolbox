@@ -59,8 +59,8 @@ describe("Gallery bridge configuration checks", () => {
   });
 
   it("derives a safe main-site origin without exposing the login path", () => {
-    assert.equal(mainSiteUrl({ MAVIS_SITE_URL: "https://tools.example.com/account" } as NodeJS.ProcessEnv), "https://tools.example.com/");
-    assert.equal(mainSiteUrl({ MAVIS_AUTH_LOGIN_URL: "https://fallback.example.com/login" } as NodeJS.ProcessEnv), "https://fallback.example.com/");
-    assert.equal(mainSiteUrl({ MAVIS_SITE_URL: "http://tools.example.com" } as NodeJS.ProcessEnv), undefined);
+    assert.equal(mainSiteUrl({ MAVIS_SITE_URL: "https://tools.example.com/account" } as unknown as NodeJS.ProcessEnv), "https://tools.example.com/");
+    assert.equal(mainSiteUrl({ MAVIS_AUTH_LOGIN_URL: "https://fallback.example.com/login" } as unknown as NodeJS.ProcessEnv), "https://fallback.example.com/");
+    assert.equal(mainSiteUrl({ MAVIS_SITE_URL: "http://tools.example.com" } as unknown as NodeJS.ProcessEnv), undefined);
   });
 });

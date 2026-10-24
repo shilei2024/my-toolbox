@@ -16,6 +16,7 @@ import { TencentCosGalleryAssetUrlResolver } from "./asset-url.ts";
 import { NoopGalleryCache } from "./cache.ts";
 import { loadGalleryConfig } from "./config.ts";
 import { GalleryCursorCodec } from "./cursor.ts";
+import { CuratedImageService } from "./curated-image-service.ts";
 import { GalleryService } from "./gallery-service.ts";
 import { createGalleryHttpServer } from "./http-server.ts";
 import { InternalViewerContextCodec } from "./internal-auth.ts";
@@ -52,7 +53,16 @@ const generationQueue = config.redisUrl ? (() => {
   const publisher = new Redis(queueConfig.redisUrl, { connectionName: "generation-api-cancel", maxRetriesPerRequest: 1, enableOfflineQueue: false });
   return new GenerationQueueService(createGenerationQueue(producer, queueConfig, logger), publisher, queueConfig);
 })() : undefined;
-const admin = new AdminService({ repository: new PostgresAdminRepository(pool, assets), logger, onContentChanged: () => service.invalidatePublicData(), ...(generationQueue ? { queueObservability: generationQueue } : {}) });
+const adminRepository = new PostgresAdminRepository(pool, assets);
+// 策展上传复用同一套 COS 存储与画廊数据链路：上传成功后直接成为公开作品。
+const curated = new CuratedImageService({
+  storage: generationStorage,
+  repository: adminRepository,
+  logger,
+  onMutated: (slug) => service.invalidateImageDetail(slug),
+  retentionSeconds: config.deletionRetentionSeconds,
+});
+const admin = new AdminService({ repository: adminRepository, logger, onContentChanged: () => service.invalidatePublicData(), curated, ...(generationQueue ? { queueObservability: generationQueue } : {}) });
 const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, storage: generationStorage, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
 const tasks = generationTaskCenter(generation);
 const app = await createGalleryHttpServer({ service, admin, billing, generation, tasks, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });

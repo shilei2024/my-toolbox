@@ -117,3 +117,66 @@ export interface UpdateWorkflowCommand {
   readonly sortOrder: number;
   readonly expectedUpdatedAt: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * 策展作品（Curated works）
+ * 管理员上传"图片 + 提示词"，直接进入公开画廊；提示词原样保留。
+ * ------------------------------------------------------------------ */
+
+export interface AdminCuratedImageItem {
+  readonly id: string;
+  readonly slug: string;
+  readonly title: string;
+  readonly description: string;
+  readonly prompt: string;
+  readonly negativePrompt: string;
+  readonly model: string;
+  readonly tags: readonly string[];
+  readonly width: number;
+  readonly height: number;
+  readonly mediaType: "image" | "video";
+  readonly promptVisibility: "public" | "hidden";
+  readonly thumbnailUrl: string;
+  readonly publishedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** 已写入对象存储的一份派生资源（原图/预览/缩略图）。 */
+export interface CuratedImageAssetRecord {
+  readonly variant: "original" | "preview" | "thumbnail";
+  readonly storageProvider: string;
+  readonly bucket: string;
+  readonly region: string;
+  readonly objectKey: string;
+  readonly publicUrl?: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly width: number;
+  readonly height: number;
+  readonly sha256: string;
+}
+
+export interface CreateCuratedImageCommand {
+  readonly slug: string;
+  readonly title: string;
+  readonly description: string;
+  readonly prompt: string;
+  readonly negativePrompt: string;
+  readonly model: string;
+  readonly tags: readonly string[];
+  readonly width: number;
+  readonly height: number;
+  readonly promptVisibility: "public" | "hidden";
+  readonly assets: readonly CuratedImageAssetRecord[];
+}
+
+export interface UpdateCuratedImageCommand {
+  readonly title?: string;
+  readonly description?: string;
+  readonly prompt?: string;
+  readonly negativePrompt?: string;
+  readonly model?: string;
+  readonly tags?: readonly string[];
+  readonly promptVisibility?: "public" | "hidden";
+}

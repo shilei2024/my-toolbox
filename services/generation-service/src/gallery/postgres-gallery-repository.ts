@@ -3,7 +3,7 @@ import type { GalleryAssetRecord, GalleryAssetUrlResolver } from "./asset-url.ts
 import type { DecodedCursor } from "./cursor.ts";
 import { GalleryError } from "./errors.ts";
 import type { GalleryRepository, RepositoryPage } from "./repository.ts";
-import type { AssetDeletionTask, DownloadGrant, GalleryFilters, GalleryImageDetail, GalleryImageSummary, ImageAssetView, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
+import type { AssetDeletionTask, DownloadGrant, GalleryFacets, GalleryFilters, GalleryImageDetail, GalleryImageSummary, GallerySort, ImageAssetView, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
 
 interface GalleryRow extends QueryResultRow {
   id: string;
@@ -69,10 +69,10 @@ export class PostgresGalleryRepository implements GalleryRepository {
     this.#assets = assets;
   }
 
-  async listPublic(filters: GalleryFilters, cursor: DecodedCursor | undefined, limit: number, viewer: ViewerContext): Promise<RepositoryPage<GalleryImageSummary>> {
+  async listPublic(filters: GalleryFilters, cursor: DecodedCursor | undefined, limit: number, viewer: ViewerContext, sort: GallerySort = "latest"): Promise<RepositoryPage<GalleryImageSummary>> {
     const values: unknown[] = [viewer.userId ?? null, limit + 1];
     const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL"];
-    if (cursor) {
+    if (cursor && sort !== "popular") {
       values.push(cursor.at, cursor.id);
       conditions.push(`(i.published_at, i.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
     }
@@ -88,14 +88,47 @@ export class PostgresGalleryRepository implements GalleryRepository {
       values.push(filters.workflow);
       conditions.push(`i.workflow_name_snapshot = $${values.length}`);
     }
+    if (filters.mediaType) {
+      values.push(filters.mediaType);
+      conditions.push(`i.media_type = $${values.length}`);
+    }
     if (filters.orientation === "portrait") conditions.push("i.height > i.width");
     if (filters.orientation === "square") conditions.push("i.height = i.width");
     if (filters.orientation === "landscape") conditions.push("i.width > i.height");
+    const order = sort === "popular" ? "i.favorite_count DESC, i.published_at DESC, i.id DESC" : "i.published_at DESC, i.id DESC";
     const rows = await this.queryRows(`${baseSelect("list")}
       WHERE ${conditions.join(" AND ")}
-      ORDER BY i.published_at DESC, i.id DESC
+      ORDER BY ${order}
       LIMIT $2`, values);
     return this.toPage(rows, limit, "public");
+  }
+
+  async facets(): Promise<GalleryFacets> {
+    const [totals, workflows] = await Promise.all([
+      this.#pool.query<{ media_type: "image" | "video"; total: string }>(`SELECT i.media_type, count(*) AS total
+        FROM ai.images i
+        WHERE i.visibility = 'public' AND i.moderation_status = 'approved' AND i.deleted_at IS NULL AND i.published_at IS NOT NULL
+        GROUP BY i.media_type`),
+      this.#pool.query<{ name: string; total: string }>(`SELECT i.workflow_name_snapshot AS name, count(*) AS total
+        FROM ai.images i
+        WHERE i.visibility = 'public' AND i.moderation_status = 'approved' AND i.deleted_at IS NULL AND i.published_at IS NOT NULL
+          AND btrim(i.workflow_name_snapshot) <> ''
+        GROUP BY i.workflow_name_snapshot
+        ORDER BY count(*) DESC, i.workflow_name_snapshot ASC
+        LIMIT 12`),
+    ]);
+    let images = 0;
+    let videos = 0;
+    for (const row of totals.rows) {
+      const total = Number(row.total);
+      if (row.media_type === "video") videos += total;
+      else images += total;
+    }
+    return {
+      total: images + videos,
+      media: { image: images, video: videos },
+      workflows: workflows.rows.map((row) => ({ name: row.name, count: Number(row.total) })),
+    };
   }
 
   async listOwned(userId: number, cursor: DecodedCursor | undefined, limit: number): Promise<RepositoryPage<GalleryImageSummary>> {

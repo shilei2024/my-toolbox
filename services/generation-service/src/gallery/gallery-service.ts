@@ -4,7 +4,7 @@ import type { GalleryCache } from "./cache.ts";
 import type { GalleryCursorCodec } from "./cursor.ts";
 import { GalleryError } from "./errors.ts";
 import type { GalleryRepository } from "./repository.ts";
-import type { DownloadGrant, GalleryFilters, GalleryImageDetail, GalleryImageSummary, GalleryPage, GalleryPageRequest, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
+import type { DownloadGrant, GalleryFacets, GalleryFilters, GalleryImageDetail, GalleryImageSummary, GalleryPage, GalleryPageRequest, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
 
 const PUBLIC_FEED_NAMESPACE = "gallery:public-feed";
 
@@ -35,19 +35,33 @@ export class GalleryService {
   async listPublic(request: GalleryPageRequest, viewer: ViewerContext): Promise<GalleryPage<GalleryImageSummary>> {
     const limit = normalizedLimit(request.limit);
     const filters = normalizedFilters(request);
+    const sort = request.sort === "popular" ? "popular" : "latest";
+    // "热门"按收藏数排序，与 keyset（published_at, id）不一致：只返回第一屏，
+    // 不签发 cursor，避免跨页重复或漏项。
     const scope = publicScope(filters);
-    const cursor = this.#cursor.decode(scope, request.cursor);
+    const cursor = sort === "popular" ? undefined : this.#cursor.decode(scope, request.cursor);
     const cacheable = viewer.role === "guest";
     const version = cacheable ? await this.#cache.version(PUBLIC_FEED_NAMESPACE) : "private";
-    const key = `gallery:list:${version}:${hashKey({ filters, cursor, limit })}`;
+    const key = `gallery:list:${version}:${hashKey({ filters, cursor, limit, sort })}`;
     if (cacheable) {
       const cached = await this.#cache.get<GalleryPage<GalleryImageSummary>>(key);
       if (cached) return cached;
     }
-    const result = await this.#repository.listPublic(filters, cursor, limit, viewer);
-    const page = toPage(result.items, result.next ? this.#cursor.encode(scope, result.next) : undefined);
+    const result = await this.#repository.listPublic(filters, cursor, limit, viewer, sort);
+    const page = toPage(result.items, result.next && sort === "latest" ? this.#cursor.encode(scope, result.next) : undefined);
     if (cacheable) await this.#cache.set(key, page, this.#cacheTtlSeconds);
     return page;
+  }
+
+  /** 筛选面板的聚合数据（模型分布、图片/视频构成）。 */
+  async facets(): Promise<GalleryFacets> {
+    const version = await this.#cache.version(PUBLIC_FEED_NAMESPACE);
+    const key = `gallery:facets:${version}`;
+    const cached = await this.#cache.get<GalleryFacets>(key);
+    if (cached) return cached;
+    const result = await this.#repository.facets();
+    await this.#cache.set(key, result, this.#cacheTtlSeconds);
+    return result;
   }
 
   async listMine(request: GalleryPageRequest, viewer: ViewerContext): Promise<GalleryPage<GalleryImageSummary>> {
@@ -124,6 +138,11 @@ export class GalleryService {
     await this.#cache.bump(PUBLIC_FEED_NAMESPACE);
   }
 
+  /** 管理员改动策展作品后，按 slug 清理详情缓存并刷新公共列表版本。 */
+  async invalidateImageDetail(slug: string): Promise<void> {
+    await Promise.all([this.#cache.delete(detailCacheKey(slug)), this.#cache.bump(PUBLIC_FEED_NAMESPACE)]);
+  }
+
   private async invalidateMutatedImage(imageId: string): Promise<void> {
     const idKey = detailIdCacheKey(imageId);
     const slug = await this.#cache.get<string>(idKey);
@@ -149,6 +168,7 @@ function normalizedFilters(request: GalleryPageRequest): GalleryFilters {
     ...(request.tag ? { tag: normalizeToken(request.tag, 80, "tag") } : {}),
     ...(request.workflow ? { workflow: normalizeText(request.workflow, 128, "workflow") } : {}),
     ...(request.orientation ? { orientation: request.orientation } : {}),
+    ...(request.mediaType ? { mediaType: request.mediaType } : {}),
   };
 }
 

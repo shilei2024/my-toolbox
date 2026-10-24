@@ -55,6 +55,11 @@
     </button>
   </li>
   <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-curated" data-bs-toggle="tab" data-bs-target="#pane-curated" type="button" role="tab" aria-controls="pane-curated" aria-selected="false">
+      策展上传 <span class="badge bg-secondary">{{ curated_images|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
     <button class="nav-link" id="tab-providers" data-bs-toggle="tab" data-bs-target="#pane-providers" type="button" role="tab" aria-controls="pane-providers" aria-selected="false">Provider</button>
   </li>
   <li class="nav-item" role="presentation">
@@ -121,6 +126,145 @@
       {% endfor %}
     {% else %}
       <div class="text-center text-muted py-5">审核队列已清空，新的 pending / manual review 作品会出现在这里。</div>
+    {% endif %}
+  </div>
+
+  <div class="tab-pane fade" id="pane-curated" role="tabpanel" aria-labelledby="tab-curated">
+    <div class="card mb-4 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title mb-1">发布策展作品</h5>
+        <p class="text-muted small mb-3">
+          上传图片并填写生成它所用的提示词。提示词会原样保存，展示在画廊详情面板里（可一键复制）；
+          <strong>模型</strong>会作为画廊顶部的“模型”筛选项。
+        </p>
+        {% if curated_error %}
+        <div class="alert alert-warning py-2 small">策展作品列表读取失败：{{ curated_error }}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('admin.gallery_curated_upload') }}" enctype="multipart/form-data" class="row g-3">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <div class="col-12">
+            <label class="form-label" for="curated-image">图片文件（JPG / PNG / WebP，最大 {{ curated_max_mb }}MB）</label>
+            <input class="form-control" id="curated-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="curated-title">标题（留空自动取提示词首行）</label>
+            <input class="form-control" id="curated-title" name="title" type="text" maxlength="180" />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="curated-model">模型</label>
+            <input class="form-control" id="curated-model" name="model" type="text" maxlength="128" placeholder="GPT-Image-1 / Midjourney v6" required />
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="curated-visibility">提示词可见性</label>
+            <select class="form-select" id="curated-visibility" name="prompt_visibility">
+              <option value="public" selected>公开（画廊展示完整提示词）</option>
+              <option value="hidden">隐藏（仅管理员可见）</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="curated-prompt">提示词（原样保留，支持换行）</label>
+            <textarea class="form-control font-monospace" id="curated-prompt" name="prompt" rows="5" maxlength="8000" required
+                      placeholder="把生成这张图所用的完整提示词粘贴进来，包括参数段落。"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="curated-negative">负面提示词（可选）</label>
+            <textarea class="form-control font-monospace" id="curated-negative" name="negative_prompt" rows="2" maxlength="4000"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="curated-tags">标签（用逗号分隔，最多 8 个）</label>
+            <input class="form-control" id="curated-tags" name="tags" type="text" placeholder="人像, 胶片, 暖光" />
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="curated-description">作品说明（可选）</label>
+            <textarea class="form-control" id="curated-description" name="description" rows="2" maxlength="2000"></textarea>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" type="submit">上传并发布到画廊</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <h6 class="mb-3">已发布策展作品（{{ curated_images|length }}）</h6>
+    {% if curated_images %}
+      {% for item in curated_images %}
+      <div class="card mb-3">
+        <div class="row g-0">
+          <div class="col-md-3">
+            {% if gallery_origin %}
+            <a href="{{ gallery_origin }}/gallery/{{ item.slug }}" target="_blank" rel="noreferrer">
+              <img src="{{ item.thumbnailUrl }}" class="img-fluid rounded-start moderation-thumb" alt="{{ item.title or '策展作品' }}" loading="lazy" />
+            </a>
+            {% else %}
+            <img src="{{ item.thumbnailUrl }}" class="img-fluid rounded-start moderation-thumb" alt="{{ item.title or '策展作品' }}" loading="lazy" />
+            {% endif %}
+          </div>
+          <div class="col-md-9">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  <h5 class="card-title mb-1">{{ item.title or "未命名作品" }}</h5>
+                  <div class="text-muted small">{{ item.model }} · {{ item.width }}×{{ item.height }} · 发布于 {{ item.publishedAtLocal }}</div>
+                </div>
+                <span class="badge bg-{{ 'success' if item.promptVisibility == 'public' else 'secondary' }}">
+                  提示词{{ '公开' if item.promptVisibility == 'public' else '隐藏' }}
+                </span>
+              </div>
+              {% if item.get('tags') %}
+              <div class="mt-2">
+                {% for tag in item.get('tags', []) %}<span class="badge bg-light text-dark border me-1">{{ tag }}</span>{% endfor %}
+              </div>
+              {% endif %}
+              <pre class="small bg-light border rounded p-2 mt-2 mb-2" style="max-height: 8rem; overflow: auto; white-space: pre-wrap;">{{ item.get('prompt', '') }}</pre>
+              {% if item.get('negativePrompt') %}
+              <p class="small text-muted mb-2"><strong>负面提示词：</strong>{{ item.negativePrompt }}</p>
+              {% endif %}
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#curated-edit-{{ item.id }}" aria-expanded="false">编辑提示词</button>
+                <form method="post" action="{{ url_for('admin.gallery_curated_delete', image_id=item.id) }}"
+                      onsubmit="return confirm('确认从画廊下线这件策展作品？对象存储会在保留期后回收。');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <button class="btn btn-outline-danger btn-sm" type="submit">下线</button>
+                </form>
+              </div>
+              <div class="collapse mt-3" id="curated-edit-{{ item.id }}">
+                <form method="post" action="{{ url_for('admin.gallery_curated_update', image_id=item.id) }}" class="row g-2">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <div class="col-md-6">
+                    <label class="form-label small" for="edit-title-{{ item.id }}">标题</label>
+                    <input class="form-control form-control-sm" id="edit-title-{{ item.id }}" name="title" value="{{ item.title }}" maxlength="180" />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label small" for="edit-model-{{ item.id }}">模型</label>
+                    <input class="form-control form-control-sm" id="edit-model-{{ item.id }}" name="model" value="{{ item.model }}" maxlength="128" />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label small" for="edit-visibility-{{ item.id }}">提示词可见性</label>
+                    <select class="form-select form-select-sm" id="edit-visibility-{{ item.id }}" name="prompt_visibility">
+                      <option value="public" {% if item.promptVisibility == 'public' %}selected{% endif %}>公开</option>
+                      <option value="hidden" {% if item.promptVisibility == 'hidden' %}selected{% endif %}>隐藏</option>
+                    </select>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small" for="edit-prompt-{{ item.id }}">提示词</label>
+                    <textarea class="form-control form-control-sm font-monospace" id="edit-prompt-{{ item.id }}" name="prompt" rows="5" maxlength="8000">{{ item.prompt }}</textarea>
+                  </div>
+                  <div class="col-md-8">
+                    <label class="form-label small" for="edit-tags-{{ item.id }}">标签（逗号分隔）</label>
+                    <input class="form-control form-control-sm" id="edit-tags-{{ item.id }}" name="tags" value="{{ item.get('tags', [])|join('，') }}" />
+                  </div>
+                  <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary btn-sm w-100" type="submit">保存修改</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="text-center text-muted py-4">还没有策展作品。上面上传第一张图片和它的提示词吧。</div>
     {% endif %}
   </div>
 
