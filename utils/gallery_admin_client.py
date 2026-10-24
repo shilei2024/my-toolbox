@@ -122,6 +122,59 @@ def gallery_update_workflow(
     )
 
 
+UPLOAD_TIMEOUT_SECONDS = 90
+
+
+def gallery_list_curated_images(user_id: int, limit: int = 20) -> dict[str, Any]:
+    """Read the curated (admin-uploaded) works shown in the public gallery."""
+    safe_limit = max(1, min(int(limit), 50))
+    return _request("GET", f"/v1/admin/curated-images?limit={safe_limit}", user_id)
+
+
+def gallery_create_curated_image(
+    user_id: int,
+    *,
+    image_base64: str,
+    title: str = "",
+    prompt: str,
+    model: str,
+    negative_prompt: str = "",
+    description: str = "",
+    tags: list[str] | None = None,
+    prompt_visibility: str = "public",
+) -> dict[str, Any]:
+    """Upload an image plus its prompt; the prompt is stored verbatim."""
+    return _request(
+        "POST",
+        "/v1/admin/curated-images",
+        user_id,
+        payload={
+            "imageBase64": image_base64,
+            "title": title,
+            "prompt": prompt,
+            "negativePrompt": negative_prompt,
+            "description": description,
+            "model": model,
+            "tags": list(tags or []),
+            "promptVisibility": "hidden" if prompt_visibility == "hidden" else "public",
+        },
+        timeout=UPLOAD_TIMEOUT_SECONDS,
+    )
+
+
+def gallery_update_curated_image(user_id: int, image_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    return _request(
+        "PATCH",
+        f"/v1/admin/curated-images/{quote(image_id, safe='')}",
+        user_id,
+        payload=fields,
+    )
+
+
+def gallery_delete_curated_image(user_id: int, image_id: str) -> None:
+    _request("DELETE", f"/v1/admin/curated-images/{quote(image_id, safe='')}", user_id)
+
+
 def localize_iso(value: str | None) -> str:
     """Render an ISO-8601 timestamp in Asia/Shanghai for admin templates."""
     if not value:
@@ -133,7 +186,13 @@ def localize_iso(value: str | None) -> str:
     return parsed.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M")
 
 
-def _request(method: str, path: str, user_id: int, payload: dict[str, Any] | None = None) -> Any:
+def _request(
+    method: str,
+    path: str,
+    user_id: int,
+    payload: dict[str, Any] | None = None,
+    timeout: int = REQUEST_TIMEOUT_SECONDS,
+) -> Any:
     base_url, secret = _endpoint_config()
     context, signature = sign_admin_context(user_id, secret)
     headers = {
@@ -148,7 +207,7 @@ def _request(method: str, path: str, user_id: int, payload: dict[str, Any] | Non
             url,
             headers=headers,
             json=payload if payload is not None else None,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except requests.RequestException:
         raise GalleryAdminError(

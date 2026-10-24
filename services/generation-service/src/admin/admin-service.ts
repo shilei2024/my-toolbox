@@ -1,8 +1,9 @@
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
+import type { CuratedImageService } from "../gallery/curated-image-service.ts";
 import { GalleryError } from "../gallery/errors.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { AdminRepository } from "./repository.ts";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { AdminCuratedImageItem, AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
 import type { GenerationQueueSnapshot } from "../queue/queue-observability.ts";
 
 export interface QueueObservabilityPort { snapshot(): Promise<GenerationQueueSnapshot>; }
@@ -12,12 +13,14 @@ export class AdminService {
   readonly #logger: StructuredLogger;
   readonly #onContentChanged: () => Promise<void>;
   readonly #queueObservability: QueueObservabilityPort | undefined;
+  readonly #curated: CuratedImageService | undefined;
 
-  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void>; queueObservability?: QueueObservabilityPort }) {
+  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void>; queueObservability?: QueueObservabilityPort; curated?: CuratedImageService }) {
     this.#repository = options.repository;
     this.#logger = options.logger;
     this.#onContentChanged = options.onContentChanged;
     this.#queueObservability = options.queueObservability;
+    this.#curated = options.curated;
   }
 
   async dashboard(viewer: ViewerContext): Promise<AdminDashboard> {
@@ -66,6 +69,33 @@ export class AdminService {
     const result = await this.#repository.updateWorkflow(uuid(workflowId), command, adminUserId, viewer.requestId);
     this.#logger.info("admin.workflow_updated", { requestId: viewer.requestId, actorUserId: adminUserId, workflowId, isEnabled: command.isEnabled, sortOrder: command.sortOrder });
     return result;
+  }
+
+  /* -------- 策展作品：管理员上传"图片 + 提示词" -------- */
+
+  async createCuratedImage(input: unknown, viewer: ViewerContext): Promise<AdminCuratedImageItem> {
+    requireAdmin(viewer);
+    return this.curatedService().create(input, viewer);
+  }
+
+  async listCuratedImages(viewer: ViewerContext, limit?: number): Promise<readonly AdminCuratedImageItem[]> {
+    requireAdmin(viewer);
+    return limit === undefined ? this.curatedService().list(viewer) : this.curatedService().list(viewer, limit);
+  }
+
+  async updateCuratedImage(imageId: string, input: unknown, viewer: ViewerContext): Promise<AdminCuratedImageItem> {
+    requireAdmin(viewer);
+    return this.curatedService().update(imageId, input, viewer);
+  }
+
+  async deleteCuratedImage(imageId: string, viewer: ViewerContext): Promise<void> {
+    requireAdmin(viewer);
+    await this.curatedService().delete(imageId, viewer);
+  }
+
+  private curatedService(): CuratedImageService {
+    if (!this.#curated) throw new GalleryError("service_unavailable", "Curated image uploads are not configured", 503);
+    return this.#curated;
   }
 }
 

@@ -25,6 +25,16 @@ const navigation = [
   { href: "/pricing", label: "会员" },
 ] as const;
 
+/**
+ * 画廊首页使用自己的深色顶栏（见 showcase-gallery.tsx），
+ * 因此在这个路由上不渲染全站导航，避免出现两条 header。
+ */
+export function SiteHeaderGate({ mainSiteUrl }: SiteHeaderProps) {
+  const pathname = usePathname();
+  if (pathname === "/gallery") return null;
+  return <SiteHeader mainSiteUrl={mainSiteUrl} />;
+}
+
 export function SiteHeader({ mainSiteUrl }: SiteHeaderProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -58,7 +68,7 @@ export function SiteHeader({ mainSiteUrl }: SiteHeaderProps) {
 
         <nav className="nav-links" aria-label="Gallery 主导航">
           {mainSiteUrl ? <a className="nav-link nav-link-main" href={mainSiteUrl}>工具箱</a> : null}
-          {navigation.map((item) => <Link key={item.href} className={`nav-link${isActive(pathname, item.href) ? " active" : ""}`} href={item.href}>{item.label}</Link>)}
+          {navigation.map((item) => <Link key={item.href} className={`nav-link${isActive(returnTo, item.href) ? " active" : ""}`} href={item.href}>{item.label}</Link>)}
         </nav>
 
         <div className="header-actions">
@@ -85,7 +95,7 @@ export function SiteHeader({ mainSiteUrl }: SiteHeaderProps) {
       <nav id="gallery-mobile-menu" className={`mobile-nav-panel${menuOpen ? " open" : ""}`} aria-label="Gallery 移动导航" hidden={!menuOpen}>
         <div className="mobile-nav-primary">
           {mainSiteUrl ? <a className="mobile-nav-main" href={mainSiteUrl} onClick={closeMenu}><span>返回主站工具箱</span><i>↗</i></a> : null}
-          {navigation.map((item) => <Link key={item.href} className={isActive(pathname, item.href) ? "active" : ""} href={item.href} onClick={closeMenu}><span>{item.label}</span><i>→</i></Link>)}
+          {navigation.map((item) => <Link key={item.href} className={isActive(returnTo, item.href) ? "active" : ""} href={item.href} onClick={closeMenu}><span>{item.label}</span><i>→</i></Link>)}
         </div>
         <div className="mobile-nav-actions">
           {session === undefined ? null : authenticated

@@ -8,14 +8,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test test/seo.test.ts test/bridge-config.test.ts test/admin-links.test.ts test/auth-return-url.test.ts",
+    "test": "node --experimental-strip-types --test test/seo.test.ts test/bridge-config.test.ts test/admin-links.test.ts test/auth-return-url.test.ts test/justified-layout.test.ts",
     "test:seo": "node --experimental-strip-types --test test/seo.test.ts",
     "test:bridge": "node --experimental-strip-types --test test/bridge-config.test.ts",
     "test:admin-links": "node --experimental-strip-types --test test/admin-links.test.ts",
     "check:bridge": "node --experimental-strip-types scripts/check-bridge-config.ts"
   },
   "dependencies": {
-    "next": "16.2.12",
+    "next": "16.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -25,13 +25,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.12",
+    "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
     "nanoid": "3.3.18",
     "postcss": "8.5.25",
-    "sharp": "0.35.3"
+    "sharp": "0.35.5",
+    "source-map-js": "1.2.2"
   }
 }

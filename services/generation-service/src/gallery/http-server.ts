@@ -38,6 +38,10 @@ export async function createGalleryHttpServer(options: {
   app.get("/health", async () => ({ status: "ok" }));
 
   app.get("/v1/gallery", async (request) => options.service.listPublic(parsePageRequest(request.query), viewer(request, options.auth)));
+  app.get("/v1/gallery/facets", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {
+    viewer(request, options.auth);
+    return options.service.facets();
+  });
   app.get("/v1/gallery/:slug", async (request) => options.service.getBySlug(pathParam(request.params, "slug"), viewer(request, options.auth)));
   app.get("/v1/seo/images", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
     viewer(request, options.auth);
@@ -100,6 +104,19 @@ export async function createGalleryHttpServer(options: {
     app.patch("/v1/admin/providers/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProvider(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/provider-models/:id", { config: { rateLimit: { max: 40, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProviderModel(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/workflows/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateWorkflow(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    // 策展上传：管理员直接发布"图片 + 提示词"。base64 JSON 承载，路由级放大 body 限制。
+    app.get("/v1/admin/curated-images", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {
+      return { items: await options.admin!.listCuratedImages(viewer(request, options.auth), parseListLimit(request.query)) };
+    });
+    app.post("/v1/admin/curated-images", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } }, bodyLimit: 24 * 1024 * 1024 }, async (request, reply) => {
+      const created = await options.admin!.createCuratedImage(request.body, viewer(request, options.auth));
+      return reply.code(201).send(created);
+    });
+    app.patch("/v1/admin/curated-images/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateCuratedImage(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    app.delete("/v1/admin/curated-images/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
+      await options.admin!.deleteCuratedImage(pathParam(request.params, "id"), viewer(request, options.auth));
+      return reply.code(204).send();
+    });
   }
 
   app.put("/v1/images/:id/favorite", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.service.setFavorite(pathParam(request.params, "id"), true, viewer(request, options.auth)));
@@ -139,6 +156,10 @@ function parsePageRequest(value: unknown): GalleryPageRequest {
   const query = record(value);
   const orientation = scalar(query.orientation);
   if (orientation && !new Set(["portrait", "square", "landscape"]).has(orientation)) throw new GalleryError("invalid_request", "orientation is invalid", 400);
+  const mediaType = scalar(query.mediaType);
+  if (mediaType && mediaType !== "image" && mediaType !== "video") throw new GalleryError("invalid_request", "mediaType is invalid", 400);
+  const sort = scalar(query.sort);
+  if (sort && sort !== "latest" && sort !== "popular") throw new GalleryError("invalid_request", "sort is invalid", 400);
   const cursor = scalar(query.cursor);
   const limit = scalar(query.limit);
   const search = scalar(query.q);
@@ -151,6 +172,8 @@ function parsePageRequest(value: unknown): GalleryPageRequest {
     ...(tag ? { tag } : {}),
     ...(workflow ? { workflow } : {}),
     ...(orientation ? { orientation: orientation as "portrait" | "square" | "landscape" } : {}),
+    ...(mediaType ? { mediaType: mediaType as "image" | "video" } : {}),
+    ...(sort ? { sort: sort as "latest" | "popular" } : {}),
   };
 }
 
@@ -192,6 +215,12 @@ function parseTaskListRequest(value: unknown): TaskListRequest {
 function pathParam(value: unknown, key: string): string {
   const result = scalar(record(value)[key]);
   return result ?? "";
+}
+function parseListLimit(value: unknown): number | undefined {
+  const raw = scalar(record(value).limit);
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : undefined;
 }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function scalar(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }

@@ -50,6 +50,7 @@ class SeoRepository implements GalleryRepository {
     };
   }
   async listPublic() { return { items: [summary()] }; }
+  async facets() { return { total: 1, media: { image: 1, video: 0 }, workflows: [{ name: "portrait", count: 1 }] }; }
   async listOwned() { return { items: [summary()] }; }
   async listFavorites() { return { items: [summary()] }; }
   async findBySlug(): Promise<GalleryImageDetail> { return { ...summary(), providerCode: "comfyui", createdAt: "2026-08-02T00:00:00.000Z", downloadCount: 0, canDelete: false, isOwner: false }; }
