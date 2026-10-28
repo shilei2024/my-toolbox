@@ -65,3 +65,5 @@ keyset cursor；后续模块接入时由 Task Center 统一扩展分页契约。
 `POST /v1/billing/webhooks/:provider` 是唯一可按精确路径公开的 Billing 入站接口。必须使用原始 body 验签、限制 body 大小、幂等落库并快速返回；复杂处理不得阻塞 HTTP 响应。
 
 Generation API 已完成代码与契约测试；真实 Staging 数据库、队列、COS 与 Provider 集成验收仍按部署清单执行。
+
+- [发票留存与通行费分摊 API](invoice-retention.md)：口径、打印、预览确认和审计契约。

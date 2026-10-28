@@ -65,3 +65,14 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 3. 打开产品线下拉，确认 79 显示“先楫”，历史报销导出封面该分组有编号且不再落到未匹配。
 4. 回滚只需恢复上一版本代码并重启。注意更名纠正已经写入数据库，回滚不会把历史文本改回
    “物料分组”；如需完全回退语义，必须在大盘确认后单独执行一次反向 SQL。
+
+
+## 2026-10-28 留存、打印与账单分摊（待发布）
+
+`reimbursement_invoices` 增加 inclusion_policy/document_kind、发生月/结算月、amount_confirmed 和 print_selected；迁移 e4f5a6b7c8d9 保留历史 expense 默认值。普通发票、零散过路费、加油票和月账单共用 owner、附件、周期。后两类核对票据不冲减实际公里；仅确认后的账单金额从派车行计入。
+
+`tools/reimbursement/retention.py` 保存独立的金额/月校验与整数分分摊；manager 提供同 owner 同周期同自然月的预览/确认/撤销。周期行锁与快照在 PostgreSQL 上避免过期覆盖，`reimbursement_audits` 记录分摊前后和修改操作者。已分摊账单先撤销才可修改或删除。审计模型属于报销领域，未新建平台服务或队列。
+
+仪表盘、周期卡片、费用统计、封面和分类表共用明确口径。print_selected 仅控制打印，不删除电子件。留存票据不生成应酬/出差关联明细。提取页金额为人工确认，报销弹窗保留原有 OCR；没有新增批量 OCR 成本。上传复用同 owner 同内容原件，删除共享引用时保留附件。
+
+原件仍本地 + 数据库 BLOB，尚未迁移 COS。大量手机上传前需要测量存储增长和恢复时长。详见[契约](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)、[发布手册](../deployment/invoice-retention-rollout.md)。小程序尚未实现，不能把网站会话接口直接开放给微信身份。
