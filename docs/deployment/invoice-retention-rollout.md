@@ -1,14 +1,15 @@
 # 发票留存功能发布与回滚
 
-状态：候选代码独立审查及 CI 通过，备份已真实恢复，操作者已反馈 MIGRATION_REHEARSAL_OK；恢复库业务验收进行中，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
+状态：网站候选代码独立审查、CI、真实备份恢复、PG16迁移演练和恢复库业务验收均已通过；准备0.9.47正式发布，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
 方案见 [实施计划](../product/invoice-retention-plan.md)、[API](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)。
 
 ## 发布前 Go/No-Go
 
 - [x] 业务候选 9199c0d 已经独立审查通过，本地 217 项与 PR CI 均通过；后续提交仍须 CI 验证。
 - [x] PR #102 已将当前 main 同步到 develop，合并后两者文件树一致；功能经 develop / release PR 发布。
-- [ ] 预发布使用独立数据库与附件目录，不能让 Preview 读写生产报销数据。
+- [x] 已在独立恢复库及临时附件目录运行固定候选业务验收，不连接生产报销数据。
 - [x] 操作者已在 PostgreSQL 16.14 恢复库反馈 MIGRATION_REHEARSAL_OK；63 张发票、79 个附件历史指纹及新增默认值检查通过。
+- [x] 操作者反馈BUSINESS_OK、HISTORY_OK、STAGING_SMOKE_OK，实际API/Excel/原件/权限/撤销通过，既有发票和附件指纹保持一致。
 - [ ] 记录本次备份位置、恢复结果、发布前 SHA 和负责人。
 - [ ] 域名/DNS/TLS、systemd、数据库连接、服务器磁盘/内存、附件目录权限、数据库及附件备份、监控正常。
 - [ ] Redis/COS 本次不变：确认现有平台状态正常；报销原件仍为本地 + DB BLOB，不声称已经迁移 COS。
@@ -106,39 +107,35 @@ export AUTO_CREATE_SCHEMA=false
 
 ## 生产更新（全部门禁通过并获发布批准后）
 
-以下以仓库已有 systemd 主站部署为准。先在服务器记下旧 SHA，不要把密钥、数据库口令或真实发票发到聊天中。
+本次版本0.9.47，用户已明确批准生产部署，发布负责人负责PR/版本和审核证据，操作者执行服务器命令并兼任数据库/回滚操作负责人。CI/复核和main发布提交确定后才发实际固定SHA命令。无需重建其他服务，也不安装新依赖；最终脚本会验证requirements.txt与旧版完全一致。
+
+一次性 `scripts/ops/invoice_release.py` 和已审核 `invoice_backup.py` 必须从**同一批准SHA**提取至root专用目录。发布工具在preflight前持有固定root文件的非阻塞互斥锁，并发第二次执行只报告busy，不操作服务。仅支持本次已知旧生产SHA f086b4f、main、已拉取origin/main精确目标；目标必须包含已验收7f751fe且其后只有发布脚本/测试/文档更改。任何未验收业务变化、额外迁移、依赖或仓库Caddy变动都会拒绝。工作树只允许已知Caddy未提交修改，不接受任何暂存修改；不删除既有未跟踪备份，不reset/stash。
+
+脚本先按运行中service环境/项目config一致的优先级确定数据库，再stop主站。保持停写完成最终DB及原件/配置备份，根目录0700、文件0600；manifest注明停写最终备份和目标SHA。验证备份旧迁移d3，快进main到批准SHA，核对.env及本地Caddy哈希未变。用最小Flask-Migrate应用执行正常Alembic upgrade到e4（不导入app、不启动调度器、不create_all），检查历史发票/含BLOB附件内容指纹及默认口径均保留，然后start主站及校验active/HTTPS healthz。migration连接有15秒锁等待和120秒语句超时，不无限挂起。
+
+这是现有systemd的本次受控运维工件，不是新的发布平台。停站时域名可能短暂不可用，请执行整段命令，不在中间停留等待聊天。数据库dump与原件均在主站停写期间完成；同一数据库其他服务仍可能写自己的表，pg_dump本身提供事务一致快照，未经此次修改的服务保持原运行方式。
 
 ```bash
+(
+set -euo pipefail
 cd /opt/mytoolbox
-git status --short
-git rev-parse HEAD
-mkdir -p backups
-set -a
-. ./.env
-set +a
-pg_dump --format=custom --file="backups/before-invoice-retention-$(date +%Y%m%d-%H%M%S).dump" "$DATABASE_URL"
-tar -czf "backups/invoice-files-$(date +%Y%m%d-%H%M%S).tar.gz" uploads/reimbursement
+git fetch origin main
+release=<APPROVED_MAIN_SHA>
+test "$(git rev-parse origin/main)" = "$release"
+install -d -m 0700 /root/mytoolbox-invoice-release
+for script in invoice_backup.py invoice_release.py; do
+  git show "${release}:scripts/ops/${script}" > "/root/mytoolbox-invoice-release/${script}"
+  chmod 0600 "/root/mytoolbox-invoice-release/${script}"
+done
+.venv/bin/python /root/mytoolbox-invoice-release/invoice_release.py "$release"
+)
 ```
 
-目的：数据库和附件一起保留，避免只回滚代码却丢失票据。备份失败/磁盘空间不足必须停止。先确认可恢复备份，再进入短维护窗口（停用报销录入和导出；若没有单模块维护开关，应暂停主站服务并说明用户影响）。
+预期输出DEPLOY_OK、release_commit、migration_revision=e4f5a6b7c8d9、backup_dir、service=active; HTTPS_health=OK。报告这些固定结果即可；随后按人工验收第1/2/6/7项做实际检查。healthz只是HTTP存活，不能代替脚本的数据库/内容核验或用户实际业务验收。
 
-```bash
-sudo systemctl stop mytoolbox
-git fetch origin
-git switch main
-git pull --ff-only origin main
-.venv/bin/pip install --requirement requirements.txt
-export FLASK_APP='app:create_app'
-export AUTO_CREATE_SCHEMA=false
-.venv/bin/flask db current
-.venv/bin/flask db upgrade
-.venv/bin/flask db current
-sudo systemctl start mytoolbox
-sudo systemctl status mytoolbox --no-pager
-curl --fail --silent --show-error https://mindfulpenpal.com/healthz
-```
+失败输出DEPLOY_FAILED阶段及root专用日志位置，只贴固定失败行，不上传日志/备份/连接配置。主站尚未切换代码且最终备份失败时自动尝试恢复旧服务；一旦切换代码或进入迁移则保持停写，不盲目运行旧版。不要重跑脚本绕过旧SHA保护，先按失败阶段诊断。未出现DEPLOY_OK不算上线成功。生产备份新工件标记restore_verified仍为false，指该次新dump未再次恢复；历史真实恢复及迁移验收已验证备份链路，不伪称本次最终dump也已恢复。
 
-预期：迁移头为 e4f5a6b7c8d9，服务 active (running)，healthz 成功；随后按人工验收第 1/2/6/7 项做实际检查。确认 main 是已批准且 CI 全绿的发布提交，不能直接把功能分支部署生产。
+工件本地验证：8项故障/互斥/恢复保护测试通过；在临时PostgreSQL18合成数据库实际调用同一个最小Flask-Migrate函数完成d3→e4，历史发票/BLOB及默认口径一致，服务已停止。正式服务器此前PG16恢复库已完成原始DDL演练和API/Excel业务验收；本机PG18结果不替代服务器版本证据。正式主站执行结果仍待操作者反馈。
 
 ## 失败恢复与回滚
 
