@@ -60,3 +60,9 @@
 操作者已反馈BUSINESS_OK/HISTORY_OK/STAGING_SMOKE_OK，真实恢复库业务验收通过。继续功能PR至develop，按既有release分支/PR到main；网站业务文件保持已验收内容，小程序不合入此次发布。发布版本0.9.47。
 
 Golden Rule五项：会短暂停主站，用户已授权生产部署，服务器命令仍由其执行；复用既有backup及Flask-Migrate，精确版本和业务指纹检查属于本次发票发布、不构建通用发布平台；无新增服务/云费用，不变更依赖/Caddy；新手只执行固定SHA的一次性脚本，输出成功或失败阶段；保持当前systemd/单体/PostgreSQL架构。新增scripts/ops/invoice_release.py及有意义的失败/数据保护测试，更新发布手册/CHANGELOG，独立审查后进入release PR。脚本先校验生产旧SHA/分支/允许的工作树改动/依赖不变、读取运行环境与数据库，再停止服务、最终备份、快进至批准SHA、最小Flask-Migrate应用正常upgrade到e4、核对历史数据/默认值、启动和HTTPS健康检查。不开生产调试、不导入app启动调度器、不清库/删文件、不运行downgrade。最终备份失败且仍是旧SHA时恢复旧服务；代码或迁移阶段失败保持停写，由日志脱敏诊断后前滚修复。工作量小至中，不改业务API/DB版本，测试保护执行顺序和失败停止条件。
+
+## 生产权限故障修复（2026-10-28）
+
+实际6239408发布已完成最终备份、代码及e4迁移/历史指纹校验，但HTTPS健康检查失败，脚本按保护停写。现场确认app.py/models.py及新模块为root:root 0600，服务用户www-data；全局umask077被Git检出继承，导致代码不可读。此前Windows/mock测试遗漏了Linux实际检出行为。操作者按限定8个已审核运行文件恢复0644并启动后，反馈active、LOCAL_HTTP=200、PUBLIC_HTTP=200；未重做迁移、未回滚数据。用户随后确认历史金额一致、加油票/留存选择可用、提取阈值/完整归档入口可见，网站基础上线验收通过。
+
+Golden Rule：此补丁只改运维脚本，不改变运行中业务/DB；继续复用既有Git/备份边界，避免形成新发布系统；标准库subprocess子进程umask参数无需资源或依赖；单独Git子进程022、父进程077清晰可维护；符合既有systemd架构和秘密隔离。范围scripts/ops/invoice_release.py、tests/test_invoice_release.py和发布文档/CHANGELOG。Linux CI用真实临时Git仓库，验证普通代码0644、执行文件/目录0755，备份及日志仍0600/0700；Windows明确跳过真实POSIX测试，mock同时断言子进程umask。无新增迁移，现有生产服务无需为脚本补丁再次停机；禁止重新跑本次只支持旧SHA的完整发布命令。紧急恢复只修Git认可的公开代码权限，不递归chmod，不触碰.env/上传/备份/Caddy。补丁经hotfix PR评审/CI后同步main及develop。
