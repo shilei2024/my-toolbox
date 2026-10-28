@@ -9,7 +9,7 @@
 ## 当前验证与门禁
 
 - 独立审查已验证绑定过期/去重冲突修复；二维码旧定时器问题已修复，待最终复核。
-- 本地移动15项通过；隔离PostgreSQL18合成数据16项通过，包括并发重试仅一张票/一次用量、绑定码竞争和旧BLOB迁移。CI另用PostgreSQL16匹配服务器主版本；CI结果以实际PR为准。
+- 本地移动相关回归通过；隔离PostgreSQL18合成数据18项通过，包括并发重试仅一张票/一次用量、绑定码竞争、旧BLOB迁移和实际psql三段演练/错库拒绝。CI另用PostgreSQL16匹配服务器主版本；CI结果以实际PR为准。
 - 上线必需：最新PR CI通过、恢复库f5升级/恢复验证、原件/历史费用对照、备份及回滚、域名DNS/TLS/现有systemd/DB/Redis/COS/防火墙/容量/监控确认。手机功能不新增Redis、COS、端口或常驻服务。
 - 微信后台：个人主体当前允许的实际服务类目、备案、名称/Logo、合法域名、隐私保护指引、开发/体验成员及审核状态逐项核实。不能从“已注册”推断已可提审。
 
@@ -30,6 +30,32 @@
 核对来源（2026-10-28）：[官方API类型仓库](https://github.com/wechat-miniprogram/api-typings)、[类型定义](https://raw.githubusercontent.com/wechat-miniprogram/api-typings/master/types/wx/lib.wx.api.d.ts)已用于wx.login/chooseMedia/chooseMessageFile/uploadFile/隐私接口契约。官方[网络配置](https://developers.weixin.qq.com/miniprogram/dev/framework/ability/network.html)与[隐私授权](https://developers.weixin.qq.com/miniprogram/dev/framework/user-privacy/PrivacyAuthorize.html)当前自动访问失败；实际类目、备案、域名保存和审核要求需登录后台核验，未宣称已核实。
 
 ## 服务器发布
+
+### f5恢复库迁移演练
+
+网站0.9.47已上线，操作者已确认历史金额、加油票留存选择与提取阈值/归档入口正常。先在此前独立恢复库演练手机迁移；不停止主站、不切换生产工作树、不读取生产.env、不运行微信换码。该库已完成网站业务验收且处于e4，必须保持与生产服务隔离。
+
+`scripts/ops/mobile_invoice_rehearsal.sql`从真实f5 revision渲染，第一步严格指定测试库 `mytoolbox_invoice_verify_20261028_111850`、旧e4版本及新增对象不存在，才执行升级/降级/再升级。对所有历史用户/票据完整行及附件原件BLOB作前后指纹比较，保留已有留存/打印/月份/金额，不重置为旧默认值；约束及空摘要检查通过，最后停在f5供后续API验收。锁等待15秒、语句120秒超时，失败立即停止，不改保护重跑。生产只能正常Alembic upgrade，禁止此恢复SQL。
+
+固定候选SHA由发布协作在评审和CI全绿后提供，按下列形式执行：
+
+```bash
+(
+set -euo pipefail
+cd /opt/mytoolbox
+git fetch origin codex/wechat-invoice-upload
+candidate=<APPROVED_MOBILE_SHA>
+git show "${candidate}:scripts/ops/mobile_invoice_rehearsal.sql" > /root/mytoolbox-mobile-rehearsal.sql
+chmod 0600 /root/mytoolbox-mobile-rehearsal.sql
+sudo -u postgres psql -X --set=ON_ERROR_STOP=1 --host=/var/run/postgresql --port=5432 \
+  --username=postgres --dbname=mytoolbox_invoice_verify_20261028_111850 \
+  < /root/mytoolbox-mobile-rehearsal.sql
+)
+```
+
+成功输出MOBILE_UPGRADE_OK、MOBILE_ROLLBACK_OK、MOBILE_REUPGRADE_OK和最终MOBILE_MIGRATION_REHEARSAL_OK；只反馈最终状态，不贴原件或用户明细。未见最终成功则停止手机发布。工件已独立审查、契约测试通过，本机PG18实际执行18项通过；PG16 CI及服务器执行结果以实际状态为准，不将本机结果当服务器实测。
+
+### 正式发布边界
 
 发布提交确定后由协作提供固定SHA命令；流程与网站相同：保留本地Caddy修改/备份，独立审查、CI、隔离恢复库迁移与业务验收，集成到develop再release PR到main。主站更新使用现有systemd，不让手机PR直接覆盖生产。
 

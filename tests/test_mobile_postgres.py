@@ -89,3 +89,78 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 revision.upgrade()
                 rows = conn.execute(sa.text('SELECT content,content_sha256 FROM reimbursement_attachments ORDER BY id')).all()
                 self.assertEqual([(bytes(content), digest) for content, digest in rows], [(b'\x01\x02\xff',None),(b'\x01\x02\xff',None)])
+
+    def test_rehearsal_sql_executes_on_isolated_database_and_rejects_wrong_database(self):
+        import importlib.util
+        import shutil
+        import subprocess
+        import tempfile
+        from pathlib import Path
+        from flask import Flask
+        from alembic.operations import Operations
+        from alembic.migration import MigrationContext
+        from models import User, ReimbursementPeriod
+        from scripts.ops.invoice_backup import private_connection_environment
+        psql=os.environ.get('MOBILE_TEST_PSQL') or shutil.which('psql')
+        self.assertTrue(psql,'psql is required for the configured PostgreSQL test')
+        root=Path(__file__).parents[1]
+        sql=(root/'scripts/ops/mobile_invoice_rehearsal.sql').read_bytes()
+        base=make_url(os.environ['MOBILE_TEST_DATABASE_URL'])
+        name='mytoolbox_invoice_verify_20261028_111850'
+        target=base.set(database=name)
+        admin=sa.create_engine(base,isolation_level='AUTOCOMMIT')
+        created=False
+        target_engine=None
+        try:
+            with admin.connect() as conn:
+                conn.exec_driver_sql(f'CREATE DATABASE "{name}"')
+            created=True
+            app=Flask(__name__)
+            app.config['SQLALCHEMY_DATABASE_URI']=target
+            db.init_app(app)
+            with app.app_context():
+                target_engine=db.engine
+                db.create_all()
+                user=User(email='migration@example.invalid',password_hash='synthetic-only')
+                db.session.add(user);db.session.flush()
+                period=ReimbursementPeriod(owner_type='user',owner_id=str(user.id),name='test',start_year=2026,start_month=6,end_year=2026,end_month=7)
+                db.session.add(period);db.session.flush()
+                db.session.add(ReimbursementInvoice(owner_type='user',owner_id=str(user.id),period_id=period.id,
+                    inclusion_policy='retain',document_kind='fuel',total_amount=88.12,occurrence_month='2026-08',print_selected=False,amount_confirmed=False))
+                for filename in ('legacy-a.pdf','legacy-b.pdf'):
+                    db.session.add(ReimbursementAttachment(owner_type='user',owner_id=str(user.id),stored_name=filename,
+                        original_name=filename,mime_type='application/pdf',file_size=3,content=b'\x01\x02\xff'))
+                db.session.commit()
+                path=root/'migrations/versions/f5a6b7c8d9e0_mobile_invoice_upload.py'
+                spec=importlib.util.spec_from_file_location('rehearsal_pg_revision',path)
+                revision=importlib.util.module_from_spec(spec);spec.loader.exec_module(revision)
+                with db.engine.begin() as conn:
+                    revision.op=Operations(MigrationContext.configure(conn));revision.downgrade()
+                    conn.exec_driver_sql('CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)')
+                    conn.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('e4f5a6b7c8d9')")
+                db.session.remove();db.engine.dispose()
+            with tempfile.TemporaryDirectory() as folder:
+                environment=private_connection_environment(target.set(drivername='postgresql').render_as_string(hide_password=False),Path(folder))
+                if os.name == 'nt':
+                    environment['SYSTEMROOT']=os.environ['SYSTEMROOT']
+                result=subprocess.run([psql,'-X','--set=ON_ERROR_STOP=1'],input=sql,env=environment,capture_output=True,timeout=90)
+                self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
+                self.assertIn(b'MOBILE_MIGRATION_REHEARSAL_OK',result.stdout)
+                # The unchanged script must reject the original test DB before
+                # even reading schema revision or writing public objects.
+                environment=private_connection_environment(base.set(drivername='postgresql').render_as_string(hide_password=False),Path(folder))
+                if os.name == 'nt':
+                    environment['SYSTEMROOT']=os.environ['SYSTEMROOT']
+                wrong=subprocess.run([psql,'-X','--set=ON_ERROR_STOP=1'],input=sql,env=environment,capture_output=True,timeout=30)
+                self.assertNotEqual(wrong.returncode,0)
+                self.assertIn(b'Refusing to run outside',wrong.stderr)
+            with target_engine.connect() as conn:
+                self.assertEqual(conn.exec_driver_sql('SELECT version_num FROM public.alembic_version').scalar(),'f5a6b7c8d9e0')
+                self.assertEqual(conn.exec_driver_sql('SELECT inclusion_policy,occurrence_month,total_amount,print_selected FROM public.reimbursement_invoices').one(),('retain','2026-08',__import__('decimal').Decimal('88.12'),False))
+        finally:
+            if target_engine is not None:
+                target_engine.dispose()
+            if created:
+                with admin.connect() as conn:
+                    conn.exec_driver_sql(f'DROP DATABASE "{name}"')
+            admin.dispose()
