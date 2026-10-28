@@ -1,14 +1,14 @@
 # 发票留存功能发布与回滚
 
-状态：候选代码独立审查及 CI 通过，备份已真实恢复；恢复库迁移与预发布验收进行中，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
+状态：候选代码独立审查及 CI 通过，备份已真实恢复，操作者已反馈 MIGRATION_REHEARSAL_OK；恢复库业务验收进行中，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
 方案见 [实施计划](../product/invoice-retention-plan.md)、[API](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)。
 
 ## 发布前 Go/No-Go
 
 - [x] 业务候选 9199c0d 已经独立审查通过，本地 217 项与 PR CI 均通过；后续提交仍须 CI 验证。
-- [ ] 当前 develop 落后 main，须先同步生产基线并走集成/发布分支流程，禁止把旧 develop 直接发布。
+- [x] PR #102 已将当前 main 同步到 develop，合并后两者文件树一致；功能经 develop / release PR 发布。
 - [ ] 预发布使用独立数据库与附件目录，不能让 Preview 读写生产报销数据。
-- [ ] 生产备份恢复到隔离 PostgreSQL，演练 d3e4f5a6b7c8 → e4f5a6b7c8d9，检查旧记录 expense/invoice/打印选中/金额确认均保留。
+- [x] 操作者已在 PostgreSQL 16.14 恢复库反馈 MIGRATION_REHEARSAL_OK；63 张发票、79 个附件历史指纹及新增默认值检查通过。
 - [ ] 记录本次备份位置、恢复结果、发布前 SHA 和负责人。
 - [ ] 域名/DNS/TLS、systemd、数据库连接、服务器磁盘/内存、附件目录权限、数据库及附件备份、监控正常。
 - [ ] Redis/COS 本次不变：确认现有平台状态正常；报销原件仍为本地 + DB BLOB，不声称已经迁移 COS。
@@ -37,11 +37,42 @@
 
 用 `git show <PINNED_SHA>:scripts/ops/invoice_retention_rehearsal.sql` 提取到受限文件后，只允许 `psql -X --set=ON_ERROR_STOP=1 --dbname=mytoolbox_invoice_verify_20261028_111850` 执行。成功输出 UPGRADE_OK、ROLLBACK_OK、REUPGRADE_OK、MIGRATION_REHEARSAL_OK。未见最终成功标记须停下诊断，不能改脚本中的数据库名保护或盲目重跑。该脚本**禁止在生产执行**；生产仅执行正常受控 Alembic upgrade，生产不 downgrade。本地契约测试确认工件与当前 revision 的实际 PostgreSQL DDL 完全一致，真实执行结果由操作者反馈后记录。
 
-该 SQL 工件已独立只读复核通过，迁移契约测试 2 项通过；另在本机临时 PostgreSQL 18.6 集群上用合成发票/BLOB 执行三段迁移及错误库名拒绝测试，全部通过，临时服务已停止。这不能替代服务器 PostgreSQL 16.14 上的真实备份恢复库验证，后者仍等待操作者执行。
+该 SQL 工件已独立只读复核通过，迁移契约测试 2 项通过；另在本机临时 PostgreSQL 18.6 集群上用合成发票/BLOB 执行三段迁移及错误库名拒绝测试，全部通过。操作者随后反馈 PostgreSQL 16.14 恢复库最终 MIGRATION_REHEARSAL_OK。本机结果与操作者反馈分别记录，不将本机版本说成生产版本。
 
 2026-10-28 独立审查发现旧明细覆盖分摊、跨账单覆盖、历史附件别名误删、未分类税额遗漏和周期删除遗留原件五项问题，修复与回归已加入候选代码，必须复核后才能发布。更新后已打开的旧页面保存明细可能收到 409，需刷新后核对；不能绕过快照强制覆盖。
 
 ## 预发布验证（操作者服务器终端）
+
+### 本次低资源恢复库业务验收
+
+当前服务器使用 systemd，尚无常驻 Flask staging。为了不临时增加常驻服务，提供 `scripts/ops/invoice_staging_smoke.py`：将固定候选 SHA 用 `git archive` 展开到 postgres 专用 0700 新目录，禁止复制生产 `.env`；从主站虚拟环境借用解释器，但只导入候选模块，不导入 app/config、不启动 scheduler、不监听端口，不请求外部 OCR。
+
+脚本只允许本次精确恢复库名 `mytoolbox_invoice_verify_20261028_111850`（本机 socket5432、角色 postgres），先验证 current_database 和迁移 e4f5a6b7c8d9，再创建随机测试账号及合成票据。全程不连接生产业务库、不迁移、不操作 systemd 或 Caddy。原有发票、含 BLOB 附件逐行摘要前后必须一致。它会向恢复库增加测试账号和业务数据，不会清库；失败后停下检查，不重跑迁移演练 SQL。
+
+验收覆盖加油票零费用、两个月60公里保留、6月590.48元手工分摊、7月不变、总费用650.48元、过期快照409、Excel单元格合计、只打印选中原件、删本轮临时磁盘缓存后BLOB取回、另一账号隔离、审计及撤销。成功输出 `BUSINESS_OK`、`HISTORY_OK`、`STAGING_SMOKE_OK`。失败输出固定阶段标识，不输出数据库连接或原始异常；不得将失败算作验收通过。
+
+该无监听业务验收补足恢复库的真实候选 API/Excel 验证；浏览器样式、ZIP 下载和实体打印仍按下方人工清单完成。它不是 Vercel/独立常驻 staging 已搭建的证明。此次不改变 Gallery/Generation 运行工件，部署方式沿用现有主站 systemd，容器晋级要求不适用于这一未容器化服务。
+
+操作者命令由发布协作提供固定 SHA，采用以下形式（`<PINNED_SHA>` 需替换为已审查且 CI 通过的实际提交，不能执行占位符）：
+
+```bash
+cd /opt/mytoolbox || exit 1
+set -euo pipefail
+git fetch origin codex/invoice-retention-workflow
+candidate=<PINNED_SHA>
+stage_dir="/var/lib/postgresql/mytoolbox-invoice-stage-${candidate}"
+test ! -e "$stage_dir"
+install -d -m 0700 -o postgres -g postgres "$stage_dir"
+git archive "$candidate" | sudo -u postgres tar -x -C "$stage_dir"
+test ! -e "$stage_dir/.env"
+git show "$candidate:scripts/ops/invoice_staging_smoke.py" > /root/mytoolbox-invoice-staging-smoke.py
+chmod 0600 /root/mytoolbox-invoice-staging-smoke.py
+sudo -u postgres /opt/mytoolbox/.venv/bin/python - "$stage_dir" < /root/mytoolbox-invoice-staging-smoke.py
+```
+
+目的：不切换生产工作树、不覆盖未提交配置，就能执行固定代码的恢复库验收。目录已存在、模块缺失、数据库版本不符或验收失败均停止；不要删除已有目录或修改数据库保护来继续。权限/解释器失败时先核对 postgres 对 `/opt/mytoolbox/.venv` 的读/执行权限；不改生产目录为777，不把生产环境文件复制到验收目录。
+
+### 已有独立 staging 的通用方式
 
 请在已经按平台部署手册创建的 staging 实例操作。不要把生产 `.env` 原样复制到 staging。
 
