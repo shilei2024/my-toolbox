@@ -92,7 +92,10 @@ class ToolRegistrySyncTest(unittest.TestCase):
         self.assertIn('/static/vendor/jszip/jszip-3.10.1.min.js', body)
         self.assertIn('await ensureJSZip()', body)
         self.assertNotIn('requestArchiveBatch', body)
-        self.assertNotIn('new FormData()', body)
+        extraction = body.split('async function processFiles', 1)[1].split('async function extractArchives', 1)[0]
+        self.assertNotIn('new FormData()', extraction)
+        self.assertIn('保存全部票据到报销助手', body)
+        self.assertIn('async function importRetained', body)
         self.assertNotIn('base64PDFToFile', body)
         self.assertNotIn("onclick=", body)
         self.assertNotIn("confirm(", body)

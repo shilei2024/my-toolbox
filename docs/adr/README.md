@@ -46,3 +46,5 @@
 | [0029](0029-customer-project-calendar-and-controlled-import.md) | 共享工作日日历与受控 Excel 导入边界 |
 | [0030](0030-customer-project-controlled-export.md) | 客户项目受控导出策略与文件安全边界 |
 | [0031](0031-customer-project-saved-views.md) | 客户项目个人与组织筛选视图边界 |
+
+- [ADR-0040：票据留存、打印与费用口径分离](0040-invoice-retention-and-accounting.md)。

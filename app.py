@@ -465,6 +465,9 @@ def _init_extensions(app: Flask) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
+    # Register domain metadata before development db.create_all() in _seed_admin.
+    from tools.reimbursement.models import ReimbursementAudit  # noqa: F401
+
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(customer_projects_bp)

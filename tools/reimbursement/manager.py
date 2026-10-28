@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import re
 import base64
@@ -15,6 +16,8 @@ from typing import Any
 from flask import Blueprint, current_app, g, has_request_context, jsonify, request, send_file
 from sqlalchemy import case, func, or_, select
 
+from tools.reimbursement.models import ReimbursementAudit
+from tools.reimbursement.retention import POLICIES, KINDS, money, month, allocate
 from extensions import db
 from customer_projects.models import Customer
 from models import (
@@ -254,12 +257,8 @@ def _period_dict(period: ReimbursementPeriod, with_stats: bool = True) -> dict[s
         "reimbursement_date": period.reimbursement_date.isoformat() if period.reimbursement_date else "",
     }
     if with_stats:
-        count, total = (
-            db.session.query(func.count(ReimbursementInvoice.id), func.coalesce(func.sum(ReimbursementInvoice.total_amount), 0))
-            .filter(ReimbursementInvoice.period_id == period.id)
-            .one()
-        )
-        result.update(invoice_count=int(count), total_amount=float(total or 0))
+        count = ReimbursementInvoice.query.filter_by(period_id=period.id).count()
+        result.update(invoice_count=int(count), total_amount=_summary(period)["total_amount"])
     return result
 
 
@@ -295,6 +294,12 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "file_url": invoice.file_url,
         "file_name": invoice.file_name,
         "file_size": invoice.file_size,
+        "inclusion_policy": invoice.inclusion_policy,
+        "document_kind": invoice.document_kind,
+        "occurrence_month": invoice.occurrence_month,
+        "settlement_month": invoice.settlement_month,
+        "print_selected": invoice.print_selected,
+        "amount_confirmed": invoice.amount_confirmed,
         "status": invoice.status,
         "status_label": STATUS_LABELS.get(invoice.status, invoice.status),
         "product_line": invoice.product_line,
@@ -598,10 +603,12 @@ def _set_active(period: ReimbursementPeriod) -> None:
 
 def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
     categories = _seed_categories(period.owner_type, period.owner_id)
-    invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+    all_invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+    invoices = [i for i in all_invoices if i.inclusion_policy == "expense"]
     dispatch_totals = _dispatch_vehicle_totals(period)
     dispatch_total = round(sum(dispatch_totals.values()), 2)
     vehicle_adjustment = 0.0
+    replaced_tax = 0.0
     by_category = []
     for category in categories:
         rows = [item for item in invoices if item.category_id == category.id]
@@ -612,7 +619,7 @@ def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
             "tax_amount": round(sum(float(item.tax_amount or 0) for item in rows), 2),
             "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
         }
-        if category.export_key == "vehicle" and dispatch_total:
+        if category.export_key == "vehicle" and dispatch_totals:
             # 派车单明细（公里 + 过桥费 + 停车费）是车辆费用的权威来源：
             # 同一产品线已有车辆类发票时以派车单为准，避免重复计入。
             covered = [
@@ -622,6 +629,7 @@ def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
             ]
             covered_total = sum(float(item.total_amount or 0) for item in covered)
             covered_tax = sum(float(item.tax_amount or 0) for item in covered)
+            replaced_tax += covered_tax
             vehicle_total = round(dispatch_total + row["total_amount"] - covered_total, 2)
             vehicle_tax = round(row["tax_amount"] - covered_tax, 2)
             vehicle_adjustment = round(vehicle_total - row["total_amount"], 2)
@@ -640,46 +648,69 @@ def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
                 "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
             }
         )
-    invoice_amount = round(sum(float(item.amount or 0) for item in invoices), 2)
-    invoice_tax = round(sum(float(item.tax_amount or 0) for item in invoices), 2)
+    invoice_tax = round(sum(float(item.tax_amount or 0) for item in invoices) - replaced_tax, 2)
     invoice_total = round(sum(float(item.total_amount or 0) for item in invoices), 2)
+    reconciliation = []
+    for occurrence in sorted({i.occurrence_month for i in all_invoices if i.document_kind == "toll_statement"}):
+        statements = [i for i in all_invoices if i.document_kind == "toll_statement" and i.occurrence_month == occurrence and i.amount_confirmed]
+        receipts = [i for i in all_invoices if i.document_kind == "toll" and i.occurrence_month == occurrence and i.amount_confirmed]
+        target = sum((Decimal(str(i.total_amount)) for i in statements), Decimal(0))
+        actual = sum((Decimal(str(i.total_amount)) for i in receipts), Decimal(0))
+        reconciliation.append({"occurrence_month": occurrence, "statement_total": str(target),
+            "receipt_total": str(actual), "difference": str(target - actual)})
     return {
-        "period": _period_dict(period),
+        "retained_count": sum(i.inclusion_policy == "retain" for i in all_invoices),
+        "review_count": sum(i.inclusion_policy == "review" or not i.amount_confirmed for i in all_invoices),
+        "toll_reconciliation": reconciliation,
+        "period": _period_dict(period, with_stats=False),
         "by_category": by_category,
         "by_status": by_status,
         "invoice_count": len(invoices),
-        "amount": round(invoice_amount + vehicle_adjustment, 2),
+        "amount": round(invoice_total + vehicle_adjustment - invoice_tax, 2),
         "tax_amount": invoice_tax,
         "total_amount": round(invoice_total + vehicle_adjustment, 2),
     }
 
 
-def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
+def _read_aux_values(period_id: int) -> list[dict[str, Any]]:
+    # Select scalar columns so a previously loaded ORM identity cannot supply
+    # cached data after another transaction committed a change.
+    rows = db.session.execute(select(
+        ReimbursementAuxDetail.id, ReimbursementAuxDetail.kind,
+        ReimbursementAuxDetail.sort_order, ReimbursementAuxDetail.data_json,
+    ).where(ReimbursementAuxDetail.period_id == period_id).order_by(ReimbursementAuxDetail.id)).all()
+    return [{"id": row.id, "kind": row.kind, "sort_order": row.sort_order,
+             "data": json.loads(row.data_json or "{}")} for row in rows]
+
+
+def _render_aux_values(values: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     result = {"entertainment": [], "vehicle": [], "travel": []}
-    rows = (
-        ReimbursementAuxDetail.query.filter_by(period_id=period_id)
-        .order_by(ReimbursementAuxDetail.kind, ReimbursementAuxDetail.sort_order)
-        .all()
-    )
     vehicle_rows = []
-    for row in rows:
-        value = json.loads(row.data_json or "{}")
+    for row in sorted(values, key=lambda item: (item["kind"], item["sort_order"], item["id"])):
+        value = dict(row["data"])
         customer = _owned_customer(value.get("customer_id"))
         if customer:
             value["customer"] = customer.short_name or customer.name
             value["customer_level"] = customer.grade or ""
-        if row.kind == "vehicle":
-            value["id"] = row.id
+        value["id"] = row["id"]
+        if row["kind"] == "vehicle":
             vehicle_rows.append(value)
-            continue
-        value["id"] = row.id
-        result.setdefault(row.kind, []).append(value)
+        else:
+            result.setdefault(row["kind"], []).append(value)
     result["entertainment"] = _sort_rows_by_date(result["entertainment"])
     result["travel"] = _sort_rows_by_date(result["travel"])
-    result["vehicle"] = _normalize_vehicle_rows(
-        _sort_rows_by_date(vehicle_rows), legacy_km_from_end=True
-    )
+    result["vehicle"] = _normalize_vehicle_rows(_sort_rows_by_date(vehicle_rows), legacy_km_from_end=True)
     return result
+
+
+def _aux_state(period_id: int) -> dict[str, Any]:
+    values = _read_aux_values(period_id)
+    snapshot = hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+    return {"aux": _render_aux_values(values), "aux_snapshot": snapshot}
+
+
+def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
+    return _aux_state(period_id)["aux"]
 
 
 def _dispatch_vehicle_totals(period: ReimbursementPeriod) -> dict[str, float]:
@@ -725,7 +756,7 @@ def _sync_invoice_aux(
     linked_detail: dict[str, Any] | None,
 ) -> None:
     """Create or update the detail row generated from an entertainment/travel invoice."""
-    desired_kind = _linked_kind(category)
+    desired_kind = _linked_kind(category) if invoice.inclusion_policy == "expense" else None
     matched: list[tuple[ReimbursementAuxDetail, dict[str, Any]]] = []
     rows = ReimbursementAuxDetail.query.filter_by(
         owner_type=invoice.owner_type, owner_id=invoice.owner_id
@@ -881,20 +912,29 @@ def _invoice_attachment_path(invoice: ReimbursementInvoice) -> Path | None:
 
 
 def _delete_invoice_attachment(invoice: ReimbursementInvoice) -> None:
+    if _attachment_is_shared(invoice):
+        return
     if not invoice.file_url.startswith("/tools/reimbursement/preview/"):
         return
-    filename = invoice.file_url.rsplit("/", 1)[-1]
-    file_id = re.sub(r"_(?:thumb|full)$", "", Path(filename).stem)
+    file_id = _attachment_file_id(invoice.file_url)
+    if file_id is None:
+        return
     ReimbursementAttachment.query.filter(
+        ReimbursementAttachment.owner_type == invoice.owner_type,
+        ReimbursementAttachment.owner_id == invoice.owner_id,
         ReimbursementAttachment.stored_name.like(f"{file_id}.%")
     ).delete(synchronize_session=False)
 
 
 def _invoice_family_paths(invoice: ReimbursementInvoice) -> list[Path]:
+    if _attachment_is_shared(invoice):
+        return []
     path = _invoice_attachment_path(invoice)
     if not path:
         return []
-    file_id = re.sub(r"_(?:thumb|full)$", "", path.stem)
+    file_id = _attachment_file_id(invoice.file_url)
+    if file_id is None:
+        return []
     upload_dir = path.parent
     return [
         item
@@ -905,6 +945,28 @@ def _invoice_family_paths(invoice: ReimbursementInvoice) -> list[Path]:
         for item in upload_dir.glob(f"{file_id}_*.png")
         if item.is_file() and item.parent.resolve() == upload_dir.resolve()
     ]
+
+
+def _attachment_file_id(file_url: str) -> str | None:
+    match = re.fullmatch(r"/tools/reimbursement/preview/([0-9a-f]{12})(?:_(?:thumb|full))?\.[a-z0-9]+", file_url or "", re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def _attachment_is_shared(invoice: ReimbursementInvoice) -> bool:
+    file_id = _attachment_file_id(invoice.file_url)
+    query = ReimbursementInvoice.query.filter(
+        ReimbursementInvoice.owner_type == invoice.owner_type,
+        ReimbursementInvoice.owner_id == invoice.owner_id,
+        ReimbursementInvoice.id != invoice.id,
+    )
+    if file_id is None:
+        return query.filter(ReimbursementInvoice.file_url == invoice.file_url).first() is not None
+    candidates = query.filter(ReimbursementInvoice.file_url.ilike(f"/tools/reimbursement/preview/{file_id}%")).all()
+    return any(_attachment_file_id(item.file_url) == file_id for item in candidates)
+
+
+def _aux_snapshot(period_id: int) -> str:
+    return hashlib.sha256(json.dumps(_read_aux_values(period_id), sort_keys=True).encode()).hexdigest()
 
 
 def _printable_invoice_pages(invoice: ReimbursementInvoice) -> list[str]:
@@ -944,7 +1006,7 @@ def _number_to_chinese(amount: float) -> str:
 
 
 def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
-    invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+    invoices = ReimbursementInvoice.query.filter_by(period_id=period.id, inclusion_policy="expense").all()
     categories = {c.id: c for c in _seed_categories(period.owner_type, period.owner_id)}
     groups: dict[str, dict[str, Any]] = {}
     grand = {key: 0.0 for _, key, _ in DEFAULT_CATEGORIES}
@@ -962,7 +1024,12 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
             },
         )
         category = categories.get(invoice.category_id)
+        has_amount = any(value != 0 for value in (invoice.amount, invoice.tax_amount, invoice.total_amount))
+        if category is None and has_amount:
+            raise ValueError("存在未分类的计费发票，请先补齐费用类别再导出")
         export_key = category.export_key if category else "other"
+        if export_key not in grand and has_amount:
+            raise ValueError("费用类别缺少有效导出科目，请先修正类别配置")
         total = float(invoice.total_amount or 0)
         if export_key in group["totals"]:
             group["totals"][export_key] += total
@@ -1014,6 +1081,19 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
             grand["vehicle"] -= existing
             group["totals"]["vehicle"] = round(amount, 2)
             grand["vehicle"] += round(amount, 2)
+
+    # The customer-level classification sheet uses the same vehicle replacement
+    # rule as the cover. Dispatch rows have no customer tier, so use 未分类.
+    if vehicle_totals:
+        for invoice in invoices:
+            category = categories.get(invoice.category_id)
+            if category and category.export_key == "vehicle" and (invoice.product_line or "未分类") in vehicle_totals:
+                values = levels[_invoice_customer_level(invoice) or "未分类"]
+                values["other"] -= float(invoice.total_amount or 0)
+                values["total"] -= float(invoice.total_amount or 0)
+        values = levels.setdefault("未分类", {"entertainment": 0.0, "travel": 0.0, "other": 0.0, "total": 0.0})
+        values["other"] += sum(vehicle_totals.values())
+        values["total"] += sum(vehicle_totals.values())
 
     total_all = round(sum(grand.values()), 2)
     return {
@@ -1343,6 +1423,90 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
 
 
 def register_routes(bp: Blueprint) -> None:
+    def vehicle_snapshot(period_id):
+        rows = ReimbursementAuxDetail.query.filter_by(period_id=period_id, kind="vehicle").order_by(ReimbursementAuxDetail.id).all()
+        values = [{"id": row.id, "data": json.loads(row.data_json)} for row in rows]
+        return rows, values, hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+    @bp.post("/api/periods/<int:period_id>/toll-allocation")
+    def allocate_tolls(period_id):
+        owner_type, owner_id = _owner()
+        period = ReimbursementPeriod.query.filter_by(id=period_id, owner_type=owner_type, owner_id=owner_id).with_for_update().first()
+        if not period:
+            return jsonify(error="周期不存在"), 404
+        data = _payload()
+        statement = ReimbursementInvoice.query.filter_by(id=data.get("statement_id"), period_id=period.id,
+            owner_type=owner_type, owner_id=owner_id, document_kind="toll_statement").with_for_update().first()
+        if not statement or not statement.amount_confirmed or not statement.file_url or not statement.occurrence_month:
+            return jsonify(error="请选择本期已上传原件、确认金额和发生月的通行账单"), 400
+        rows, before, snapshot = vehicle_snapshot(period.id)
+        selected_ids = data.get("row_ids")
+        if not isinstance(selected_ids, list) or not selected_ids or len(set(map(str, selected_ids))) != len(selected_ids):
+            return jsonify(error="请选择不重复的派车行"), 400
+        selected = [r for r in rows if r.id in selected_ids]
+        values = [json.loads(r.data_json) for r in selected]
+        if any(v.get("toll_statement_id") not in (None, statement.id) for v in values):
+            return jsonify(error="所选派车行已关联其他通行账单，请先撤销原分摊或选择其他行"), 409
+        if any(json.loads(r.data_json).get("toll_statement_id") == statement.id and r.id not in selected_ids for r in rows):
+            return jsonify(error="重新分摊须包含该账单上次分摊的所有行，或先撤销上次分摊"), 409
+        if len(selected) != len(selected_ids) or any(str(v.get("date") or "")[:7] != statement.occurrence_month for v in values):
+            return jsonify(error="派车行须属于本周期及账单发生自然月"), 400
+        try:
+            amounts = allocate(statement.total_amount, [v.get("km_total") for v in values])
+            if "amounts" in data:
+                supplied = data["amounts"]
+                if not isinstance(supplied, list) or len(supplied) != len(amounts):
+                    raise ValueError("分摊金额数量不匹配")
+                amounts = [str(money(v)) for v in supplied]
+                if sum(map(Decimal, amounts)) != money(statement.total_amount):
+                    raise ValueError("分摊合计必须等于账单确认金额")
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        statement_snapshot = hashlib.sha256(json.dumps(_invoice_dict(statement), sort_keys=True).encode()).hexdigest()
+        if data.get("confirm") is not True:
+            return jsonify(success=True, snapshot=snapshot, statement_snapshot=statement_snapshot,
+                total=str(statement.total_amount), rows=[{"id": r.id, "date": v.get("date"), "amount": a} for r, v, a in zip(selected, values, amounts)])
+        if data.get("snapshot") != snapshot or data.get("statement_snapshot") != statement_snapshot:
+            return jsonify(error="账单或派车单已变更，请重新预览"), 409
+        for row, value, amount in zip(selected, values, amounts):
+            value.update(toll_fee=amount, toll_statement_id=statement.id)
+            row.data_json = json.dumps(value, ensure_ascii=False)
+        db.session.flush()
+        _, after, after_snapshot = vehicle_snapshot(period.id)
+        audit(period.id, "toll.allocate", {"statement_id": statement.id, "before": before,
+            "after": after, "after_snapshot": after_snapshot})
+        db.session.commit()
+        return jsonify(success=True, **_aux_state(period.id))
+
+    @bp.get("/api/periods/<int:period_id>/audits")
+    def list_audits(period_id):
+        owner_type, owner_id = _owner()
+        if not _owned_period(period_id, owner_type, owner_id):
+            return jsonify(error="周期不存在"), 404
+        rows = ReimbursementAudit.query.filter_by(period_id=period_id, owner_type=owner_type, owner_id=owner_id).order_by(ReimbursementAudit.id.desc()).limit(100).all()
+        return jsonify(audits=[{"id": r.id, "action": r.action, "created_at": r.created_at.isoformat(), "data": json.loads(r.data_json)} for r in rows])
+
+    @bp.post("/api/periods/<int:period_id>/toll-allocation/undo")
+    def undo_tolls(period_id):
+        owner_type, owner_id = _owner()
+        period = ReimbursementPeriod.query.filter_by(id=period_id, owner_type=owner_type, owner_id=owner_id).with_for_update().first()
+        if not period:
+            return jsonify(error="周期不存在"), 404
+        entry = ReimbursementAudit.query.filter_by(id=_payload().get("audit_id"), period_id=period.id,
+            owner_type=owner_type, owner_id=owner_id, action="toll.allocate").first()
+        if not entry:
+            return jsonify(error="分摊记录不存在"), 404
+        record = json.loads(entry.data_json)
+        rows, _, snapshot = vehicle_snapshot(period.id)
+        if snapshot != record["after_snapshot"]:
+            return jsonify(error="派车单在分摊后已变更，无法直接撤销，请重新核对"), 409
+        previous = {v["id"]: v["data"] for v in record["before"]}
+        for row in rows:
+            row.data_json = json.dumps(previous[row.id], ensure_ascii=False)
+        audit(period.id, "toll.undo", {"audit_id": entry.id})
+        db.session.commit()
+        return jsonify(success=True, **_aux_state(period.id))
+
     @bp.get("/api/bootstrap")
     def bootstrap():
         owner_type, owner_id = _owner()
@@ -1390,7 +1554,7 @@ def register_routes(bp: Blueprint) -> None:
         total_count, total_amount, pending_count = (
             db.session.query(
                 func.count(ReimbursementInvoice.id),
-                func.coalesce(func.sum(ReimbursementInvoice.total_amount), 0),
+                func.coalesce(func.sum(case((ReimbursementInvoice.inclusion_policy == "expense", ReimbursementInvoice.total_amount), else_=0)), 0),
                 func.coalesce(func.sum(case((ReimbursementInvoice.status == "pending", 1), else_=0)), 0),
             )
             .filter(
@@ -1414,7 +1578,7 @@ def register_routes(bp: Blueprint) -> None:
             recent=[_invoice_dict(item) for item in invoices],
             stats={
                 "invoice_count": int(total_count),
-                "total_amount": float(total_amount or 0),
+                "total_amount": _summary(active_period)["total_amount"] if active_period else 0,
                 "pending_count": int(pending_count or 0),
                 "period_id": active_period.id if active_period else None,
                 "period_name": active_period.name if active_period else "",
@@ -1560,19 +1724,21 @@ def register_routes(bp: Blueprint) -> None:
     @bp.delete("/api/periods/<int:period_id>")
     def remove_period(period_id: int):
         owner_type, owner_id = _owner()
-        period = _owned_period(period_id, owner_type, owner_id)
+        period = ReimbursementPeriod.query.filter_by(id=period_id, owner_type=owner_type, owner_id=owner_id).with_for_update().first()
         if not period:
             return jsonify(error="周期不存在"), 404
         invoice_count = ReimbursementInvoice.query.filter_by(period_id=period.id).count()
         if invoice_count and request.args.get("force") != "1":
             return jsonify(error="该周期已有发票，请二次确认", invoice_count=invoice_count, needs_confirmation=True), 409
         period_invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
+        # Remove all departing references first so shared-file checks only see
+        # records that will survive this period deletion, including URL aliases.
+        ReimbursementInvoice.query.filter_by(period_id=period.id).delete(synchronize_session=False)
         for invoice in period_invoices:
             for path in set(_invoice_family_paths(invoice)):
                 path.unlink(missing_ok=True)
             _delete_invoice_attachment(invoice)
-        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
-        ReimbursementInvoice.query.filter_by(period_id=period.id).delete()
         db.session.delete(period)
         db.session.commit()
         return jsonify(success=True)
@@ -1865,6 +2031,9 @@ def register_routes(bp: Blueprint) -> None:
         period_id = request.args.get("period_id", type=int)
         category_id = request.args.get("category_id", type=int)
         status = (request.args.get("status") or "").strip()
+        document_kind = request.args.get("document_kind")
+        if document_kind in KINDS:
+            query = query.filter(ReimbursementInvoice.document_kind == document_kind)
         search = (request.args.get("q") or "").strip()
         if period_id:
             query = query.filter(ReimbursementInvoice.period_id == period_id)
@@ -1885,7 +2054,35 @@ def register_routes(bp: Blueprint) -> None:
         )
 
     def save_invoice(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | None:
-        period = _owned_period(int(data.get("period_id") or 0), invoice.owner_type, invoice.owner_id)
+        previous_file_url = invoice.file_url if invoice.id else None
+        kind = data.get("document_kind", invoice.document_kind or "invoice")
+        policy = data.get("inclusion_policy", invoice.inclusion_policy or ("expense" if kind == "invoice" else "retain"))
+        if not isinstance(kind, str) or not isinstance(policy, str) or kind not in KINDS or policy not in POLICIES:
+            return "票据类型或计入口径无效"
+        if kind in {"fuel", "toll", "toll_statement"} and policy == "expense":
+            return "加油票、零散过路费和通行账单仅作留存；通行费用请从派车单计入"
+        try:
+            for key in ("occurrence_month", "settlement_month"):
+                value = data.get(key, getattr(invoice, key) or "")
+                setattr(invoice, key, month(value) if value else "")
+            for key in ("print_selected", "amount_confirmed"):
+                if key in data and not isinstance(data[key], bool):
+                    return "打印选择及金额确认须为布尔值"
+            confirmed = data.get("amount_confirmed", invoice.amount_confirmed if invoice.id else kind == "invoice")
+            if policy == "expense" and not confirmed:
+                return "计入费用前请确认金额"
+            for key in ("amount", "tax_amount", "total_amount"):
+                if data.get(key) not in (None, ""):
+                    money(data[key])
+        except ValueError as exc:
+            return str(exc)
+        invoice.document_kind, invoice.inclusion_policy = kind, policy
+        invoice.amount_confirmed = confirmed
+        invoice.print_selected = data.get("print_selected", invoice.print_selected if invoice.id else kind != "toll_statement")
+        if kind == "toll" and not invoice.id and "print_selected" not in data:
+            invoice.print_selected = confirmed and money(data.get("total_amount") or 0) >= 5
+        period = ReimbursementPeriod.query.filter_by(id=int(data.get("period_id") or 0),
+            owner_type=invoice.owner_type, owner_id=invoice.owner_id).with_for_update().first()
         if not period:
             return "请选择有效的报销周期"
         category = _owned_category(data.get("category_id"), invoice.owner_type, invoice.owner_id)
@@ -1918,11 +2115,25 @@ def register_routes(bp: Blueprint) -> None:
         for key in ("vendor", "description", "file_url", "file_name", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
+        if invoice.file_url:
+            filename = invoice.file_url.removeprefix("/tools/reimbursement/preview/")
+            attachment = ReimbursementAttachment.query.filter_by(owner_type=invoice.owner_type,
+                owner_id=invoice.owner_id, stored_name=filename).first()
+            # Existing disk-only historical records remain editable, but no new
+            # record may claim an arbitrary URL or another owner's attachment.
+            legacy_unchanged = invoice.document_kind == "invoice" and previous_file_url == invoice.file_url
+            if not attachment and not legacy_unchanged:
+                return "请上传当前账号的票据原件"
         if data.get("status") in STATUS_LABELS:
             invoice.status = data["status"]
         elif not invoice.status:
             invoice.status = "pending"
         return None
+
+    def audit(period_id, action, payload):
+        owner_type, owner_id = _owner()
+        db.session.add(ReimbursementAudit(owner_type=owner_type, owner_id=owner_id,
+            period_id=period_id, action=action, data_json=json.dumps(payload, ensure_ascii=False)))
 
     @bp.post("/api/invoices")
     def create_invoice():
@@ -1932,10 +2143,16 @@ def register_routes(bp: Blueprint) -> None:
         error = save_invoice(invoice, data)
         if error:
             return jsonify(error=error), 400
+        if invoice.document_kind != "invoice" and invoice.file_url:
+            existing = ReimbursementInvoice.query.filter_by(owner_type=owner_type, owner_id=owner_id,
+                file_url=invoice.file_url, period_id=invoice.period_id).first()
+            if existing:
+                return jsonify(success=True, duplicate=True, invoice=_invoice_dict(existing)), 200
         db.session.add(invoice)
         db.session.flush()
         category = _owned_category(invoice.category_id, owner_type, owner_id)
         _sync_invoice_aux(invoice, category, data.get("linked_detail"))
+        audit(invoice.period_id, "invoice.create", {"invoice_id": invoice.id, "policy": invoice.inclusion_policy})
         db.session.commit()
         return jsonify(success=True, invoice=_invoice_dict(invoice)), 201
 
@@ -1945,12 +2162,21 @@ def register_routes(bp: Blueprint) -> None:
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
         if not invoice:
             return jsonify(error="发票不存在"), 404
+        db.session.execute(select(ReimbursementPeriod).where(ReimbursementPeriod.id == invoice.period_id).with_for_update())
+        db.session.refresh(invoice)
+        if invoice.document_kind == "toll_statement" and any(
+            json.loads(r.data_json).get("toll_statement_id") == invoice.id
+            for r in ReimbursementAuxDetail.query.filter_by(period_id=invoice.period_id, kind="vehicle").all()
+        ):
+            return jsonify(error="此账单已分摊，请先撤销分摊再修改账单"), 409
         data = _payload()
+        before = _invoice_dict(invoice)
         error = save_invoice(invoice, data)
         if error:
             return jsonify(error=error), 400
         category = _owned_category(invoice.category_id, owner_type, owner_id)
         _sync_invoice_aux(invoice, category, data.get("linked_detail"))
+        audit(invoice.period_id, "invoice.update", {"invoice_id": invoice.id, "before": before, "after": _invoice_dict(invoice)})
         db.session.commit()
         return jsonify(success=True, invoice=_invoice_dict(invoice))
 
@@ -1960,6 +2186,14 @@ def register_routes(bp: Blueprint) -> None:
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
         if not invoice:
             return jsonify(error="发票不存在"), 404
+        db.session.execute(select(ReimbursementPeriod).where(ReimbursementPeriod.id == invoice.period_id).with_for_update())
+        db.session.refresh(invoice)
+        if invoice.document_kind == "toll_statement" and any(
+            json.loads(r.data_json).get("toll_statement_id") == invoice.id
+            for r in ReimbursementAuxDetail.query.filter_by(period_id=invoice.period_id, kind="vehicle").all()
+        ):
+            return jsonify(error="此账单已分摊，请先撤销分摊再删除账单"), 409
+        audit(invoice.period_id, "invoice.delete", {"invoice_id": invoice.id, "policy": invoice.inclusion_policy})
         for path in set(_invoice_family_paths(invoice)):
             path.unlink(missing_ok=True)
         _delete_invoice_attachment(invoice)
@@ -1984,7 +2218,7 @@ def register_routes(bp: Blueprint) -> None:
             .all()
         )
         rendered_pages = []
-        for index, invoice in enumerate(invoices, 1):
+        for index, invoice in enumerate((i for i in invoices if i.print_selected), 1):
             pages = _printable_invoice_pages(invoice)
             if not pages:
                 rendered_pages.append(
@@ -2017,7 +2251,7 @@ def register_routes(bp: Blueprint) -> None:
         period = _owned_period(period_id, owner_type, owner_id)
         if not period:
             return jsonify(error="周期不存在"), 404
-        return jsonify(success=True, summary=_summary(period), aux=_aux_rows(period.id))
+        return jsonify(success=True, summary=_summary(period), **_aux_state(period.id))
 
     @bp.put("/api/aux/<int:period_id>")
     def save_aux(period_id: int):
@@ -2025,7 +2259,12 @@ def register_routes(bp: Blueprint) -> None:
         period = _owned_period(period_id, owner_type, owner_id)
         if not period:
             return jsonify(error="周期不存在"), 404
+        db.session.execute(select(ReimbursementPeriod).where(ReimbursementPeriod.id == period.id).with_for_update())
         data = _payload()
+        current_snapshot = _aux_snapshot(period.id)
+        has_rows = ReimbursementAuxDetail.query.filter_by(period_id=period.id).first() is not None
+        if data.get("_snapshot") != current_snapshot and (has_rows or data.get("_snapshot") is not None):
+            return jsonify(error="明细已变更，请刷新汇总后核对并重新保存"), 409
         prepared: dict[str, list[dict[str, Any]]] = {}
         for kind in ("entertainment", "vehicle", "travel"):
             incoming_rows = [dict(row) for row in (data.get(kind) or [])]
@@ -2044,7 +2283,15 @@ def register_routes(bp: Blueprint) -> None:
                     else:
                         row.pop("customer_id", None)
                         row.pop("customer_level", None)
+            if kind != "vehicle":
+                for row in incoming_rows:
+                    if row.get("invoice_id"):
+                        linked = ReimbursementInvoice.query.filter_by(id=row["invoice_id"], period_id=period.id,
+                            owner_type=owner_type, owner_id=owner_id, inclusion_policy="expense").first()
+                        if not linked:
+                            return jsonify(error="明细关联的票据不可计入当前周期"), 400
             prepared[kind] = incoming_rows
+        audit(period.id, "details.replace", {"before": _aux_rows(period.id), "after": prepared})
         ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
         for kind, incoming_rows in prepared.items():
             for index, row in enumerate(incoming_rows):
@@ -2061,7 +2308,7 @@ def register_routes(bp: Blueprint) -> None:
                     )
                 )
         db.session.commit()
-        return jsonify(success=True, aux=_aux_rows(period.id))
+        return jsonify(success=True, **_aux_state(period.id))
 
     @bp.get("/api/export/<kind>/<int:period_id>")
     def export_xls(kind: str, period_id: int):
