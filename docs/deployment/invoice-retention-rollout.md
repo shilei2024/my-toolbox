@@ -1,11 +1,12 @@
 # 发票留存功能发布与回滚
 
-状态：本地实现；尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
+状态：候选代码独立审查及 CI 通过，备份已真实恢复；恢复库迁移与预发布验收进行中，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
 方案见 [实施计划](../product/invoice-retention-plan.md)、[API](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)。
 
 ## 发布前 Go/No-Go
 
-- [ ] 独立评审通过；PR CI 通过。当前 develop 落后 main，先由维护人确定同步/发布分支路径，禁止把旧 develop 直接发布。
+- [x] 业务候选 9199c0d 已经独立审查通过，本地 217 项与 PR CI 均通过；后续提交仍须 CI 验证。
+- [ ] 当前 develop 落后 main，须先同步生产基线并走集成/发布分支流程，禁止把旧 develop 直接发布。
 - [ ] 预发布使用独立数据库与附件目录，不能让 Preview 读写生产报销数据。
 - [ ] 生产备份恢复到隔离 PostgreSQL，演练 d3e4f5a6b7c8 → e4f5a6b7c8d9，检查旧记录 expense/invoice/打印选中/金额确认均保留。
 - [ ] 记录本次备份位置、恢复结果、发布前 SHA 和负责人。
@@ -28,7 +29,15 @@
 
 `pg_restore --list` 只是归档目录检查，**不代表恢复验证完成**，脚本始终标记 restore_verified=NO；下一步须恢复到独立库并演练迁移。该备份用于演练，数据库 dump 与在线附件目录并非同一文件系统原子快照；正式更新前仍须按维护窗口安排新的最终备份。
 
-操作者已反馈演练备份 BACKUP_OK（dump 8,119,101 字节，源 SHA f086b4f），恢复尚未完成。创建恢复库时，PostgreSQL 16 的 `createdb` **没有** `--connection-limit` 参数；先用 `createdb --template=template0 --owner=postgres <全新测试库名>` 创建，再连接维护库执行 `REVOKE ALL ON DATABASE <测试库名> FROM PUBLIC; ALTER DATABASE <测试库名> CONNECTION LIMIT 3;`。不得把测试库名替换为生产库名，遇到同名库则停止而不是删除重建。依据：[createdb](https://www.postgresql.org/docs/16/app-createdb.html)、[ALTER DATABASE](https://www.postgresql.org/docs/16/sql-alterdatabase.html)。
+操作者已反馈演练备份 BACKUP_OK（dump 8,119,101 字节，源 SHA f086b4f）；随后恢复已成功（见下文）。创建恢复库时，PostgreSQL 16 的 `createdb` **没有** `--connection-limit` 参数；先用 `createdb --template=template0 --owner=postgres <全新测试库名>` 创建，再连接维护库执行 `REVOKE ALL ON DATABASE <测试库名> FROM PUBLIC; ALTER DATABASE <测试库名> CONNECTION LIMIT 3;`。不得把测试库名替换为生产库名，遇到同名库则停止而不是删除重建。依据：[createdb](https://www.postgresql.org/docs/16/app-createdb.html)、[ALTER DATABASE](https://www.postgresql.org/docs/16/sql-alterdatabase.html)。
+
+恢复随后已由操作者验证成功：独立库仍为 d3e4f5a6b7c8，63 条发票、79 个附件，输出 RESTORE_OK。此后不得将生产服务连接切到该测试库。
+
+本次迁移演练工件 `scripts/ops/invoice_retention_rehearsal.sql` 由真实 Alembic revision 离线生成 PostgreSQL DDL，专用于这一次发布，不是通用迁移服务。脚本在任何 DDL 前校验精确指定的恢复库名和旧迁移版本，在同一 psql 会话执行升级、降级、再升级；验证全部历史发票行、附件含 BLOB 内容的指纹未变，新增口径和打印默认值保留、审计表和索引存在，最后停留 e4f5a6b7c8d9 供候选版本验收。不导入 Flask、不读取生产配置、不重启、不修改生产库，不新增基础设施。
+
+用 `git show <PINNED_SHA>:scripts/ops/invoice_retention_rehearsal.sql` 提取到受限文件后，只允许 `psql -X --set=ON_ERROR_STOP=1 --dbname=mytoolbox_invoice_verify_20261028_111850` 执行。成功输出 UPGRADE_OK、ROLLBACK_OK、REUPGRADE_OK、MIGRATION_REHEARSAL_OK。未见最终成功标记须停下诊断，不能改脚本中的数据库名保护或盲目重跑。该脚本**禁止在生产执行**；生产仅执行正常受控 Alembic upgrade，生产不 downgrade。本地契约测试确认工件与当前 revision 的实际 PostgreSQL DDL 完全一致，真实执行结果由操作者反馈后记录。
+
+该 SQL 工件已独立只读复核通过，迁移契约测试 2 项通过；另在本机临时 PostgreSQL 18.6 集群上用合成发票/BLOB 执行三段迁移及错误库名拒绝测试，全部通过，临时服务已停止。这不能替代服务器 PostgreSQL 16.14 上的真实备份恢复库验证，后者仍等待操作者执行。
 
 2026-10-28 独立审查发现旧明细覆盖分摊、跨账单覆盖、历史附件别名误删、未分类税额遗漏和周期删除遗留原件五项问题，修复与回归已加入候选代码，必须复核后才能发布。更新后已打开的旧页面保存明细可能收到 409，需刷新后核对；不能绕过快照强制覆盖。
 
