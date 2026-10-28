@@ -1,6 +1,6 @@
 # 发票留存功能发布与回滚
 
-状态：0.9.47主站已更新到6239408并完成e4迁移；发布中权限故障已按下文恢复，操作者确认本机/公网HTTP200。用户实际业务验收待反馈。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
+状态：0.9.47主站已更新到6239408并完成e4迁移；发布中权限故障已按下文恢复，操作者确认本机/公网HTTP200，并确认历史金额一致、新增加油票/仅留存选择可用、提取页阈值/完整归档入口可见。网站基础上线验收通过。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
 方案见 [实施计划](../product/invoice-retention-plan.md)、[API](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)。
 
 ## 发布前 Go/No-Go

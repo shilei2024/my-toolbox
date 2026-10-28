@@ -63,6 +63,6 @@ Golden Rule五项：会短暂停主站，用户已授权生产部署，服务器
 
 ## 生产权限故障修复（2026-10-28）
 
-实际6239408发布已完成最终备份、代码及e4迁移/历史指纹校验，但HTTPS健康检查失败，脚本按保护停写。现场确认app.py/models.py及新模块为root:root 0600，服务用户www-data；全局umask077被Git检出继承，导致代码不可读。此前Windows/mock测试遗漏了Linux实际检出行为。操作者按限定8个已审核运行文件恢复0644并启动后，反馈active、LOCAL_HTTP=200、PUBLIC_HTTP=200；未重做迁移、未回滚数据。真实用户业务验收仍待反馈。
+实际6239408发布已完成最终备份、代码及e4迁移/历史指纹校验，但HTTPS健康检查失败，脚本按保护停写。现场确认app.py/models.py及新模块为root:root 0600，服务用户www-data；全局umask077被Git检出继承，导致代码不可读。此前Windows/mock测试遗漏了Linux实际检出行为。操作者按限定8个已审核运行文件恢复0644并启动后，反馈active、LOCAL_HTTP=200、PUBLIC_HTTP=200；未重做迁移、未回滚数据。用户随后确认历史金额一致、加油票/留存选择可用、提取阈值/完整归档入口可见，网站基础上线验收通过。
 
 Golden Rule：此补丁只改运维脚本，不改变运行中业务/DB；继续复用既有Git/备份边界，避免形成新发布系统；标准库subprocess子进程umask参数无需资源或依赖；单独Git子进程022、父进程077清晰可维护；符合既有systemd架构和秘密隔离。范围scripts/ops/invoice_release.py、tests/test_invoice_release.py和发布文档/CHANGELOG。Linux CI用真实临时Git仓库，验证普通代码0644、执行文件/目录0755，备份及日志仍0600/0700；Windows明确跳过真实POSIX测试，mock同时断言子进程umask。无新增迁移，现有生产服务无需为脚本补丁再次停机；禁止重新跑本次只支持旧SHA的完整发布命令。紧急恢复只修Git认可的公开代码权限，不递归chmod，不触碰.env/上传/备份/Caddy。补丁经hotfix PR评审/CI后同步main及develop。
