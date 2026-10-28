@@ -16,6 +16,18 @@
 
 缺少任一项不能上线；本地 SQLite 迁移及测试成功不能替代 PostgreSQL 演练。
 
+## 已核实的服务器基线与演练备份
+
+2026-10-28 操作者提供的只读检查：生产主站 SHA 为 f086b4f，systemd active，Python 3.12.3；PostgreSQL 与 pg_dump/pg_restore 同为 16.14，业务库约 22MB，迁移 d3e4f5a6b7c8。服务器尚有未提交的 Caddy 配置及本地备份，禁止 reset/clean 删除；后续发布要保留并核对这些改动。服务器运行环境以实际输出为准。
+
+新增 `scripts/ops/invoice_backup.py` 供操作者在 Linux 服务器从部署目录手动执行（root）。可通过 `git fetch` + `git show <PINNED_SHA>:scripts/ops/invoice_backup.py` 提取到 `/root`，无需切换生产分支或更新应用工作树。执行前检查提取命令成功，不运行不完整文件。
+
+脚本从运行中的 mytoolbox 环境及项目 config 的相同优先级确定数据库，只做只读版本/容量检查和 pg_dump，不导入 Flask、不迁移、不重启、不恢复、不删除文件。确认数据库与工具主版本相同、可用磁盘足够后，在 `/var/backups/mytoolbox` 创建随机唯一的 0700 目录，保存数据库 custom dump、发票附件、环境文件、Caddy 当前文件及其 Git diff、服务配置、Git SHA 和 SHA-256 manifest；文件均 0600。libpq 使用受限连接配置文件，连接凭据不进入命令参数、输出或子进程环境，说明见 [PostgreSQL 连接服务文件](https://www.postgresql.org/docs/16/libpq-pgservice.html)。
+
+成功仅在所有步骤完成后生成 COMPLETE 并输出 BACKUP_OK 和备份位置。失败输出 BACKUP_FAILED，保留受保护的部分文件供本机排查，不把连接错误直接发到聊天。备份目录包含机密，禁止上传仓库、工单或聊天。
+
+`pg_restore --list` 只是归档目录检查，**不代表恢复验证完成**，脚本始终标记 restore_verified=NO；下一步须恢复到独立库并演练迁移。该备份用于演练，数据库 dump 与在线附件目录并非同一文件系统原子快照；正式更新前仍须按维护窗口安排新的最终备份。
+
 ## 预发布验证（操作者服务器终端）
 
 请在已经按平台部署手册创建的 staging 实例操作。不要把生产 `.env` 原样复制到 staging。
