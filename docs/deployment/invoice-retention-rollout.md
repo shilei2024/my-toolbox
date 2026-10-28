@@ -28,6 +28,10 @@
 
 `pg_restore --list` 只是归档目录检查，**不代表恢复验证完成**，脚本始终标记 restore_verified=NO；下一步须恢复到独立库并演练迁移。该备份用于演练，数据库 dump 与在线附件目录并非同一文件系统原子快照；正式更新前仍须按维护窗口安排新的最终备份。
 
+操作者已反馈演练备份 BACKUP_OK（dump 8,119,101 字节，源 SHA f086b4f），恢复尚未完成。创建恢复库时，PostgreSQL 16 的 `createdb` **没有** `--connection-limit` 参数；先用 `createdb --template=template0 --owner=postgres <全新测试库名>` 创建，再连接维护库执行 `REVOKE ALL ON DATABASE <测试库名> FROM PUBLIC; ALTER DATABASE <测试库名> CONNECTION LIMIT 3;`。不得把测试库名替换为生产库名，遇到同名库则停止而不是删除重建。依据：[createdb](https://www.postgresql.org/docs/16/app-createdb.html)、[ALTER DATABASE](https://www.postgresql.org/docs/16/sql-alterdatabase.html)。
+
+2026-10-28 独立审查发现旧明细覆盖分摊、跨账单覆盖、历史附件别名误删、未分类税额遗漏和周期删除遗留原件五项问题，修复与回归已加入候选代码，必须复核后才能发布。更新后已打开的旧页面保存明细可能收到 409，需刷新后核对；不能绕过快照强制覆盖。
+
 ## 预发布验证（操作者服务器终端）
 
 请在已经按平台部署手册创建的 staging 实例操作。不要把生产 `.env` 原样复制到 staging。

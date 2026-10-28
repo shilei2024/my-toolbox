@@ -1,6 +1,8 @@
 import json
 import unittest
+import tempfile
 from decimal import Decimal
+from unittest.mock import patch
 from flask import Blueprint, Flask
 from extensions import db, login_manager
 from models import ReimbursementAttachment, ReimbursementAuxDetail, ReimbursementInvoice
@@ -11,7 +13,10 @@ from tools.reimbursement.retention import allocate, money, month
 class RetentionTests(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
-        self.app.config.update(SECRET_KEY="test", TESTING=True, SQLALCHEMY_DATABASE_URI="sqlite:///:memory:")
+        self.upload_root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.upload_root.cleanup)
+        self.app.config.update(SECRET_KEY="test", TESTING=True, UPLOAD_DIR=self.upload_root.name,
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:")
         db.init_app(self.app)
         login_manager.init_app(self.app)
         login_manager.user_loader(lambda _: None)
@@ -136,3 +141,106 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["duplicate"])
         self.assertEqual(self.invoice(document_kind="toll", file_url="https://example.com/other.pdf").status_code, 400)
+
+    def allocate_bill(self, bill, ids):
+        path = f"/rb/api/periods/{self.period}/toll-allocation"
+        body = {"statement_id":bill["id"], "row_ids":ids}
+        preview = self.client.post(path, json=body)
+        self.assertEqual(preview.status_code, 200)
+        body.update(snapshot=preview.json["snapshot"], statement_snapshot=preview.json["statement_snapshot"], confirm=True)
+        result = self.client.post(path, json=body)
+        self.assertEqual(result.status_code, 200)
+        return result.json
+
+    def test_stale_or_missing_aux_snapshot_cannot_erase_allocation(self):
+        bill = self.statement()
+        ids = self.vehicles()
+        old = self.client.get(f"/rb/api/summary/{self.period}").json
+        self.allocate_bill(bill, ids[:2])
+        path = f"/rb/api/aux/{self.period}"
+        self.assertEqual(self.client.put(path, json={**old["aux"], "_snapshot":old["aux_snapshot"]}).status_code, 409)
+        self.assertEqual(self.client.put(path, json=old["aux"]).status_code, 409)
+        latest = self.client.get(f"/rb/api/summary/{self.period}").json
+        self.assertEqual(sum(Decimal(str(r.get("toll_fee") or 0)) for r in latest["aux"]["vehicle"]), Decimal("590.48"))
+        saved = self.client.put(path, json={**latest["aux"], "_snapshot":latest["aux_snapshot"]})
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn("aux_snapshot", saved.json)
+
+    def test_interleaved_commit_cannot_pair_old_rows_with_new_token(self):
+        from tools.reimbursement import manager
+        self.vehicles()
+        render = manager._render_aux_values
+        counter = [0]
+
+        def interleaved(values):
+            response_rows = render(values)
+            counter[0] += 1
+            row = ReimbursementAuxDetail.query.filter_by(period_id=self.period, kind="vehicle").first()
+            value = json.loads(row.data_json)
+            value["toll_fee"] = str(77 + counter[0])
+            row.data_json = json.dumps(value)
+            db.session.commit()
+            return response_rows
+
+        with patch.object(manager, "_render_aux_values", side_effect=interleaved):
+            old = self.client.get(f"/rb/api/summary/{self.period}").json
+        latest = self.client.get(f"/rb/api/summary/{self.period}").json
+        self.assertNotEqual(old["aux_snapshot"], latest["aux_snapshot"])
+        self.assertEqual(self.client.put(f"/rb/api/aux/{self.period}",
+            json={**old["aux"], "_snapshot":old["aux_snapshot"]}).status_code, 409)
+        after = self.client.get(f"/rb/api/summary/{self.period}").json
+        self.assertEqual(after["aux"], latest["aux"])
+
+    def test_second_statement_cannot_overwrite_first(self):
+        bill = self.statement()
+        ids = self.vehicles()
+        second = self.invoice(document_kind="toll_statement", total_amount="100", amount_confirmed=True,
+            occurrence_month="2026-06").json["invoice"]
+        with self.app.app_context():
+            db.session.get(ReimbursementInvoice, second["id"]).file_url = bill["file_url"]
+            db.session.commit()
+        self.allocate_bill(bill, ids[:2])
+        response = self.client.post(f"/rb/api/periods/{self.period}/toll-allocation",
+            json={"statement_id":second["id"], "row_ids":ids[:2]})
+        self.assertEqual(response.status_code, 409)
+        aux = self.client.get(f"/rb/api/summary/{self.period}").json["aux"]
+        self.assertEqual(sum(Decimal(str(r.get("toll_fee") or 0)) for r in aux["vehicle"]), Decimal("590.48"))
+
+    def test_preview_alias_delete_preserves_shared_original(self):
+        bill = self.statement()
+        with self.app.app_context():
+            alias = ReimbursementInvoice(owner_type="anon", owner_id="retention-owner", period_id=self.period,
+                file_url="/tools/reimbursement/preview/123456789abc_thumb.png", file_name="preview.png")
+            db.session.add(alias)
+            db.session.commit()
+            alias_id = alias.id
+        self.assertEqual(self.client.delete(f"/rb/api/invoices/{alias_id}").status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(ReimbursementAttachment.query.count(), 1)
+            self.assertIsNotNone(db.session.get(ReimbursementInvoice, bill["id"]))
+
+    def test_uncategorized_invoice_preserves_tax_and_requires_export_classification(self):
+        response = self.client.post("/rb/api/invoices", json={"period_id":self.period, "office_id":self.office,
+            "amount":"100", "tax_amount":"10", "total_amount":"110"})
+        self.assertEqual(response.status_code, 201)
+        summary = self.client.get(f"/rb/api/summary/{self.period}").json["summary"]
+        self.assertEqual((summary["amount"], summary["tax_amount"], summary["total_amount"]), (100, 10, 110))
+        self.assertEqual(self.client.get(f"/rb/api/export/cover/{self.period}").status_code, 422)
+
+    def test_period_delete_cleans_retained_aliases_but_preserves_other_period_reference(self):
+        bill = self.statement()
+        other = self.client.post("/rb/api/periods", json=dict(start_year=2026, start_month=8,
+            end_year=2026, end_month=9)).json["period"]["id"]
+        with self.app.app_context():
+            survivor = ReimbursementInvoice(owner_type="anon", owner_id="retention-owner", period_id=other,
+                file_url="/tools/reimbursement/preview/123456789abc_full.png", file_name="original.pdf", inclusion_policy="review")
+            db.session.add(survivor)
+            db.session.commit()
+        self.assertEqual(self.client.delete(f"/rb/api/periods/{self.period}?force=1").status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(ReimbursementAttachment.query.count(), 1)
+            self.assertEqual(ReimbursementInvoice.query.count(), 1)
+        self.assertEqual(self.client.delete(f"/rb/api/periods/{other}?force=1").status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(ReimbursementAttachment.query.count(), 0)
+            self.assertEqual(ReimbursementInvoice.query.count(), 0)
