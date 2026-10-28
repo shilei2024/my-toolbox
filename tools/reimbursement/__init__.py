@@ -405,6 +405,21 @@ def upload():
     filepath = upload_dir / safe_name
     # 一次读取即落盘 + 落库：避免先 save() 再 read_bytes() 多读一遍磁盘。
     raw_bytes = f.stream.read()
+    valid_signature = (
+        ext == ".pdf" and raw_bytes.startswith(b"%PDF-")
+        or ext == ".png" and raw_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+        or ext in {".jpg", ".jpeg"} and raw_bytes.startswith(b"\xff\xd8\xff")
+    )
+    if not valid_signature:
+        return jsonify(error="文件内容与格式不匹配，请选择有效的 PDF、PNG 或 JPG 原件"), 400
+    owner_type, owner_id = _rb_owner()
+    duplicate = ReimbursementAttachment.query.filter_by(owner_type=owner_type, owner_id=owner_id,
+        file_size=len(raw_bytes), content=raw_bytes).first()
+    if duplicate:
+        url = f"/tools/reimbursement/preview/{duplicate.stored_name}"
+        return jsonify(success=True, duplicate=True, file_id=duplicate.stored_name.split(".")[0], filename=duplicate.stored_name,
+            original_url=url, full_url=url, preview_url=url, original_name=duplicate.original_name,
+            size=duplicate.file_size)
     filepath.write_bytes(raw_bytes)
     owner_type, owner_id = _rb_owner()
     attachment = ReimbursementAttachment(

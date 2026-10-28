@@ -169,6 +169,8 @@ const IP_JSZIP_URLS = [
   'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
 ];
 const STATE = {
+  originals: [],
+  threshold: 5,
   queue: [],      // {file, name, size, sizeStr} — 待确认
   files: [],      // {name, size, sizeStr, type, _selected, dataUrl, blobUrl} — 已确认
   busy: false,
@@ -242,6 +244,9 @@ document.addEventListener('DOMContentLoaded', () => {
       'delete-selected': deleteSelected,
       'print-all': printAll,
       'export-zip': exportZip,
+      'filter-amount': filterAmounts,
+      'archive-all': archiveAll,
+      'save-retained': saveRetained,
       'print-one': () => printOne(index),
       'download-one': () => downloadOne(index),
       'remove-file': () => removeFile(index),
@@ -250,6 +255,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   result.addEventListener('change', event => {
+    if(event.target.matches('[data-invoice-amount]')){const f=STATE.files[Number(event.target.dataset.invoiceAmount)];f.confirmedAmount=event.target.value.trim();f._selected=f.confirmedAmount!==''&&Number(f.confirmedAmount)>=STATE.threshold;renderResult();}
+
     if (event.target.matches('[data-action="toggle-all"]')) toggleAll(event.target);
     if (event.target.matches('[data-action="toggle-file"]')) {
       onToggle(Number(event.target.dataset.index), event.target.checked);
@@ -377,6 +384,7 @@ function clearAll() {
   revokeAllBlobs();
   STATE.files = [];
   STATE.queue = [];
+  STATE.originals = [];
   clearArchiveErrors();
   hideResultPanel();
   renderQueue();
@@ -500,6 +508,7 @@ async function processFiles(btn) {
       showProgress(Math.round((i + 1) / Math.max(filesToAdd.length, 1) * 100), `加入工作台 ${i + 1}/${filesToAdd.length}`);
     }
 
+    STATE.originals.push(...STATE.queue.filter(item=>isZipType(item.file)&&!STATE.originals.some(old=>old.file===item.file)));
     STATE.queue = archiveResult.failedItems;
     if (STATE.files.length > 0) renderResult();
     renderQueue();
@@ -793,6 +802,7 @@ function renderResult() {
         </button>
       </div>
     </div>
+    <div class="my-3 p-3 border rounded"><div class="d-flex flex-wrap gap-2 align-items-center"><label>打印金额下限（元） <input id="ipThreshold" type="number" min="0" step="0.01" value="${STATE.threshold}" style="width:85px"></label><button class="btn btn-outline-secondary btn-sm" data-action="filter-amount">按金额筛选打印</button><button class="btn btn-outline-success btn-sm" data-action="archive-all">归档全部原件及筛选清单</button><button class="btn btn-outline-primary btn-sm" data-action="save-retained">保存全部票据到报销助手</button></div><div class="small text-muted mt-2">金额留空为待确认；筛选只改变打印选择。保存包含未勾选的小额票据。原 ZIP 请下载归档后保留。</div></div>
     <div class="ip-grid">
   `;
 
@@ -812,6 +822,7 @@ function renderResult() {
         <div class="ip-info">
           <div class="ip-name" title="${safeName}">${safeName}</div>
           <div class="ip-meta" title="${safeMeta}">${safeMeta}</div>
+          <label class="small">票面合计 <input type="number" min="0" step="0.01" data-invoice-amount="${i}" value="${escapeHTML(f.confirmedAmount??'')}" placeholder="待确认" style="width:100px" aria-label="票面合计 ${safeName}"></label>
           <div class="ip-btns mt-1">
             <button type="button" class="btn btn-outline-secondary btn-sm" data-action="print-one" data-index="${i}" title="打印">
               <i class="bi bi-printer"></i> 打印
@@ -833,6 +844,23 @@ function renderResult() {
   document.getElementById('ipEmpty').classList.add('hidden');
   const selectAll = document.getElementById('ipSelectAll');
   if (selectAll) selectAll.indeterminate = selectedCount > 0 && selectedCount < total;
+}
+
+function filterAmounts(){const t=Number(document.getElementById('ipThreshold').value);if(!Number.isFinite(t)||t<0){showToast('请输入有效阈值','warn');return}STATE.threshold=t;STATE.files.forEach(f=>{f._selected=f.confirmedAmount!==undefined&&f.confirmedAmount!==''&&Number(f.confirmedAmount)>=t&&!isDefaultDeselectedFromArchive({_invoiceSource:f.source,name:f.name});});renderResult();showToast('金额待确认的票据已保留，请核对后勾选','info');}
+async function archiveAll(){try{await ensureJSZip();const zip=new JSZip();for(const [i,item] of STATE.originals.entries())zip.file(`原始压缩包/${i+1}_${item.name}`,item.file);for(const [i,f] of STATE.files.entries())zip.file(`提取结果/${i+1}_${f.name}`,await(await fetch(f.blobUrl)).blob());zip.file('清单.json',JSON.stringify(STATE.files.map(f=>({name:f.name,source:f.source,amount:f.confirmedAmount??null,print_selected:f._selected})),null,2));const url=URL.createObjectURL(await zip.generateAsync({type:'blob'}));const a=document.createElement('a');a.href=url;a.download='发票完整归档.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){showToast('归档失败，请重试','warn');}}
+async function saveRetained(){
+  const button=document.querySelector('[data-action="save-retained"]');if(button.disabled)return;
+  const csrf=document.querySelector('meta[name="csrf-token"]')?.content||'';
+  const api=async(url,options={})=>{const r=await fetch(url,{...options,headers:{'X-CSRFToken':csrf,...options.headers}});const d=await r.json();if(!r.ok)throw new Error(d.error||'保存失败');return d;};
+  try{button.disabled=true;const d=await api('/tools/reimbursement/api/bootstrap');STATE.retentionOffice=d.offices[0]?.id;
+    let panel=document.getElementById('ipRetentionOptions');
+    if(!panel){panel=document.createElement('div');panel.id='ipRetentionOptions';panel.className='my-3';panel.innerHTML='<label>归属周期 <select id="ipRetentionPeriod"></select></label> <label>用途 <select id="ipRetentionKind"><option value="toll">零散过路费</option><option value="fuel">加油票</option></select></label> <label>发生月 <input type="month" id="ipRetentionMonth"></label> <button class="btn btn-primary btn-sm" id="ipConfirmRetention">确认上传并留存全部原件</button>';document.getElementById('ipResult').prepend(panel);document.getElementById('ipRetentionPeriod').innerHTML=d.periods.map(p=>`<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');document.getElementById('ipConfirmRetention').addEventListener('click',()=>importRetained(api));showToast('请选择归属周期、用途和发生月，再确认上传','info');}
+  }catch(e){showToast(e.message,'warn');}finally{button.disabled=false;}
+}
+async function importRetained(api){const button=document.getElementById('ipConfirmRetention');button.disabled=true;const period=Number(document.getElementById('ipRetentionPeriod').value),kind=document.getElementById('ipRetentionKind').value,occurrence=document.getElementById('ipRetentionMonth').value;let saved=0;
+  try{if(!period||!occurrence)throw new Error('请先创建报销周期，并填写发生月');for(const f of STATE.files){if(f.importedFor===`${period}:${kind}`)continue;if(f.size>20*1024*1024)throw new Error('报销助手单文件最大 20MB，请单独处理大文件');const fd=new FormData();fd.append('file',await(await fetch(f.blobUrl)).blob(),f.name);const u=await api('/tools/reimbursement/upload',{method:'POST',body:fd});const confirmed=kind==='toll'&&f.confirmedAmount!==undefined&&f.confirmedAmount!=='';
+    await api('/tools/reimbursement/api/invoices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period_id:period,document_kind:kind,inclusion_policy:'retain',occurrence_month:occurrence,amount_confirmed:confirmed,print_selected:kind==='fuel'?f._selected:(confirmed&&f._selected),total_amount:confirmed?f.confirmedAmount:'',file_url:u.original_url,file_name:u.original_name,file_size:u.size,office_id:STATE.retentionOffice})});f.importedFor=`${period}:${kind}`;saved++;showProgress(Math.round(saved/STATE.files.length*100),'正在留存 '+saved+' 张');}showToast('全部票据已留存，可在报销助手查看及打印','info');}
+  catch(e){showToast(`已保存 ${saved} 张；${e.message}。保留页面后重试可继续`,'warn');}finally{button.disabled=false;hideProgress();}
 }
 
 // ============== 打印引擎 ==============

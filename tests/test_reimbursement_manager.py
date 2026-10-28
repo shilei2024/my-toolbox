@@ -613,6 +613,14 @@ class ReimbursementManagerTests(unittest.TestCase):
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII="
                 )
             )
+            with client.session_transaction() as session:
+                attachment_owner = session["anon_id"]
+            with app.app_context():
+                raw = (upload_dir / f"{file_id}.png").read_bytes()
+                db.session.add(ReimbursementAttachment(owner_type="anon", owner_id=attachment_owner,
+                    stored_name=f"{file_id}.png", original_name="发票.png", mime_type="image/png",
+                    content=raw, file_size=len(raw)))
+                db.session.commit()
             invoice = client.post(
                 "/tools/reimbursement/api/invoices",
                 headers=headers,
