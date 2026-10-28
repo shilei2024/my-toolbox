@@ -1,6 +1,6 @@
 # 发票留存功能发布与回滚
 
-状态：网站候选代码独立审查、CI、真实备份恢复、PG16迁移演练和恢复库业务验收均已通过；准备0.9.47正式发布，尚未生产部署。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
+状态：0.9.47主站已更新到6239408并完成e4迁移；发布中权限故障已按下文恢复，操作者确认本机/公网HTTP200。用户实际业务验收待反馈。仅涉及 Flask 主站，不需要重建 Gallery 或 Generation Service。
 方案见 [实施计划](../product/invoice-retention-plan.md)、[API](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)。
 
 ## 发布前 Go/No-Go
@@ -113,6 +113,8 @@ export AUTO_CREATE_SCHEMA=false
 
 脚本先按运行中service环境/项目config一致的优先级确定数据库，再stop主站。保持停写完成最终DB及原件/配置备份，根目录0700、文件0600；manifest注明停写最终备份和目标SHA。验证备份旧迁移d3，快进main到批准SHA，核对.env及本地Caddy哈希未变。用最小Flask-Migrate应用执行正常Alembic upgrade到e4（不导入app、不启动调度器、不create_all），检查历史发票/含BLOB附件内容指纹及默认口径均保留，然后start主站及校验active/HTTPS healthz。migration连接有15秒锁等待和120秒语句超时，不无限挂起。
 
+Git检出子进程必须单独使用umask022，公开代码普通文件0644、执行文件和目录0755；父进程继续077保护备份/日志。Git创建普通文件用0666、目录用0777并受umask影响，不能假设Git树100644会绕过父进程077。见[Git官方entry.c](https://github.com/git/git/blob/master/entry.c)。
+
 这是现有systemd的本次受控运维工件，不是新的发布平台。停站时域名可能短暂不可用，请执行整段命令，不在中间停留等待聊天。数据库dump与原件均在主站停写期间完成；同一数据库其他服务仍可能写自己的表，pg_dump本身提供事务一致快照，未经此次修改的服务保持原运行方式。
 
 ```bash
@@ -139,6 +141,9 @@ done
 
 ## 失败恢复与回滚
 
+- **本次6239408的实际故障**：stage=https-health，现场stat显示root持有的新运行代码0600，www-data不可读。操作者仅将8个已批准运行文件恢复0644，确认服务用户可读后reset-failed/start；随后active、本机和公网health均200。数据库迁移/历史指纹校验已在失败前完成，不再迁移、不恢复旧库、不重跑原发布脚本。首次启动期间一次连接拒绝后重试得到200属端口就绪过程；以最终结果为准。
+- 只修公开Git代码权限，不对整个/opt目录递归chmod/chown，不修改.env、上传、备份或本地Caddy。其余非运行代码若需整理，限定到本次A/M跟踪文件及新代码目录，按Git100644/100755处理，先校验SHA/内容/路径边界并拒绝符号链接；不要扩大到机密文件。
+- 永久修复使用Git子进程专属022，Linux CI实际检出验证代码与私有备份权限。此为运维工件修复，不需要再次停机、重启或DB迁移；本次完整发布脚本仍只支持原始旧SHA，不能拿它重跑已升级服务。
 - Git 工作区不干净、HEAD 不符合计划：停止，不使用 reset --hard 清理未知改动。
 - 迁移失败：保持停写，检查数据库连接和 migration current；在隔离恢复库复现，不执行 stamp 跳过迁移。
 - 服务启动失败：本机查看 `journalctl -u mytoolbox -n 100 --no-pager`，对外只提供脱敏错误；不要复制完整带业务数据的日志。

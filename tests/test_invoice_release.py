@@ -1,8 +1,11 @@
 """Release safety: no writes before guards; backup before Git/schema changes."""
 import io
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import stat
+import subprocess
 import unittest
 from unittest.mock import patch
 from scripts.ops import invoice_release as release
@@ -11,6 +14,44 @@ TARGET = "a" * 40
 
 
 class InvoiceReleaseTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'posix', 'real POSIX umask behavior requires Linux')
+    def test_real_git_checkout_preserves_code_readability_and_private_backup_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, stderr=subprocess.DEVNULL).decode().strip()
+            git('init','-b','main')
+            git('config','user.name','Release Test')
+            git('config','user.email','release@example.invalid')
+            (root/'app.py').write_text('old-code', encoding='utf-8')
+            git('add','app.py'); git('commit','-m','baseline')
+            old = git('rev-parse','HEAD')
+            (root/'new_module').mkdir()
+            (root/'new_module/model.py').write_text('new-code',encoding='utf-8')
+            (root/'new_module/cli.sh').write_text('#!/bin/sh\nexit 0\n',encoding='utf-8')
+            (root/'new_module/cli.sh').chmod(0o755)
+            (root/'app.py').write_text('changed-code',encoding='utf-8')
+            git('add','app.py','new_module'); git('commit','-m','candidate')
+            target = git('rev-parse','HEAD')
+            git('checkout','--detach',old)
+            self.assertFalse((root/'new_module').exists())
+            previous = os.umask(0o077)
+            try:
+                private = root/'private-backup'
+                private.mkdir()
+                (private/'database.service.conf').write_text('test-only',encoding='utf-8')
+                with (private/'release.log').open('w') as log:
+                    release.checkout_release(root,target,log)
+                self.assertEqual(stat.S_IMODE((root/'app.py').stat().st_mode),0o644)
+                self.assertEqual(stat.S_IMODE((root/'new_module/model.py').stat().st_mode),0o644)
+                self.assertEqual(stat.S_IMODE((root/'new_module').stat().st_mode),0o755)
+                self.assertEqual(stat.S_IMODE((root/'new_module/cli.sh').stat().st_mode),0o755)
+                for file in (private/'database.service.conf',private/'release.log'):
+                    self.assertEqual(stat.S_IMODE(file.stat().st_mode),0o600)
+                self.assertEqual(stat.S_IMODE(private.stat().st_mode),0o700)
+            finally:
+                os.umask(previous)
+
     def test_second_release_is_rejected_before_entering_operation(self):
         from unittest.mock import Mock
         fcntl = SimpleNamespace(LOCK_EX=2,LOCK_NB=4,LOCK_UN=8,flock=Mock(side_effect=BlockingIOError()))
@@ -38,6 +79,7 @@ class InvoiceReleaseTests(unittest.TestCase):
         def run(command, **_kwargs):
             events.append(tuple(command))
             if command[:2] == ["git","merge"]:
+                self.assertEqual(_kwargs.get('umask'),0o022)
                 if failure == 'partial-checkout':
                     raise OSError('interrupted checkout')
                 head[0] = TARGET
