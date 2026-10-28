@@ -55,6 +55,14 @@ def git(root, *args):
     return subprocess.check_output(["git", *args], cwd=root, stderr=subprocess.DEVNULL).decode().strip()
 
 
+def checkout_release(root, target, log):
+    # Git creates files with 0666 and directories with 0777, masked by umask.
+    # Public tracked source must be readable by the systemd service user.
+    # Only this child gets 022; the parent keeps 077 for secrets and backups.
+    subprocess.run(["git", "merge", "--ff-only", target], cwd=root, check=True,
+        stdout=log, stderr=log, timeout=60, umask=0o022)
+
+
 def file_digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
@@ -155,7 +163,7 @@ def execute(root, target, backup_module, log, backup_base=Path("/var/backups/myt
         (directory / "COMPLETE").write_text("Final stopped-service backup complete; prior restore and migration verified.\n", encoding="utf-8")
         require(git(root, "rev-parse", "HEAD") == SOURCE, "source-changed-during-backup")
         stage = "checkout"
-        subprocess.run(["git", "merge", "--ff-only", target], cwd=root, check=True, stdout=log, stderr=log, timeout=60)
+        checkout_release(root, target, log)
         require(git(root, "rev-parse", "HEAD") == target, "release-sha-not-applied")
         require(all(file_digest(root / name) == digest for name, digest in protected.items()), "local-configuration-changed")
         stage = "migration"
