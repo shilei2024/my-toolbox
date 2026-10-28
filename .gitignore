@@ -132,6 +132,8 @@ coverage/
 
 # Machine-local npm mirror configuration (do not commit)
 apps/gallery-web/.npmrc
+apps/invoice-miniprogram/project.private.config.json
+apps/invoice-miniprogram/miniprogram_npm/
 
 # test reports (generated)
 tests/test_report.json

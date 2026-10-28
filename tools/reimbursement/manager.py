@@ -1422,6 +1422,110 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
     return output
 
 
+def save_invoice(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | None:
+    previous_file_url = invoice.file_url if invoice.id else None
+    kind = data.get("document_kind", invoice.document_kind or "invoice")
+    policy = data.get("inclusion_policy", invoice.inclusion_policy or ("expense" if kind == "invoice" else "retain"))
+    if not isinstance(kind, str) or not isinstance(policy, str) or kind not in KINDS or policy not in POLICIES:
+        return "票据类型或计入口径无效"
+    if kind in {"fuel", "toll", "toll_statement"} and policy == "expense":
+        return "加油票、零散过路费和通行账单仅作留存；通行费用请从派车单计入"
+    try:
+        for key in ("occurrence_month", "settlement_month"):
+            value = data.get(key, getattr(invoice, key) or "")
+            setattr(invoice, key, month(value) if value else "")
+        for key in ("print_selected", "amount_confirmed"):
+            if key in data and not isinstance(data[key], bool):
+                return "打印选择及金额确认须为布尔值"
+        confirmed = data.get("amount_confirmed", invoice.amount_confirmed if invoice.id else kind == "invoice")
+        if policy == "expense" and not confirmed:
+            return "计入费用前请确认金额"
+        for key in ("amount", "tax_amount", "total_amount"):
+            if data.get(key) not in (None, ""):
+                money(data[key])
+    except ValueError as exc:
+        return str(exc)
+    invoice.document_kind, invoice.inclusion_policy = kind, policy
+    invoice.amount_confirmed = confirmed
+    invoice.print_selected = data.get("print_selected", invoice.print_selected if invoice.id else kind != "toll_statement")
+    if kind == "toll" and not invoice.id and "print_selected" not in data:
+        invoice.print_selected = confirmed and money(data.get("total_amount") or 0) >= 5
+    period = ReimbursementPeriod.query.filter_by(id=int(data.get("period_id") or 0),
+        owner_type=invoice.owner_type, owner_id=invoice.owner_id).with_for_update().first()
+    if not period:
+        return "请选择有效的报销周期"
+    category = _owned_category(data.get("category_id"), invoice.owner_type, invoice.owner_id)
+    if data.get("category_id") and not category:
+        return "请选择有效的费用类别"
+    invoice.period_id = period.id
+    invoice.category_id = category.id if category else None
+    invoice.invoice_number = str(data.get("invoice_number") or "").strip()
+    invoice.invoice_date = _date(data.get("invoice_date"))
+    invoice.amount = _money(data.get("amount"))
+    invoice.tax_amount = _money(data.get("tax_amount"))
+    invoice.total_amount = _money(data.get("total_amount"))
+    if invoice.total_amount == 0:
+        invoice.total_amount = invoice.amount + invoice.tax_amount
+    product_line_error = _assign_invoice_product_line(invoice, data)
+    if product_line_error:
+        return product_line_error
+    office_error = _assign_invoice_office(invoice, data)
+    if office_error:
+        return office_error
+    customer_id = str(data.get("customer_id") or "").strip()
+    customer = _owned_customer(customer_id)
+    if customer_id and customer is None:
+        return "请选择当前组织中的有效客户"
+    customer_level = str(data.get("customer_level") or "").strip().upper()
+    if customer_level and customer_level not in CUSTOMER_LEVELS:
+        return "客户等级仅支持 0-1、A、AA、AAA"
+    invoice.customer_id = customer.id if customer else None
+    invoice.customer_level = str(customer.grade or "") if customer else customer_level
+    for key in ("vendor", "description", "file_url", "file_name", "remarks"):
+        setattr(invoice, key, str(data.get(key) or "").strip())
+    invoice.file_size = int(data.get("file_size") or 0)
+    if invoice.file_url:
+        filename = invoice.file_url.removeprefix("/tools/reimbursement/preview/")
+        attachment = ReimbursementAttachment.query.filter_by(owner_type=invoice.owner_type,
+            owner_id=invoice.owner_id, stored_name=filename).first()
+        # Existing disk-only historical records remain editable, but no new
+        # record may claim an arbitrary URL or another owner's attachment.
+        legacy_unchanged = invoice.document_kind == "invoice" and previous_file_url == invoice.file_url
+        if not attachment and not legacy_unchanged:
+            return "请上传当前账号的票据原件"
+    if data.get("status") in STATUS_LABELS:
+        invoice.status = data["status"]
+    elif not invoice.status:
+        invoice.status = "pending"
+    return None
+
+
+
+class InvoiceConflictError(ValueError):
+    pass
+
+
+def create_invoice_record(data: dict[str, Any], owner_type: str, owner_id: str, *, deduplicate_file: bool = False):
+    invoice = ReimbursementInvoice(owner_type=owner_type, owner_id=owner_id, period_id=0)
+    error = save_invoice(invoice, data)
+    if error:
+        raise ValueError(error)
+    if invoice.file_url and (deduplicate_file or invoice.document_kind != "invoice"):
+        existing = ReimbursementInvoice.query.filter_by(owner_type=owner_type, owner_id=owner_id,
+            file_url=invoice.file_url, period_id=invoice.period_id).first()
+        if existing:
+            if (existing.document_kind, existing.occurrence_month, existing.office) != (invoice.document_kind, invoice.occurrence_month, invoice.office):
+                raise InvoiceConflictError("该原件已在本期保存，但用途、发生月或办事处不同，请先到网站核对并修改")
+            return existing, False
+    db.session.add(invoice)
+    db.session.flush()
+    category = _owned_category(invoice.category_id, owner_type, owner_id)
+    _sync_invoice_aux(invoice, category, data.get("linked_detail"))
+    db.session.add(ReimbursementAudit(owner_type=owner_type, owner_id=owner_id, period_id=invoice.period_id,
+        action="invoice.create", data_json=json.dumps({"invoice_id":invoice.id, "policy":invoice.inclusion_policy})))
+    return invoice, True
+
+
 def register_routes(bp: Blueprint) -> None:
     def vehicle_snapshot(period_id):
         rows = ReimbursementAuxDetail.query.filter_by(period_id=period_id, kind="vehicle").order_by(ReimbursementAuxDetail.id).all()
@@ -2053,83 +2157,6 @@ def register_routes(bp: Blueprint) -> None:
             pagination={"page": page, "per_page": per_page, "total": total, "pages": max(1, (total + per_page - 1) // per_page)},
         )
 
-    def save_invoice(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | None:
-        previous_file_url = invoice.file_url if invoice.id else None
-        kind = data.get("document_kind", invoice.document_kind or "invoice")
-        policy = data.get("inclusion_policy", invoice.inclusion_policy or ("expense" if kind == "invoice" else "retain"))
-        if not isinstance(kind, str) or not isinstance(policy, str) or kind not in KINDS or policy not in POLICIES:
-            return "票据类型或计入口径无效"
-        if kind in {"fuel", "toll", "toll_statement"} and policy == "expense":
-            return "加油票、零散过路费和通行账单仅作留存；通行费用请从派车单计入"
-        try:
-            for key in ("occurrence_month", "settlement_month"):
-                value = data.get(key, getattr(invoice, key) or "")
-                setattr(invoice, key, month(value) if value else "")
-            for key in ("print_selected", "amount_confirmed"):
-                if key in data and not isinstance(data[key], bool):
-                    return "打印选择及金额确认须为布尔值"
-            confirmed = data.get("amount_confirmed", invoice.amount_confirmed if invoice.id else kind == "invoice")
-            if policy == "expense" and not confirmed:
-                return "计入费用前请确认金额"
-            for key in ("amount", "tax_amount", "total_amount"):
-                if data.get(key) not in (None, ""):
-                    money(data[key])
-        except ValueError as exc:
-            return str(exc)
-        invoice.document_kind, invoice.inclusion_policy = kind, policy
-        invoice.amount_confirmed = confirmed
-        invoice.print_selected = data.get("print_selected", invoice.print_selected if invoice.id else kind != "toll_statement")
-        if kind == "toll" and not invoice.id and "print_selected" not in data:
-            invoice.print_selected = confirmed and money(data.get("total_amount") or 0) >= 5
-        period = ReimbursementPeriod.query.filter_by(id=int(data.get("period_id") or 0),
-            owner_type=invoice.owner_type, owner_id=invoice.owner_id).with_for_update().first()
-        if not period:
-            return "请选择有效的报销周期"
-        category = _owned_category(data.get("category_id"), invoice.owner_type, invoice.owner_id)
-        if data.get("category_id") and not category:
-            return "请选择有效的费用类别"
-        invoice.period_id = period.id
-        invoice.category_id = category.id if category else None
-        invoice.invoice_number = str(data.get("invoice_number") or "").strip()
-        invoice.invoice_date = _date(data.get("invoice_date"))
-        invoice.amount = _money(data.get("amount"))
-        invoice.tax_amount = _money(data.get("tax_amount"))
-        invoice.total_amount = _money(data.get("total_amount"))
-        if invoice.total_amount == 0:
-            invoice.total_amount = invoice.amount + invoice.tax_amount
-        product_line_error = _assign_invoice_product_line(invoice, data)
-        if product_line_error:
-            return product_line_error
-        office_error = _assign_invoice_office(invoice, data)
-        if office_error:
-            return office_error
-        customer_id = str(data.get("customer_id") or "").strip()
-        customer = _owned_customer(customer_id)
-        if customer_id and customer is None:
-            return "请选择当前组织中的有效客户"
-        customer_level = str(data.get("customer_level") or "").strip().upper()
-        if customer_level and customer_level not in CUSTOMER_LEVELS:
-            return "客户等级仅支持 0-1、A、AA、AAA"
-        invoice.customer_id = customer.id if customer else None
-        invoice.customer_level = str(customer.grade or "") if customer else customer_level
-        for key in ("vendor", "description", "file_url", "file_name", "remarks"):
-            setattr(invoice, key, str(data.get(key) or "").strip())
-        invoice.file_size = int(data.get("file_size") or 0)
-        if invoice.file_url:
-            filename = invoice.file_url.removeprefix("/tools/reimbursement/preview/")
-            attachment = ReimbursementAttachment.query.filter_by(owner_type=invoice.owner_type,
-                owner_id=invoice.owner_id, stored_name=filename).first()
-            # Existing disk-only historical records remain editable, but no new
-            # record may claim an arbitrary URL or another owner's attachment.
-            legacy_unchanged = invoice.document_kind == "invoice" and previous_file_url == invoice.file_url
-            if not attachment and not legacy_unchanged:
-                return "请上传当前账号的票据原件"
-        if data.get("status") in STATUS_LABELS:
-            invoice.status = data["status"]
-        elif not invoice.status:
-            invoice.status = "pending"
-        return None
-
     def audit(period_id, action, payload):
         owner_type, owner_id = _owner()
         db.session.add(ReimbursementAudit(owner_type=owner_type, owner_id=owner_id,
@@ -2138,23 +2165,16 @@ def register_routes(bp: Blueprint) -> None:
     @bp.post("/api/invoices")
     def create_invoice():
         owner_type, owner_id = _owner()
-        data = _payload()
-        invoice = ReimbursementInvoice(owner_type=owner_type, owner_id=owner_id, period_id=0)
-        error = save_invoice(invoice, data)
-        if error:
-            return jsonify(error=error), 400
-        if invoice.document_kind != "invoice" and invoice.file_url:
-            existing = ReimbursementInvoice.query.filter_by(owner_type=owner_type, owner_id=owner_id,
-                file_url=invoice.file_url, period_id=invoice.period_id).first()
-            if existing:
-                return jsonify(success=True, duplicate=True, invoice=_invoice_dict(existing)), 200
-        db.session.add(invoice)
-        db.session.flush()
-        category = _owned_category(invoice.category_id, owner_type, owner_id)
-        _sync_invoice_aux(invoice, category, data.get("linked_detail"))
-        audit(invoice.period_id, "invoice.create", {"invoice_id": invoice.id, "policy": invoice.inclusion_policy})
+        try:
+            invoice, created = create_invoice_record(_payload(), owner_type, owner_id)
+        except InvoiceConflictError as exc:
+            db.session.rollback()
+            return jsonify(error=str(exc)), 409
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify(error=str(exc)), 400
         db.session.commit()
-        return jsonify(success=True, invoice=_invoice_dict(invoice)), 201
+        return jsonify(success=True, duplicate=not created, invoice=_invoice_dict(invoice)), 201 if created else 200
 
     @bp.put("/api/invoices/<int:invoice_id>")
     def update_invoice(invoice_id: int):

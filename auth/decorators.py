@@ -195,7 +195,7 @@ def require_usage(tool_id: str) -> Callable:
     return decorator
 
 
-def commit_usage(tool_id: str, *, success: bool = True, message: str | None = None) -> None:
+def commit_usage(tool_id: str, *, success: bool = True, message: str | None = None, commit: bool = True) -> None:
     """Atomically bump the counter and write an audit log entry."""
     ip = get_client_ip()
     day = china_today_str()
@@ -222,12 +222,13 @@ def commit_usage(tool_id: str, *, success: bool = True, message: str | None = No
         email=email,
         ip=ip,
     )
-    db.session.commit()
+    if commit:
+        db.session.commit()
 
 
 def _quota_exceeded(message: str, **log_kwargs: Any):
     # API-style tools (XHR) return JSON; HTML tools get a flash + redirect.
-    if request.accept_mimetypes.best == "application/json" or request.is_json:
+    if request.accept_mimetypes.best == "application/json" or request.is_json or request.blueprint == "mobile_api":
         return jsonify(error=message), 429
 
     _log(tool_id=log_kwargs.pop("tool_id"), status="rate_limited", message=message, **log_kwargs)

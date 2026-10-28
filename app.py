@@ -452,6 +452,8 @@ def _init_extensions(app: Flask) -> None:
         try:
             # Keep all workers in sync with settings saved from the admin panel.
             apply_runtime_settings(app)
+            if request.blueprint == "mobile_api":
+                return None
             g.anon_id = ensure_anon_id()
         except Exception:  # noqa: BLE001
             # DB-backed request setup must never take the whole site down.
@@ -467,8 +469,12 @@ def _init_extensions(app: Flask) -> None:
 def _register_blueprints(app: Flask) -> None:
     # Register domain metadata before development db.create_all() in _seed_admin.
     from tools.reimbursement.models import ReimbursementAudit  # noqa: F401
+    from tools.reimbursement.mobile_models import UploadReceipt  # noqa: F401
+    from auth.mobile_routes import binding_bp, mobile_bp
 
     app.register_blueprint(auth_bp)
+    app.register_blueprint(binding_bp)
+    app.register_blueprint(mobile_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(customer_projects_bp)
     app.register_blueprint(customer_projects_api_bp)
