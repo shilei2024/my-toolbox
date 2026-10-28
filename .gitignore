@@ -134,6 +134,8 @@ coverage/
 apps/gallery-web/.npmrc
 apps/invoice-miniprogram/project.private.config.json
 apps/invoice-miniprogram/miniprogram_npm/
+!apps/invoice-miniprogram/lib/
+!apps/invoice-miniprogram/lib/*.js
 
 # test reports (generated)
 tests/test_report.json
