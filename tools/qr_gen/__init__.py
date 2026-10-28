@@ -11,6 +11,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
+from utils.helpers import bind_download_to_session
 
 tool_bp = Blueprint("qr_gen", __name__)
 
@@ -64,7 +65,8 @@ def process():
         img_bytes = buf.getvalue()
         image_data = f"data:image/png;base64,{_b64.b64encode(img_bytes).decode('ascii')}"
 
-        filename = f"qr_{uuid.uuid4().hex[:8]}.png"
+        filename = f"qr_{uuid.uuid4().hex}.png"
+        bind_download_to_session(filename)
         upload_dir: Path = current_app.config["UPLOAD_DIR"]
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / filename

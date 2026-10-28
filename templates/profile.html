@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}个人资料 - {{ site_name }}{% endblock %}
+{% block description %}设置你的昵称，主站、画廊与作品署名都会使用它。{% endblock %}
+
+{% block head_extra %}
+<style>
+  .profile-card { max-width: 560px; margin: 0 auto; }
+  .profile-card .form-label { font-weight: 600; }
+  .profile-note { color: #6c757d; font-size: 0.9rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="profile-card">
+  <h1 class="mb-3">个人资料</h1>
+  <p class="profile-note">
+    昵称会显示在主站、AI 画廊和你的作品署名上；未设置昵称时，使用注册账号（邮箱）显示。
+  </p>
+  <form method="post" action="{{ url_for('auth.profile_update') }}" class="card card-body shadow-sm border-0 mt-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="mb-3">
+      <label class="form-label" for="nickname">昵称</label>
+      <input class="form-control" type="text" id="nickname" name="nickname" maxlength="80"
+             value="{{ user.nickname or '' }}" placeholder="例如：Mavis" />
+    </div>
+    <div class="d-flex align-items-center gap-3">
+      <button class="btn btn-primary" type="submit">保存昵称</button>
+      <span class="text-muted small">当前显示：<strong>{{ user.display_name }}</strong></span>
+    </div>
+  </form>
+</div>
+{% endblock %}

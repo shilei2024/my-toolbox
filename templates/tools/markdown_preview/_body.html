@@ -58,7 +58,8 @@ def hello():
       const r = await fetch('{{ url_for("markdown_preview.process") }}', {method:'POST', body:fd});
       const d = await r.json();
       if(d.ok){ preview.innerHTML = d.html; }
-    } catch(e){ preview.innerHTML = '<span class="text-danger">渲染失败: '+e+'</span>'; }
+      else { preview.textContent = (d && d.error) ? ('渲染失败: ' + d.error) : '渲染失败'; }
+    } catch(e){ preview.textContent = '渲染失败: ' + e; }
   }
 
   document.getElementById('renderBtn').onclick = render;

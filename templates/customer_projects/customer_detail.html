@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ customer.short_name or customer.name }} — 客户项目跟进{% endblock %}
+{% block description %}从客户进入其跟进项目、联系人和客户评级。{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <nav class="cp-breadcrumb" aria-label="面包屑"><a href="{{ url_for('customer_projects.customers') }}">客户</a><i class="bi bi-chevron-right"></i><span>{{ customer.short_name or customer.name }}</span></nav>
+  <header class="cp-detail-hero">
+    <div><p class="cp-kicker">CUSTOMER · {{ customer.grade or '未评级' }}</p><h1>{{ customer.short_name or customer.name }}</h1>{% if customer.short_name %}<p>{{ customer.name }}</p>{% endif %}<p>{{ customer.industry or '行业待补齐' }} · {{ customer.region or '区域待补齐' }}</p></div>
+    {% if can_write %}<a class="btn btn-primary" href="{{ url_for('customer_projects.project_new', customer_id=customer.id) }}"><i class="bi bi-plus-lg"></i> 新建项目</a>{% endif %}
+  </header>
+  <div class="cp-detail-grid">
+    <section class="cp-panel">
+      <div class="cp-panel-heading"><div><p class="cp-kicker">PROJECTS</p><h2>跟进项目</h2><p>先进入客户，再选择需要推进的项目。</p></div><span>{{ projects|length }} 个</span></div>
+      {% if projects %}<div class="cp-project-list">{% for project in projects %}
+        <a class="cp-project-row" id="project-{{ project.id }}" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
+          <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ project.product_name or '产品待补齐' }} · {{ project.project_code }}</small></span>
+          <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
+          <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
+          <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%m-%d %H:%M') }}</span>
+        </a>
+      {% endfor %}</div>{% else %}<div class="cp-empty"><i class="bi bi-kanban"></i><h3>还没有跟进项目</h3><p>从当前客户建立第一个项目。</p>{% if can_write %}<a class="btn btn-primary" href="{{ url_for('customer_projects.project_new', customer_id=customer.id) }}">新建项目</a>{% endif %}</div>{% endif %}
+    </section>
+    <aside class="cp-detail-aside">
+      <section class="cp-panel"><div class="cp-panel-heading"><div><h2>联系人</h2><p>{{ contacts|length }} 位</p></div></div>{% for contact in contacts %}<div class="cp-contact-row"><strong>{{ contact.name }}</strong><small>{{ contact.department or '部门待补齐' }}{% if contact.title %} · {{ contact.title }}{% endif %}{% if contact.is_primary %} · 主联系人{% endif %}</small><small>{{ contact.email or contact.phone or '联系方式待补齐' }}</small></div>{% else %}<p class="text-muted mb-0">暂无联系人，可在客户列表中补充。</p>{% endfor %}</section>
+      {% if customer.notes %}<section class="cp-panel"><h2 class="h5">客户备注</h2><p class="mb-0 text-muted">{{ customer.notes }}</p></section>{% endif %}
+    </aside>
+  </div>
+</section>
+{% endblock %}

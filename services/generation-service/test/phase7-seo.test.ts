@@ -35,7 +35,7 @@ describe("Phase 7 SEO feed", () => {
     const ok = await app.inject({ method: "GET", url: "/v1/seo/images?limit=500", headers });
     assert.equal(ok.statusCode, 200);
     assert.equal(ok.json().items[0].slug, "public-artwork");
-    const oversized = await app.inject({ method: "GET", url: "/v1/seo/images?limit=1001", headers });
+    const oversized = await app.inject({ method: "GET", url: "/v1/seo/images?limit=5001", headers });
     assert.equal(oversized.statusCode, 400);
     await app.close();
   });
@@ -50,6 +50,7 @@ class SeoRepository implements GalleryRepository {
     };
   }
   async listPublic() { return { items: [summary()] }; }
+  async facets() { return { total: 1, media: { image: 1, video: 0 }, workflows: [{ name: "portrait", count: 1 }] }; }
   async listOwned() { return { items: [summary()] }; }
   async listFavorites() { return { items: [summary()] }; }
   async findBySlug(): Promise<GalleryImageDetail> { return { ...summary(), providerCode: "comfyui", createdAt: "2026-08-02T00:00:00.000Z", downloadCount: 0, canDelete: false, isOwner: false }; }
@@ -67,7 +68,7 @@ function serviceFor(repository: GalleryRepository, cache: GalleryCache): Gallery
 }
 
 function summary(): GalleryImageSummary {
-  return { id: IMAGE_ID, slug: "public-artwork", title: "", description: "", width: 1024, height: 1024, workflowName: "portrait", publishedAt: "2026-08-02T00:00:00.000Z", asset: { url: "https://assets.example.test/public.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" }, tags: [], likeCount: 0, favoriteCount: 0, viewerHasLiked: false, viewerHasFavorited: false };
+  return { id: IMAGE_ID, slug: "public-artwork", title: "", description: "", width: 1024, height: 1024, mediaType: "image", workflowName: "portrait", publishedAt: "2026-08-02T00:00:00.000Z", asset: { url: "https://assets.example.test/public.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" }, tags: [], likeCount: 0, favoriteCount: 0, viewerHasLiked: false, viewerHasFavorited: false };
 }
 
 const silentLogger: StructuredLogger = { info() {}, error() {} };

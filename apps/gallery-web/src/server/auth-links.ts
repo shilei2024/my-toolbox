@@ -1,4 +1,5 @@
 import "server-only";
+import { isLoopbackHost, safeAuthReturnUrl } from "@/lib/auth-return-url";
 
 /**
  * Authentication lives on the existing Flask toolbox site. The Gallery Web
@@ -16,30 +17,29 @@ export function loginUrl(next?: string): string | undefined {
 export function logoutUrl(returnTo?: string): string | undefined {
   const base = configuredAuthUrl("MAVIS_AUTH_LOGOUT_URL");
   if (!base) return undefined;
-  const next = safeNext(returnTo);
+  const next = safeAuthReturnUrl(returnTo, process.env.GALLERY_PUBLIC_ORIGIN?.trim());
   return next ? `${base}${base.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}` : base;
 }
 
 function configuredAuthUrl(name: string): string | undefined {
-  const raw = process.env[name]?.trim();
-  if (!raw) return undefined;
+  return configuredUrl(process.env[name]);
+}
+
+function configuredUrl(raw?: string): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
   let url: URL;
-  try { url = new URL(raw); } catch { return undefined; }
+  try { url = new URL(value); } catch { return undefined; }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) return undefined;
   return url.toString();
 }
 
 function appendNext(base: string, next?: string): string {
-  const safe = safeNext(next);
+  const safe = safeAuthReturnUrl(next, process.env.GALLERY_PUBLIC_ORIGIN?.trim());
   if (!safe) return base;
   return `${base}${base.includes("?") ? "&" : "?"}next=${encodeURIComponent(safe)}`;
 }
 
-function safeNext(value?: string): string | undefined {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return undefined;
-  return value;
-}
-
 function isLoopback(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+  return isLoopbackHost(hostname);
 }

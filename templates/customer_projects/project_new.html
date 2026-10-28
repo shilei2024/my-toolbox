@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}新建项目 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell cp-narrow">
+  {% include "customer_projects/_module_nav.html" %}
+  <div class="cp-page-heading"><div><p class="cp-kicker">{{ customer.short_name or customer.name }} / NEW PROJECT</p><h1>建立项目主记录</h1><p>项目归属于当前客户；负责人、下一步和跟进时间为必填项。</p></div></div>
+  <form class="cp-panel cp-form-panel" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}"><input type="hidden" name="customer_id" value="{{ customer.id }}">
+    <div class="cp-step"><span>1</span><div><strong>客户与项目</strong><small>建立唯一业务事实</small></div></div>
+    <div class="row g-3 mb-4">
+      <div class="col-md-6"><label class="form-label">客户</label><div class="form-control cp-readonly-field">{{ customer.short_name or customer.name }}{% if customer.short_name %}<small>{{ customer.name }}</small>{% endif %}</div></div>
+      <div class="col-md-6"><label class="form-label" for="project-name">项目名称 <span class="text-danger">*</span></label><input class="form-control" id="project-name" name="name" maxlength="255" required></div>
+      <div class="col-md-8"><label class="form-label" for="project-product">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="project-product" name="product_name" maxlength="255" required></div>
+      <div class="col-md-4"><label class="form-label" for="project-annual-usage">项目年用量（PCS） <span class="text-danger">*</span></label><input class="form-control" id="project-annual-usage" name="annual_usage" type="number" min="1" step="1" inputmode="numeric" required></div>
+      <div class="col-md-4"><label class="form-label" for="project-stage">当前阶段</label><select class="form-select" id="project-stage" name="stage_code">{% for code,label in stages.items() %}{% if code not in ['lost','archived','paused'] and (code != 'mass_production' or can_manage) %}<option value="{{ code }}">{{ label }}</option>{% endif %}{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label" for="project-grade">项目等级</label><select class="form-select" id="project-grade" name="assessment_grade"><option value="">未评估</option>{% for grade in ['A','B','C','D'] %}<option>{{ grade }}</option>{% endfor %}</select></div>
+      <div class="col-md-4"><label class="form-label" for="project-probability">成功概率区间</label><select class="form-select" id="project-probability" name="probability_band"><option value="">待判断</option>{% for value in [10,30,50,70,90] %}<option value="{{ value }}">{{ value }}%</option>{% endfor %}</select></div>
+    </div>
+    <div class="cp-step"><span>2</span><div><strong>负责人</strong><small>主负责人必须是有效组织成员</small></div></div>
+    <div class="mb-4"><label class="form-label" for="project-owner">主负责人 <span class="text-danger">*</span></label><select class="form-select" id="project-owner" name="primary_sales_user_id" required>{% for user,membership in members %}<option value="{{ user.id }}">{{ user.display_name }} · {{ user.email }}</option>{% endfor %}</select></div>
+    <div class="cp-step"><span>3</span><div><strong>下一步</strong><small>行动和时间必须成对出现</small></div></div>
+    <div class="row g-3 mb-4"><div class="col-md-7"><label class="form-label" for="project-next">下一步动作 <span class="text-danger">*</span></label><input class="form-control" id="project-next" name="next_action" maxlength="500" required placeholder="例如：确认原理图和样品数量"></div><div class="col-md-5"><label class="form-label" for="project-follow">下次跟进时间 <span class="text-danger">*</span></label><input class="form-control" id="project-follow" name="next_follow_up_at" type="datetime-local" required></div></div>
+    <div class="d-flex justify-content-end gap-2"><a class="btn btn-outline-secondary" href="{{ url_for('customer_projects.customer_detail', customer_id=customer.id) }}">取消</a><button class="btn btn-primary" type="submit">创建项目</button></div>
+  </form>
+</section>
+{% endblock %}

@@ -12,10 +12,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request, send_file
-from sqlalchemy import case, func, or_
+from flask import Blueprint, current_app, g, has_request_context, jsonify, request, send_file
+from sqlalchemy import case, func, or_, select
 
-from extensions import csrf, db
+from extensions import db
+from customer_projects.models import Customer
 from models import (
     ReimbursementAttachment,
     ReimbursementAuxDetail,
@@ -41,6 +42,7 @@ DEFAULT_CATEGORIES = [
 ]
 DEFAULT_OFFICES = ["深圳办", "厦门办", "杭州办", "上海办", "北京办", "合肥办", "西安办"]
 STATUS_LABELS = {"pending": "待报销", "approved": "已通过", "rejected": "已驳回"}
+CUSTOMER_LEVELS = ("0-1", "A", "AA", "AAA")
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COVER_TEMPLATE = TEMPLATE_DIR / "报销封面及费用分类表_母版.xls"
 DETAIL_TEMPLATE = TEMPLATE_DIR / "应酬费、出差明细、派车单_母版.xls"
@@ -52,8 +54,72 @@ def _owner() -> tuple[str, str]:
 
     if current_user.is_authenticated:
         return "user", str(current_user.id)
-    client_id = (request.headers.get("X-RB-Anon-Id") or "").strip()
-    return "anon", client_id or ensure_anon_id()
+    return "anon", ensure_anon_id()
+
+
+def _customer_directory() -> list[Any]:
+    """Return the current organization customer directory once per request."""
+    if hasattr(g, "_reimbursement_customers"):
+        return g._reimbursement_customers
+    if not has_request_context():
+        g._reimbursement_customers = []
+        return g._reimbursement_customers
+    from customer_projects.permissions import current_membership
+
+    membership = current_membership()
+    if membership is None:
+        g._reimbursement_customers = []
+        return g._reimbursement_customers
+    g._reimbursement_customers = list(
+        db.session.scalars(
+            select(Customer)
+            .where(
+                Customer.organization_id == membership.organization_id,
+                Customer.deleted_at.is_(None),
+                Customer.status == "active",
+            )
+            .order_by(func.coalesce(Customer.short_name, Customer.name), Customer.name)
+        )
+    )
+    return g._reimbursement_customers
+
+
+def _customer_dict(customer: Any) -> dict[str, Any]:
+    return {
+        "id": customer.id,
+        "name": customer.name,
+        "short_name": customer.short_name or "",
+        "display_name": customer.short_name or customer.name,
+        "grade": customer.grade or "",
+    }
+
+
+def _customer_creation_membership() -> Any | None:
+    """Return an organization membership that may own a newly created customer."""
+    if not has_request_context():
+        return None
+    from customer_projects.permissions import current_membership, module_available
+
+    if not module_available():
+        return None
+    membership = current_membership()
+    if membership is None or not membership.roles.intersection(
+        {"organization_admin", "business_manager", "sales"}
+    ):
+        return None
+    return membership
+
+
+def _owned_customer(customer_id: Any) -> Any | None:
+    value = str(customer_id or "").strip()
+    if not value:
+        return None
+    return next((item for item in _customer_directory() if item.id == value), None)
+
+
+def _invoice_customer_level(invoice: ReimbursementInvoice) -> str:
+    customer = _owned_customer(invoice.customer_id)
+    return str(customer.grade or "") if customer else invoice.customer_level
 
 
 def _payload() -> dict[str, Any]:
@@ -76,6 +142,16 @@ def _money(value: Any) -> Decimal:
         return Decimal(str(value or 0)).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return Decimal("0.00")
+
+
+def _sort_rows_by_date(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stable-sort detail rows by their first-column date, leaving missing dates last."""
+
+    def key(row: dict[str, Any]) -> tuple[bool, int]:
+        parsed = _date(row.get("date"))
+        return parsed is None, parsed.toordinal() if parsed else 0
+
+    return sorted(rows, key=key)
 
 
 def _normalize_vehicle_rows(
@@ -203,6 +279,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         owner_id=invoice.owner_id,
         name=invoice.office,
     ).first()
+    customer = _owned_customer(invoice.customer_id)
     return {
         "id": invoice.id,
         "period_id": invoice.period_id,
@@ -225,7 +302,9 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         "product_line_id": product_line.id if product_line else None,
         "office": invoice.office,
         "office_id": office.id if office else None,
-        "customer_level": invoice.customer_level,
+        "customer_id": customer.id if customer else None,
+        "customer": _customer_dict(customer) if customer else None,
+        "customer_level": _invoice_customer_level(invoice),
         "remarks": invoice.remarks,
         "upload_date": invoice.upload_date.isoformat() if invoice.upload_date else "",
         "linked_detail": _invoice_aux_data(invoice),
@@ -284,15 +363,77 @@ def _seed_offices(owner_type: str, owner_id: str) -> list[ReimbursementOffice]:
     )
 
 
+def _sync_product_line_renames(
+    owner_type: str, owner_id: str, rows: list[ReimbursementProductLine]
+) -> list[ReimbursementProductLine]:
+    """Apply ERP product-line renames once per owner; safe to call on every read.
+
+    产品线 79 由 ERP 从“物料分组”更名为“先楫”。目录行、发票、应酬/派车/出差
+    明细保存的都是名称文本，必须一起纠正，否则汇总和导出封面会因为名称匹配
+    不到产品线清单而落到“未匹配”分组。全部条件都基于旧名称，纠正后不再命中。
+    """
+    from . import PRODUCT_LINE_RENAMES
+
+    pending = [
+        (item.name, PRODUCT_LINE_RENAMES[item.name])
+        for item in rows
+        if item.name in PRODUCT_LINE_RENAMES
+    ]
+    if not pending:
+        return rows
+
+    existing = {item.name for item in rows}
+    changed = False
+    for old_name, new_name in pending:
+        if new_name in existing and new_name != old_name:
+            # 目标名称已被另一条目录行占用：保留现状，交给用户在产品线管理中处理，
+            # 避免触发 (owner, name) 唯一约束。
+            current_app.logger.warning(
+                "reimbursement product line rename skipped, target exists: %s -> %s",
+                old_name,
+                new_name,
+            )
+            continue
+        for item in rows:
+            if item.name == old_name:
+                item.name = new_name
+        updated = ReimbursementInvoice.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, product_line=old_name
+        ).update({"product_line": new_name}, synchronize_session=False)
+        _replace_aux_product_line(owner_type, owner_id, old_name, new_name)
+        existing.discard(old_name)
+        existing.add(new_name)
+        changed = True
+        current_app.logger.info(
+            "reimbursement product line renamed: %s -> %s (%d invoices)",
+            old_name,
+            new_name,
+            updated,
+        )
+
+    if changed:
+        db.session.commit()
+    return rows
+
+
 def _seed_product_lines(owner_type: str, owner_id: str) -> list[ReimbursementProductLine]:
     rows = (
         ReimbursementProductLine.query.filter_by(owner_type=owner_type, owner_id=owner_id)
         .order_by(ReimbursementProductLine.sort_order, ReimbursementProductLine.code)
         .all()
     )
+    from . import PRODUCT_LINES, _LEGACY_PRODUCT_LINES
+
     if rows:
-        return rows
-    from . import PRODUCT_LINES
+        legacy_pairs = {(item["name"], item["code"]) for item in _LEGACY_PRODUCT_LINES}
+        if not any((item.name, item.code) in legacy_pairs for item in rows):
+            return _sync_product_line_renames(owner_type, owner_id, rows)
+
+        # 旧目录只在首次访问时替换一次。发票保存的是品牌名称和编号文本，
+        # 因此替换目录行不会改写或破坏历史报销数据。
+        for item in rows:
+            db.session.delete(item)
+        db.session.flush()
 
     for index, item in enumerate(PRODUCT_LINES):
         db.session.add(
@@ -458,18 +599,36 @@ def _set_active(period: ReimbursementPeriod) -> None:
 def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
     categories = _seed_categories(period.owner_type, period.owner_id)
     invoices = ReimbursementInvoice.query.filter_by(period_id=period.id).all()
+    dispatch_totals = _dispatch_vehicle_totals(period)
+    dispatch_total = round(sum(dispatch_totals.values()), 2)
+    vehicle_adjustment = 0.0
     by_category = []
     for category in categories:
         rows = [item for item in invoices if item.category_id == category.id]
-        by_category.append(
-            {
-                **_category_dict(category),
-                "invoice_count": len(rows),
-                "amount": round(sum(float(item.amount or 0) for item in rows), 2),
-                "tax_amount": round(sum(float(item.tax_amount or 0) for item in rows), 2),
-                "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
-            }
-        )
+        row = {
+            **_category_dict(category),
+            "invoice_count": len(rows),
+            "amount": round(sum(float(item.amount or 0) for item in rows), 2),
+            "tax_amount": round(sum(float(item.tax_amount or 0) for item in rows), 2),
+            "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
+        }
+        if category.export_key == "vehicle" and dispatch_total:
+            # 派车单明细（公里 + 过桥费 + 停车费）是车辆费用的权威来源：
+            # 同一产品线已有车辆类发票时以派车单为准，避免重复计入。
+            covered = [
+                item
+                for item in rows
+                if (item.product_line or "未分类") in dispatch_totals
+            ]
+            covered_total = sum(float(item.total_amount or 0) for item in covered)
+            covered_tax = sum(float(item.tax_amount or 0) for item in covered)
+            vehicle_total = round(dispatch_total + row["total_amount"] - covered_total, 2)
+            vehicle_tax = round(row["tax_amount"] - covered_tax, 2)
+            vehicle_adjustment = round(vehicle_total - row["total_amount"], 2)
+            row["total_amount"] = vehicle_total
+            row["tax_amount"] = vehicle_tax
+            row["amount"] = round(vehicle_total - vehicle_tax, 2)
+        by_category.append(row)
     by_status = []
     for status, label in STATUS_LABELS.items():
         rows = [item for item in invoices if item.status == status]
@@ -481,14 +640,17 @@ def _summary(period: ReimbursementPeriod) -> dict[str, Any]:
                 "total_amount": round(sum(float(item.total_amount or 0) for item in rows), 2),
             }
         )
+    invoice_amount = round(sum(float(item.amount or 0) for item in invoices), 2)
+    invoice_tax = round(sum(float(item.tax_amount or 0) for item in invoices), 2)
+    invoice_total = round(sum(float(item.total_amount or 0) for item in invoices), 2)
     return {
         "period": _period_dict(period),
         "by_category": by_category,
         "by_status": by_status,
         "invoice_count": len(invoices),
-        "amount": round(sum(float(item.amount or 0) for item in invoices), 2),
-        "tax_amount": round(sum(float(item.tax_amount or 0) for item in invoices), 2),
-        "total_amount": round(sum(float(item.total_amount or 0) for item in invoices), 2),
+        "amount": round(invoice_amount + vehicle_adjustment, 2),
+        "tax_amount": invoice_tax,
+        "total_amount": round(invoice_total + vehicle_adjustment, 2),
     }
 
 
@@ -502,16 +664,35 @@ def _aux_rows(period_id: int) -> dict[str, list[dict[str, Any]]]:
     vehicle_rows = []
     for row in rows:
         value = json.loads(row.data_json or "{}")
+        customer = _owned_customer(value.get("customer_id"))
+        if customer:
+            value["customer"] = customer.short_name or customer.name
+            value["customer_level"] = customer.grade or ""
         if row.kind == "vehicle":
             value["id"] = row.id
             vehicle_rows.append(value)
             continue
         value["id"] = row.id
         result.setdefault(row.kind, []).append(value)
+    result["entertainment"] = _sort_rows_by_date(result["entertainment"])
+    result["travel"] = _sort_rows_by_date(result["travel"])
     result["vehicle"] = _normalize_vehicle_rows(
-        vehicle_rows, legacy_km_from_end=True
+        _sort_rows_by_date(vehicle_rows), legacy_km_from_end=True
     )
     return result
+
+
+def _dispatch_vehicle_totals(period: ReimbursementPeriod) -> dict[str, float]:
+    """派车单费用按产品线汇总：公里 + 过桥费 + 停车费。"""
+    totals: dict[str, float] = {}
+    for row in _aux_rows(period.id)["vehicle"]:
+        product_line = str(row.get("product_line") or "").strip() or "未分类"
+        amount = sum(
+            float(_money(row.get(key)))
+            for key in ("km_total", "toll_fee", "parking_fee")
+        )
+        totals[product_line] = round(totals.get(product_line, 0.0) + amount, 2)
+    return totals
 
 
 def _invoice_aux_data(invoice: ReimbursementInvoice) -> dict[str, Any] | None:
@@ -560,6 +741,10 @@ def _sync_invoice_aux(
         return
 
     detail = dict(linked_detail or {})
+    customer = _owned_customer(invoice.customer_id)
+    customer_name = customer.short_name or customer.name if customer else str(detail.get("customer") or "")
+    customer_id = customer.id if customer else None
+    customer_level = customer.grade or "" if customer else invoice.customer_level
     if desired_kind == "entertainment":
         values = {
             "invoice_id": invoice.id,
@@ -567,7 +752,9 @@ def _sync_invoice_aux(
             "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
             "category": detail.get("category") or "餐费",
             "place": detail.get("place") or invoice.vendor,
-            "customer": detail.get("customer") or "",
+            "customer_id": customer_id,
+            "customer": customer_name,
+            "customer_level": customer_level,
             "participants": detail.get("participants") or "",
             "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
             "purpose": detail.get("purpose") or invoice.product_line,
@@ -579,7 +766,9 @@ def _sync_invoice_aux(
             "auto_generated": True,
             "date": detail.get("date") or (invoice.invoice_date.isoformat() if invoice.invoice_date else ""),
             "location": detail.get("location") or "",
-            "customer": detail.get("customer") or "",
+            "customer_id": customer_id,
+            "customer": customer_name,
+            "customer_level": customer_level,
             "expense_type": detail.get("expense_type") or (category.name if category else ""),
             "amount": float(_money(detail.get("amount") if detail.get("amount") not in (None, "") else invoice.total_amount)),
             "purpose": detail.get("purpose") or invoice.product_line,
@@ -780,7 +969,7 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
             grand[export_key] += total
         if invoice.remarks and invoice.remarks not in group["remarks"]:
             group["remarks"].append(invoice.remarks)
-        level = invoice.customer_level or "未分类"
+        level = _invoice_customer_level(invoice) or "未分类"
         values = levels.setdefault(level, {"entertainment": 0.0, "travel": 0.0, "other": 0.0, "total": 0.0})
         if export_key == "entertainment":
             values["entertainment"] += total
@@ -792,14 +981,7 @@ def _cover_payload(period: ReimbursementPeriod) -> dict[str, Any]:
 
     # 派车单是封面“车辆费用”的明细来源。每条记录以
     # 公里数 + 过桥费 + 停车费计费，再按产品线汇总。
-    vehicle_totals: dict[str, float] = {}
-    for row in _aux_rows(period.id)["vehicle"]:
-        product_line = str(row.get("product_line") or "").strip() or "未分类"
-        amount = sum(
-            float(_money(row.get(key)))
-            for key in ("km_total", "toll_fee", "parking_fee")
-        )
-        vehicle_totals[product_line] = vehicle_totals.get(product_line, 0.0) + amount
+    vehicle_totals = _dispatch_vehicle_totals(period)
 
     if vehicle_totals:
         product_lines = {
@@ -873,6 +1055,96 @@ def _write_cell(source, target, sheet_index: int, row: int, col: int, value: Any
     target_row._Row__cells[col].xf_idx = old_xf
 
 
+def _write_xf_cell(
+    target, sheet_index: int, row: int, col: int, value: Any, xf_idx: int
+) -> None:
+    """Write a cell using a cached XF index from the copied workbook."""
+    sheet = target.get_sheet(sheet_index)
+    target_row = sheet.row(row)
+    sheet.write(row, col, value)
+    target_row._Row__cells[col].xf_idx = xf_idx
+
+
+def _copy_row_height(source, target, sheet_index: int, row: int, style_row: int) -> None:
+    """Copy the template row height when dynamically extending a detail table."""
+    source_info = source.sheet_by_index(sheet_index).rowinfo_map.get(style_row)
+    if source_info is None:
+        return
+    target_row = target.get_sheet(sheet_index).row(row)
+    target_row.height = source_info.height
+    target_row.height_mismatch = 1
+
+
+def _prepare_detail_table(
+    source,
+    target,
+    *,
+    sheet_index: int,
+    data_start: int,
+    template_total_row: int,
+    column_count: int,
+    item_count: int,
+) -> int:
+    """Clear/extend data rows and return the dynamically positioned total row."""
+    capacity = max(template_total_row - data_start, item_count)
+    total_row = data_start + capacity
+    sheet = target.get_sheet(sheet_index)
+    template_xfs = {
+        row: [
+            sheet.row(row)._Row__cells.get(col).xf_idx
+            if sheet.row(row)._Row__cells.get(col) is not None
+            else 0
+            for col in range(column_count)
+        ]
+        for row in range(data_start, template_total_row + 1)
+    }
+    for row in range(data_start, total_row):
+        style_row = row if row < template_total_row else data_start
+        _copy_row_height(source, target, sheet_index, row, style_row)
+        for col in range(column_count):
+            _write_xf_cell(
+                target, sheet_index, row, col, "", template_xfs[style_row][col]
+            )
+    _copy_row_height(
+        source, target, sheet_index, total_row, template_total_row
+    )
+    for col in range(column_count):
+        _write_xf_cell(
+            target,
+            sheet_index,
+            total_row,
+            col,
+            "",
+            template_xfs[template_total_row][col],
+        )
+    return total_row
+
+
+def _finalize_detail_sheet(
+    target, *, sheet_index: int, last_row: int, column_count: int
+) -> None:
+    """Trim legacy blank cells and force each detail sheet onto one print page."""
+    sheet = target.get_sheet(sheet_index)
+    rows = sheet._Worksheet__rows
+    for row_index in list(rows):
+        if row_index > last_row:
+            del rows[row_index]
+            continue
+        cells = rows[row_index]._Row__cells
+        for col_index in list(cells):
+            if col_index >= column_count:
+                del cells[col_index]
+    columns = sheet._Worksheet__cols
+    for col_index in list(columns):
+        if col_index >= column_count:
+            del columns[col_index]
+    sheet.fit_num_pages = 1
+    sheet.fit_width_to_pages = 1
+    sheet.fit_height_to_pages = 1
+    sheet.horz_page_breaks = []
+    sheet.vert_page_breaks = []
+
+
 def _excel_date(value: str) -> date | str:
     return _date(value) or ""
 
@@ -913,7 +1185,7 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
     _write_cell(source, target, cover_index, 24, 2, _excel_date(header["date"]))
 
     level_map = {item["level"]: item for item in data["level_groups"]}
-    for offset, level in enumerate(("0-1", "level 1", "level 2", "level 3")):
+    for offset, level in enumerate(CUSTOMER_LEVELS):
         row = 2 + offset
         item = level_map.get(level, {})
         for col, value in {
@@ -939,21 +1211,24 @@ def _build_cover_xls(data: dict[str, Any]) -> io.BytesIO:
 def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]) -> io.BytesIO:
     from xlwt import Formula
 
-    entertainment, travels = aux["entertainment"], aux["travel"]
-    vehicles = _normalize_vehicle_rows(aux["vehicle"], legacy_km_from_end=True)
-    if len(entertainment) > 9:
-        raise ValueError("应酬费母版最多容纳 9 条明细")
-    if len(vehicles) > 11:
-        raise ValueError("派车单母版最多容纳 11 条明细")
-    if len(travels) > 17:
-        raise ValueError("出差明细母版需保留最后一行为合计，最多容纳 17 条明细")
+    entertainment = _sort_rows_by_date(aux["entertainment"])
+    travels = _sort_rows_by_date(aux["travel"])
+    vehicles = _normalize_vehicle_rows(
+        _sort_rows_by_date(aux["vehicle"]), legacy_km_from_end=True
+    )
     source, target = _template_copy(DETAIL_TEMPLATE)
     header = data["header"]
 
     _write_cell(source, target, 0, 1, 0, f"员工姓名：{header['employee_name']}")
-    for row in range(3, 12):
-        for col in range(8):
-            _write_cell(source, target, 0, row, col, "")
+    entertainment_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=0,
+        data_start=3,
+        template_total_row=12,
+        column_count=8,
+        item_count=len(entertainment),
+    )
     for offset, item in enumerate(entertainment):
         amount = float(item.get("amount") or 0)
         values = [
@@ -968,15 +1243,28 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 0, 3 + offset, col, value)
-    _write_cell(source, target, 0, 12, 0, "合计")
-    _write_cell(source, target, 0, 12, 5, Formula("SUM(F4:F12)"))
+    _write_cell(source, target, 0, entertainment_total_row, 0, "合计")
+    _write_cell(
+        source,
+        target,
+        0,
+        entertainment_total_row,
+        5,
+        Formula(f"SUM(F4:F{entertainment_total_row})"),
+    )
 
     _write_cell(source, target, 1, 1, 0, f"员工姓名：{header['employee_name']}")
     _write_cell(source, target, 1, 1, 9, f" {header['period']}派车单")
     _write_cell(source, target, 1, 2, 9, "产品线")
-    for row in range(4, 15):
-        for col in range(10):
-            _write_cell(source, target, 1, row, col, "")
+    vehicle_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=1,
+        data_start=4,
+        template_total_row=15,
+        column_count=10,
+        item_count=len(vehicles),
+    )
     for offset, item in enumerate(vehicles):
         date_value = _date(item.get("date"))
         compact_date = int(date_value.strftime("%Y%m%d")) if date_value else ""
@@ -996,13 +1284,27 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 1, 4 + offset, col, value)
-    for col, formula in zip((6, 7, 8), ("SUM(G5:G15)", "SUM(H5:H15)", "SUM(I5:I15)")):
-        _write_cell(source, target, 1, 15, col, Formula(formula))
+    _write_cell(source, target, 1, vehicle_total_row, 0, "合计")
+    for col, column_letter in zip((6, 7, 8), ("G", "H", "I")):
+        _write_cell(
+            source,
+            target,
+            1,
+            vehicle_total_row,
+            col,
+            Formula(f"SUM({column_letter}5:{column_letter}{vehicle_total_row})"),
+        )
 
     _write_cell(source, target, 2, 1, 0, f"员工姓名：{header['employee_name']}")
-    for row in range(3, 21):
-        for col in range(6):
-            _write_cell(source, target, 2, row, col, "")
+    travel_total_row = _prepare_detail_table(
+        source,
+        target,
+        sheet_index=2,
+        data_start=3,
+        template_total_row=20,
+        column_count=6,
+        item_count=len(travels),
+    )
     for offset, item in enumerate(travels):
         values = [
             _excel_date(item.get("date", "")),
@@ -1014,8 +1316,26 @@ def _build_detail_xls(data: dict[str, Any], aux: dict[str, list[dict[str, Any]]]
         ]
         for col, value in enumerate(values):
             _write_cell(source, target, 2, 3 + offset, col, value)
-    _write_cell(source, target, 2, 20, 0, "合计")
-    _write_cell(source, target, 2, 20, 4, Formula("SUM(E4:E20)"))
+    _write_cell(source, target, 2, travel_total_row, 0, "合计")
+    _write_cell(
+        source,
+        target,
+        2,
+        travel_total_row,
+        4,
+        Formula(f"SUM(E4:E{travel_total_row})"),
+    )
+    for sheet_index, total_row, column_count in (
+        (0, entertainment_total_row, 8),
+        (1, vehicle_total_row, 10),
+        (2, travel_total_row, 6),
+    ):
+        _finalize_detail_sheet(
+            target,
+            sheet_index=sheet_index,
+            last_row=total_row,
+            column_count=column_count,
+        )
     output = io.BytesIO()
     target.save(output)
     output.seek(0)
@@ -1088,6 +1408,9 @@ def register_routes(bp: Blueprint) -> None:
             categories=[_category_dict(item) for item in categories],
             product_lines=[_product_line_dict(item) for item in product_lines],
             offices=[_office_dict(item) for item in offices],
+            customers=[_customer_dict(item) for item in _customer_directory()],
+            customer_creation_enabled=_customer_creation_membership() is not None,
+            customer_levels=list(CUSTOMER_LEVELS),
             recent=[_invoice_dict(item) for item in invoices],
             stats={
                 "invoice_count": int(total_count),
@@ -1098,8 +1421,34 @@ def register_routes(bp: Blueprint) -> None:
             },
         )
 
+    @bp.post("/api/customers")
+    def create_customer_from_invoice():
+        membership = _customer_creation_membership()
+        if membership is None:
+            return jsonify(error="当前账号无权录入客户，请联系组织管理员"), 403
+
+        from customer_projects.services.projects import DomainError, create_customer
+
+        data = _payload()
+        try:
+            customer = create_customer(
+                {
+                    "name": data.get("name"),
+                    "short_name": data.get("short_name"),
+                    "grade": data.get("grade"),
+                },
+                membership,
+            )
+            db.session.commit()
+        except DomainError as exc:
+            db.session.rollback()
+            return jsonify(error=exc.message, field_errors=exc.field_errors), 400
+
+        if hasattr(g, "_reimbursement_customers"):
+            delattr(g, "_reimbursement_customers")
+        return jsonify(success=True, customer=_customer_dict(customer)), 201
+
     @bp.post("/api/periods")
-    @csrf.exempt
     def create_period():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1134,7 +1483,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period)), 201
 
     @bp.post("/api/periods/next")
-    @csrf.exempt
     def create_next_period():
         owner_type, owner_id = _owner()
         latest = (
@@ -1177,7 +1525,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period)), 201
 
     @bp.post("/api/periods/<int:period_id>/activate")
-    @csrf.exempt
     def activate_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1188,7 +1535,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period))
 
     @bp.put("/api/periods/<int:period_id>")
-    @csrf.exempt
     def update_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1212,7 +1558,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, period=_period_dict(period))
 
     @bp.delete("/api/periods/<int:period_id>")
-    @csrf.exempt
     def remove_period(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
@@ -1238,7 +1583,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(categories=[_category_dict(item) for item in _seed_categories(owner_type, owner_id)])
 
     @bp.post("/api/categories")
-    @csrf.exempt
     def create_category():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1261,7 +1605,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, category=_category_dict(category)), 201
 
     @bp.put("/api/categories/<int:category_id>")
-    @csrf.exempt
     def update_category(category_id: int):
         owner_type, owner_id = _owner()
         category = _owned_category(category_id, owner_type, owner_id)
@@ -1277,7 +1620,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, category=_category_dict(category))
 
     @bp.delete("/api/categories/<int:category_id>")
-    @csrf.exempt
     def remove_category(category_id: int):
         owner_type, owner_id = _owner()
         category = _owned_category(category_id, owner_type, owner_id)
@@ -1304,7 +1646,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(product_lines=[_product_line_dict(item) for item in rows])
 
     @bp.post("/api/product-lines")
-    @csrf.exempt
     def create_product_line():
         owner_type, owner_id = _owner()
         _seed_product_lines(owner_type, owner_id)
@@ -1339,7 +1680,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, product_line=_product_line_dict(item)), 201
 
     @bp.put("/api/product-lines/<int:product_line_id>")
-    @csrf.exempt
     def update_product_line(product_line_id: int):
         owner_type, owner_id = _owner()
         item = _owned_product_line(product_line_id, owner_type, owner_id)
@@ -1388,7 +1728,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, product_line=_product_line_dict(item))
 
     @bp.delete("/api/product-lines/<int:product_line_id>")
-    @csrf.exempt
     def remove_product_line(product_line_id: int):
         owner_type, owner_id = _owner()
         item = _owned_product_line(product_line_id, owner_type, owner_id)
@@ -1430,7 +1769,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(offices=[_office_dict(item) for item in rows])
 
     @bp.post("/api/offices")
-    @csrf.exempt
     def create_office():
         owner_type, owner_id = _owner()
         _seed_offices(owner_type, owner_id)
@@ -1458,7 +1796,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, office=_office_dict(office)), 201
 
     @bp.put("/api/offices/<int:office_id>")
-    @csrf.exempt
     def update_office(office_id: int):
         owner_type, owner_id = _owner()
         office = _owned_office(office_id, owner_type, owner_id)
@@ -1491,7 +1828,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, office=_office_dict(office))
 
     @bp.delete("/api/offices/<int:office_id>")
-    @csrf.exempt
     def remove_office(office_id: int):
         owner_type, owner_id = _owner()
         office = _owned_office(office_id, owner_type, owner_id)
@@ -1570,14 +1906,25 @@ def register_routes(bp: Blueprint) -> None:
         office_error = _assign_invoice_office(invoice, data)
         if office_error:
             return office_error
-        for key in ("vendor", "description", "file_url", "file_name", "customer_level", "remarks"):
+        customer_id = str(data.get("customer_id") or "").strip()
+        customer = _owned_customer(customer_id)
+        if customer_id and customer is None:
+            return "请选择当前组织中的有效客户"
+        customer_level = str(data.get("customer_level") or "").strip().upper()
+        if customer_level and customer_level not in CUSTOMER_LEVELS:
+            return "客户等级仅支持 0-1、A、AA、AAA"
+        invoice.customer_id = customer.id if customer else None
+        invoice.customer_level = str(customer.grade or "") if customer else customer_level
+        for key in ("vendor", "description", "file_url", "file_name", "remarks"):
             setattr(invoice, key, str(data.get(key) or "").strip())
         invoice.file_size = int(data.get("file_size") or 0)
-        invoice.status = data.get("status") if data.get("status") in STATUS_LABELS else "pending"
+        if data.get("status") in STATUS_LABELS:
+            invoice.status = data["status"]
+        elif not invoice.status:
+            invoice.status = "pending"
         return None
 
     @bp.post("/api/invoices")
-    @csrf.exempt
     def create_invoice():
         owner_type, owner_id = _owner()
         data = _payload()
@@ -1593,7 +1940,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, invoice=_invoice_dict(invoice)), 201
 
     @bp.put("/api/invoices/<int:invoice_id>")
-    @csrf.exempt
     def update_invoice(invoice_id: int):
         owner_type, owner_id = _owner()
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
@@ -1609,7 +1955,6 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, invoice=_invoice_dict(invoice))
 
     @bp.delete("/api/invoices/<int:invoice_id>")
-    @csrf.exempt
     def remove_invoice(invoice_id: int):
         owner_type, owner_id = _owner()
         invoice = ReimbursementInvoice.query.filter_by(id=invoice_id, owner_type=owner_type, owner_id=owner_id).first()
@@ -1675,18 +2020,33 @@ def register_routes(bp: Blueprint) -> None:
         return jsonify(success=True, summary=_summary(period), aux=_aux_rows(period.id))
 
     @bp.put("/api/aux/<int:period_id>")
-    @csrf.exempt
     def save_aux(period_id: int):
         owner_type, owner_id = _owner()
         period = _owned_period(period_id, owner_type, owner_id)
         if not period:
             return jsonify(error="周期不存在"), 404
         data = _payload()
-        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
+        prepared: dict[str, list[dict[str, Any]]] = {}
         for kind in ("entertainment", "vehicle", "travel"):
             incoming_rows = [dict(row) for row in (data.get(kind) or [])]
             if kind == "vehicle":
                 incoming_rows = _normalize_vehicle_rows(incoming_rows)
+            if kind in {"entertainment", "travel"}:
+                for row in incoming_rows:
+                    customer_id = str(row.get("customer_id") or "").strip()
+                    customer = _owned_customer(customer_id)
+                    if customer_id and customer is None:
+                        return jsonify(error="明细中包含无效或无权访问的客户"), 400
+                    if customer:
+                        row["customer_id"] = customer.id
+                        row["customer"] = customer.short_name or customer.name
+                        row["customer_level"] = customer.grade or ""
+                    else:
+                        row.pop("customer_id", None)
+                        row.pop("customer_level", None)
+            prepared[kind] = incoming_rows
+        ReimbursementAuxDetail.query.filter_by(period_id=period.id).delete()
+        for kind, incoming_rows in prepared.items():
             for index, row in enumerate(incoming_rows):
                 value = dict(row)
                 value.pop("id", None)

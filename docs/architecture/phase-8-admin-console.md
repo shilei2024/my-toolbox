@@ -1,7 +1,8 @@
 # AI Image Platform — Phase 8 管理后台
 
 状态：**已实现并通过自动化、真实 PostgreSQL、BFF 与浏览器验证**  
-页面：Next.js `/admin`  
+页面：统一后台主入口 `mindfulpenpal.com/admin/`（Gallery 模块：`/admin/gallery`）；  
+Gallery Web `/admin` 在配置 `MAVIS_ADMIN_URL` 后 307 重定向到主站，不再维护第二套后台  
 业务边界：Generation Service `AdminService`
 
 ## 1. 完成范围
@@ -12,7 +13,8 @@
 - Workflow 管理：启用/禁用、展示排序、active version 和可用 binding 数量；
 - 最近生成任务：状态、工作流、实际 Provider、成本和时间，不返回 Prompt；
 - 最近管理审计：操作、资源和时间，不回传 audit metadata；
-- Next.js 同源 BFF、前后端双层 Admin RBAC、写限流；
+- 主站 Flask 后台直连 Generation Service，使用与 BFF 相同的 60 秒 HMAC Admin Context；
+  前后端双层 Admin RBAC、写限流；
 - `updatedAt` 乐观并发，陈旧写入返回 409；
 - 管理页面及 API 禁止搜索引擎索引。
 
@@ -22,16 +24,14 @@
 
 ```mermaid
 flowchart LR
-    Admin[管理员浏览器] -->|同源 /api/admin/*| Next[Next.js Admin BFF]
-    Next -->|Flask Session| Flask[身份内省]
-    Flask -->|role=admin| Next
-    Next -->|60 秒 HMAC Admin Context| Service[Generation Service AdminService]
+    Admin[管理员浏览器] -->|Flask Session| Main[Flask 主站 Admin]
+    Main -->|60 秒 HMAC Admin Context| Service[Generation Service AdminService]
     Service -->|事务 + FOR UPDATE| PG[(PostgreSQL)]
     Service -->|审核后失效| Cache[(Gallery Redis Cache)]
     PG --> Audit[(audit_logs / moderation_events)]
 ```
 
-Next.js layout 先过滤非 Admin，改善页面体验；Generation Service 再独立校验签名身份和 `role=admin`。任何客户端绕过页面直接调用 API 都会在业务服务层被拒绝。
+Flask `admin_required` 先校验主站会话角色；Generation Service 再独立校验签名身份和 `role=admin`。任何客户端绕过页面直接调用 API 都会在业务服务层被拒绝。Gallery Web 仅在未配置 `MAVIS_ADMIN_URL` 时保留本地控制台回退（本地开发），生产统一走主站后台。
 
 ## 3. API 契约
 
@@ -87,9 +87,11 @@ Next.js layout 先过滤非 Admin，改善页面体验；Generation Service 再�
 - Admin 领域：`services/generation-service/src/admin/`
 - 数据库迁移：`services/generation-service/database/migrations/0003_admin_console.sql`
 - Fastify Admin routes：`services/generation-service/src/gallery/http-server.ts`
-- Next.js 页面：`apps/gallery-web/src/app/admin/`
-- BFF routes：`apps/gallery-web/src/app/api/admin/`
-- 交互组件：`apps/gallery-web/src/components/admin-console.tsx`
+- Flask 页面与路由：`admin/gallery_admin.py`、`templates/admin/gallery.html`
+- Flask 签名客户端：`utils/gallery_admin_client.py`
+- Next.js 重定向与后台入口：`apps/gallery-web/src/app/admin/`、`src/lib/admin-links.ts`、`src/components/site-header.tsx`
+- BFF routes（本地回退保留）：`apps/gallery-web/src/app/api/admin/`
+- 交互组件（本地回退保留）：`apps/gallery-web/src/components/admin-console.tsx`
 - 测试：`services/generation-service/test/phase8-admin*.ts`
 
 ## 9. 验证结果
@@ -98,6 +100,7 @@ Next.js layout 先过滤非 Admin，改善页面体验；Generation Service 再�
 - PostgreSQL 18 完整执行 migration 0001–0003；审核、发布、409 冲突、Provider/Workflow 更新、moderation event 与 audit transaction 验证通过。
 - Next.js ESLint、TypeScript 与 production build 通过，Admin 页面和四个 BFF route 均为动态服务端路由。
 - BFF 烟测：Admin 页面 200、dashboard 200、合法 PATCH 200、跨站 PATCH 403、陈旧 PATCH 409。
+- 统一后台：Flask `/admin/gallery` 渲染概览/审核/Provider/工作流/任务/审计；批准、拒绝、删除、Provider 与工作流更新均通过签名客户端提交并在 Generation Service 审计落账；Gallery `/admin` 配置后重定向主站。
 - Provider 只返回凭证布尔状态，真实 `secret_ref` 未出现在 API、SSR HTML 或浏览器页面。
 - 1440px 桌面和 390px 移动端验证通过，六项指标和五个管理视图可访问，无横向页面溢出。
 

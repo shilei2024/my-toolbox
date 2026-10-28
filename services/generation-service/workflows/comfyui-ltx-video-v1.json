@@ -1,0 +1,21 @@
+{
+  "1": { "class_type": "UNETLoader", "inputs": { "unet_name": "{{model}}", "weight_dtype": "default" } },
+  "2": { "class_type": "DualCLIPLoader", "inputs": { "clip_name1": "gemma_3_12B_it_fp8_e4m3fn.safetensors", "clip_name2": "ltx-2.3_text_projection_bf16.safetensors", "type": "ltxv", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "LTX23_video_vae_bf16.safetensors" } },
+  "4": { "class_type": "VAELoaderKJ", "inputs": { "vae_name": "LTX23_audio_vae_bf16.safetensors", "device": "main_device", "weight_dtype": "bf16" } },
+  "5": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{prompt}}", "clip": ["2", 0] } },
+  "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{negative_prompt}}", "clip": ["2", 0] } },
+  "7": { "class_type": "LTXVConditioning", "inputs": { "positive": ["5", 0], "negative": ["6", 0], "frame_rate": "{{fps}}" } },
+  "8": { "class_type": "EmptyLTXVLatentVideo", "inputs": { "width": "{{width}}", "height": "{{height}}", "length": "{{frame_count}}", "batch_size": 1 } },
+  "9": { "class_type": "LTXVEmptyLatentAudio", "inputs": { "audio_vae": ["4", 0], "frames_number": "{{frame_count}}", "frame_rate": "{{fps}}", "batch_size": 1 } },
+  "10": { "class_type": "LTXVConcatAVLatent", "inputs": { "video_latent": ["8", 0], "audio_latent": ["9", 0] } },
+  "11": { "class_type": "RandomNoise", "inputs": { "noise_seed": "{{seed}}" } },
+  "12": { "class_type": "CFGGuider", "inputs": { "model": ["1", 0], "positive": ["7", 0], "negative": ["7", 1], "cfg": "{{cfg}}" } },
+  "13": { "class_type": "KSamplerSelect", "inputs": { "sampler_name": "euler_ancestral_cfg_pp" } },
+  "14": { "class_type": "ManualSigmas", "inputs": { "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.881203, 0.863321, 0.841251, 0.820089, 0.655, 0.381875, 0.0" } },
+  "15": { "class_type": "SamplerCustomAdvanced", "inputs": { "noise": ["11", 0], "guider": ["12", 0], "sampler": ["13", 0], "sigmas": ["14", 0], "latent_image": ["10", 0] } },
+  "16": { "class_type": "LTXVSeparateAVLatent", "inputs": { "av_latent": ["15", 0] } },
+  "17": { "class_type": "VAEDecodeTiled", "inputs": { "samples": ["16", 0], "vae": ["3", 0], "tile_size": 512, "overlap": 64, "temporal_size": 4096, "temporal_overlap": 64 } },
+  "18": { "class_type": "LTXVAudioVAEDecode", "inputs": { "samples": ["16", 1], "audio_vae": ["4", 0] } },
+  "19": { "class_type": "VHS_VideoCombine", "inputs": { "images": ["17", 0], "audio": ["18", 0], "frame_rate": "{{fps}}", "loop_count": 0, "filename_prefix": "generation/ltx-video", "format": "video/h264-mp4", "pingpong": false, "save_output": true, "pix_fmt": "yuv420p", "crf": 19, "save_metadata": true, "trim_to_audio": false } }
+}

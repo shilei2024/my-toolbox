@@ -11,6 +11,7 @@
 | 目录 | 内容 | 主要读者 |
 | --- | --- | --- |
 | [architecture](architecture/README.md) | 系统边界、模块设计、数据模型和架构图 | 架构师、开发者 |
+| [product](product/README.md) | 产品需求、范围、角色、业务规则和验收标准 | 产品、业务、设计、开发与测试 |
 | [deployment](deployment/README.md) | 从准备环境到发布、验证和回滚的小白教程 | 首次部署人员 |
 | [operations](operations/README.md) | 日常巡检、真实部署验证、备份恢复和事件响应 | 运维人员 |
 | [api](api/README.md) | 对外 BFF、内部服务 API 及鉴权边界 | 前后端开发者 |
@@ -18,6 +19,16 @@
 | [roadmap](roadmap/README.md) | 平台原则、里程碑、依赖和上线顺序 | 产品、技术负责人 |
 | [troubleshooting](troubleshooting/README.md) | 常见故障的定位、恢复和升级路径 | 开发、运维、客服 |
 | [changelog](changelog/README.md) | Phase 1–10 与后续里程碑的交付和验证记录 | 全体成员 |
+
+## 文档去重说明（2026-08-08 整理）
+
+- **新手部署**：唯一入口是 [deploy/DEPLOY_GUIDE.md](../deploy/DEPLOY_GUIDE.md)；
+  规范部署索引见 [deployment/README.md](deployment/README.md)，两者互为补充而非重复。
+- **本地开发**：见 [local-development-bridge.md](deployment/local-development-bridge.md)。
+- **变更记录**：根目录 [CHANGELOG.md](../CHANGELOG.md) 为最新权威变更日志；
+  [changelog/](changelog/README.md) 保留历史阶段档案，不再追加新条目。
+- **平台升级方案**：原 8 项需求方案已结项；后续待办（订阅会员、Provider
+  凭证后台维护等）已并入[平台路线图](roadmap/ai-toolbox-platform-roadmap.md)的 M2/M5。
 
 ## 文档治理规则
 

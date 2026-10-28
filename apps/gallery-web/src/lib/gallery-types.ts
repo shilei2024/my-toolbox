@@ -8,10 +8,16 @@
 
 export type ViewerRole = "guest" | "user" | "admin";
 
+/** Bridge health between Gallery Web and the Flask auth introspection endpoint. */
+export type ViewerBridge = "ok" | "guest" | "unconfigured" | "error";
+
 export interface ViewerContext {
   readonly userId?: number;
+  readonly email?: string;
+  readonly nickname?: string;
   readonly role: ViewerRole;
   readonly requestId: string;
+  readonly bridge?: ViewerBridge;
 }
 
 export interface GalleryFilters {
@@ -21,14 +27,23 @@ export interface GalleryFilters {
   readonly orientation?: "portrait" | "square" | "landscape";
 }
 
-/** BFF 请求参数：q 为搜索词，tag/workflow/orientation 为筛选，cursor/limit 为分页。 */
+/** BFF 请求参数：q 为搜索词，tag/workflow/orientation/mediaType 为筛选，cursor/limit 为分页。 */
 export interface GalleryQuery {
   readonly q?: string;
   readonly tag?: string;
   readonly workflow?: string;
   readonly orientation?: "portrait" | "square" | "landscape";
+  readonly mediaType?: "image" | "video";
+  readonly sort?: "latest" | "popular";
   readonly cursor?: string;
   readonly limit?: number;
+}
+
+/** 画廊顶部筛选面板的聚合数据（模型分布、图片/视频构成）。 */
+export interface GalleryFacets {
+  readonly total: number;
+  readonly media: { readonly image: number; readonly video: number };
+  readonly workflows: readonly { readonly name: string; readonly count: number }[];
 }
 
 export interface ImageAssetView {
@@ -51,6 +66,10 @@ export interface GalleryImageSummary {
   readonly description: string;
   readonly width: number;
   readonly height: number;
+  /** 作品媒体类型：视频与图片共用画廊、审核与发布链路。 */
+  readonly mediaType?: "image" | "video";
+  /** 视频时长（秒），仅 mediaType=video 时返回。 */
+  readonly durationSeconds?: number;
   readonly workflowName: string;
   readonly publishedAt: string;
   readonly asset: ImageAssetView;

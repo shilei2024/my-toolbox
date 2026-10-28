@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}我的工作台 — 客户项目跟进{% endblock %}
+{% block description %}集中查看到期、逾期、停滞和最近更新的客户项目。{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <header class="cp-hero cp-hero--compact">
+    <div>
+      <p class="cp-kicker">CUSTOMER PROJECTS</p>
+      <h1>今天先推进什么？</h1>
+      <p>把到期动作、停滞风险和最近变化放在同一张工作台上。</p>
+    </div>
+    <a class="btn btn-light cp-primary-action" href="{{ url_for('customer_projects.customers') }}"><i class="bi bi-buildings"></i> 选择客户</a>
+  </header>
+
+  <section class="cp-panel">
+    <div class="cp-panel-heading">
+      <div><p class="cp-kicker">MARKET SCOPE</p><h2>全部跟进客户市场规模</h2><p>{{ market_scope.customer_count }} 个客户 · {{ market_scope.project_count }} 个非归档项目</p></div>
+      <a href="{{ url_for('customer_projects.market_scope_report') }}">按品牌、类别查看 <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <a class="cp-market-scope cp-market-scope--link" href="{{ url_for('customer_projects.market_scope_report') }}" aria-label="查看 TAM、SAM、SOM 品牌和类别明细">
+      <article><span>TAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.tam_usd) }}</strong><small>全部机会规模</small></article>
+      <article><span>SAM</span><strong>USD {{ '{:,.2f}'.format(market_scope.sam_usd) }}</strong><small>可服务机会规模</small></article>
+      <article><span>SOM</span><strong>USD {{ '{:,.2f}'.format(market_scope.som_usd) }}</strong><small>可获得机会规模</small></article>
+      {% if market_scope.incomplete_material_count %}<p>另有 {{ market_scope.incomplete_material_count }} 条物料因数量或价格缺失未计入。</p>{% endif %}
+    </a>
+    <div class="cp-panel-heading cp-customer-scope-heading"><div><h3>客户市场规模</h3><p>按客户汇总当前可见的非归档项目</p></div></div>
+    <div class="cp-customer-scope" aria-label="客户 TAM、SAM、SOM 明细">
+      <div class="cp-customer-scope__head"><span>客户</span><span>TAM</span><span>SAM</span><span>SOM</span></div>
+      {% for row in market_scope.customer_breakdown %}
+        <a class="cp-customer-scope__row" href="{{ url_for('customer_projects.customer_detail', customer_id=row.customer_id) }}">
+          <span><strong>{{ row.customer_name }}</strong><small>{{ row.project_count }} 个项目</small></span>
+          <span><small>TAM</small>USD {{ '{:,.2f}'.format(row.tam_usd) }}</span>
+          <span><small>SAM</small>USD {{ '{:,.2f}'.format(row.sam_usd) }}</span>
+          <span><small>SOM</small>USD {{ '{:,.2f}'.format(row.som_usd) }}</span>
+        </a>
+      {% else %}<p class="cp-empty-message">暂无客户市场规模数据。</p>{% endfor %}
+    </div>
+  </section>
+
+  <div class="cp-metric-grid" aria-label="项目提醒摘要">
+    <a class="cp-metric is-danger{% if focus == 'overdue' %} is-active{% endif %}" href="{{ url_for('customer_projects.dashboard', focus='overdue', _anchor='focus-projects') }}" {% if focus == 'overdue' %}aria-current="page"{% endif %}><span>已逾期</span><strong>{{ counts.overdue }}</strong><small>查看项目并立即更新</small></a>
+    <a class="cp-metric is-today{% if focus == 'today' %} is-active{% endif %}" href="{{ url_for('customer_projects.dashboard', focus='today', _anchor='focus-projects') }}" {% if focus == 'today' %}aria-current="page"{% endif %}><span>今日到期</span><strong>{{ counts.today }}</strong><small>查看今天需要完成的项目</small></a>
+    <a class="cp-metric{% if focus == 'upcoming' %} is-active{% endif %}" href="{{ url_for('customer_projects.dashboard', focus='upcoming', _anchor='focus-projects') }}" {% if focus == 'upcoming' %}aria-current="page"{% endif %}><span>7 天内到期</span><strong>{{ counts.upcoming }}</strong><small>查看项目并提前准备</small></a>
+    <a class="cp-metric is-warning{% if focus == 'stale' %} is-active{% endif %}" href="{{ url_for('customer_projects.dashboard', focus='stale', _anchor='focus-projects') }}" {% if focus == 'stale' %}aria-current="page"{% endif %}><span>长期未更新</span><strong>{{ counts.stale }}</strong><small>查看停滞项目并补充进展</small></a>
+  </div>
+
+  <section class="cp-panel" id="focus-projects">
+    <div class="cp-panel-heading">
+      <div><p class="cp-kicker">PRIORITIES</p><h2>{{ focus_label }}</h2><p>{% if focus %}点击项目进入详情更新；返回工作台后按最新数据重新计算。{% else %}按跟进时间排序的近期项目。{% endif %}</p></div>
+      {% if focus %}<a href="{{ url_for('customer_projects.dashboard', _anchor='focus-projects') }}">清除筛选 <i class="bi bi-x-lg"></i></a>{% else %}<a href="{{ url_for('customer_projects.customers') }}">按客户查看 <i class="bi bi-arrow-right"></i></a>{% endif %}
+    </div>
+    {% if projects %}
+      <div class="cp-project-list">
+        {% for project in projects %}
+          <a class="cp-project-row" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">
+            <span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ customer_names.get(project.customer_id, '未知客户') }} · {{ project.project_code }}</small></span>
+            <span class="cp-stage" data-stage="{{ project.stage_code }}">{{ stages.get(project.stage_code, project.stage_code) }}</span>
+            <span class="cp-next"><small>下一步</small>{{ project.next_action }}</span>
+            <span class="cp-date"><small>跟进时间</small>{{ project.next_follow_up_at|china_time('%m-%d %H:%M') }}</span>
+            <span class="cp-owner"><small>主负责人</small>{{ user_names.get(project.primary_sales_user_id, '待确认') }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="cp-empty"><i class="bi bi-inbox"></i><h3>{% if focus %}当前分类没有项目{% else %}还没有客户项目{% endif %}</h3><p>{% if focus %}选择其他提醒分类，或清除筛选查看近期项目。{% else %}先创建客户，再建立第一个项目和下一步计划。{% endif %}</p><a class="btn btn-primary" href="{{ url_for('customer_projects.customers') }}">查看客户</a></div>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

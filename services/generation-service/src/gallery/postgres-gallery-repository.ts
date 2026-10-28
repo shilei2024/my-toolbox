@@ -3,7 +3,7 @@ import type { GalleryAssetRecord, GalleryAssetUrlResolver } from "./asset-url.ts
 import type { DecodedCursor } from "./cursor.ts";
 import { GalleryError } from "./errors.ts";
 import type { GalleryRepository, RepositoryPage } from "./repository.ts";
-import type { AssetDeletionTask, DownloadGrant, GalleryFilters, GalleryImageDetail, GalleryImageSummary, ImageAssetView, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
+import type { AssetDeletionTask, DownloadGrant, GalleryFacets, GalleryFilters, GalleryImageDetail, GalleryImageSummary, GallerySort, ImageAssetView, InteractionResult, SeoImageEntry, ViewerContext } from "./types.ts";
 
 interface GalleryRow extends QueryResultRow {
   id: string;
@@ -14,6 +14,8 @@ interface GalleryRow extends QueryResultRow {
   negative_prompt: string;
   prompt_visibility: "public" | "hidden";
   visibility: "public" | "private";
+  media_type: "image" | "video";
+  duration_seconds: number | null;
   creator_user_id: number | null;
   provider_code_snapshot: string;
   model_snapshot: string | null;
@@ -67,10 +69,10 @@ export class PostgresGalleryRepository implements GalleryRepository {
     this.#assets = assets;
   }
 
-  async listPublic(filters: GalleryFilters, cursor: DecodedCursor | undefined, limit: number, viewer: ViewerContext): Promise<RepositoryPage<GalleryImageSummary>> {
+  async listPublic(filters: GalleryFilters, cursor: DecodedCursor | undefined, limit: number, viewer: ViewerContext, sort: GallerySort = "latest"): Promise<RepositoryPage<GalleryImageSummary>> {
     const values: unknown[] = [viewer.userId ?? null, limit + 1];
     const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL"];
-    if (cursor) {
+    if (cursor && sort !== "popular") {
       values.push(cursor.at, cursor.id);
       conditions.push(`(i.published_at, i.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
     }
@@ -86,14 +88,47 @@ export class PostgresGalleryRepository implements GalleryRepository {
       values.push(filters.workflow);
       conditions.push(`i.workflow_name_snapshot = $${values.length}`);
     }
+    if (filters.mediaType) {
+      values.push(filters.mediaType);
+      conditions.push(`i.media_type = $${values.length}`);
+    }
     if (filters.orientation === "portrait") conditions.push("i.height > i.width");
     if (filters.orientation === "square") conditions.push("i.height = i.width");
     if (filters.orientation === "landscape") conditions.push("i.width > i.height");
+    const order = sort === "popular" ? "i.favorite_count DESC, i.published_at DESC, i.id DESC" : "i.published_at DESC, i.id DESC";
     const rows = await this.queryRows(`${baseSelect("list")}
       WHERE ${conditions.join(" AND ")}
-      ORDER BY i.published_at DESC, i.id DESC
+      ORDER BY ${order}
       LIMIT $2`, values);
     return this.toPage(rows, limit, "public");
+  }
+
+  async facets(): Promise<GalleryFacets> {
+    const [totals, workflows] = await Promise.all([
+      this.#pool.query<{ media_type: "image" | "video"; total: string }>(`SELECT i.media_type, count(*) AS total
+        FROM ai.images i
+        WHERE i.visibility = 'public' AND i.moderation_status = 'approved' AND i.deleted_at IS NULL AND i.published_at IS NOT NULL
+        GROUP BY i.media_type`),
+      this.#pool.query<{ name: string; total: string }>(`SELECT i.workflow_name_snapshot AS name, count(*) AS total
+        FROM ai.images i
+        WHERE i.visibility = 'public' AND i.moderation_status = 'approved' AND i.deleted_at IS NULL AND i.published_at IS NOT NULL
+          AND btrim(i.workflow_name_snapshot) <> ''
+        GROUP BY i.workflow_name_snapshot
+        ORDER BY count(*) DESC, i.workflow_name_snapshot ASC
+        LIMIT 12`),
+    ]);
+    let images = 0;
+    let videos = 0;
+    for (const row of totals.rows) {
+      const total = Number(row.total);
+      if (row.media_type === "video") videos += total;
+      else images += total;
+    }
+    return {
+      total: images + videos,
+      media: { image: images, video: videos },
+      workflows: workflows.rows.map((row) => ({ name: row.name, count: Number(row.total) })),
+    };
   }
 
   async listOwned(userId: number, cursor: DecodedCursor | undefined, limit: number): Promise<RepositoryPage<GalleryImageSummary>> {
@@ -142,7 +177,8 @@ export class PostgresGalleryRepository implements GalleryRepository {
 
   async listSeoImages(cursor: DecodedCursor | undefined, limit: number): Promise<RepositoryPage<SeoImageEntry>> {
     const values: unknown[] = [limit + 1];
-    const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL"];
+    // og:image / sitemap 只接受图片资源；视频作品不进入 SEO 资产列表。
+    const conditions = ["i.visibility = 'public'", "i.moderation_status = 'approved'", "i.deleted_at IS NULL", "i.published_at IS NOT NULL", "i.media_type = 'image'"];
     if (cursor) {
       values.push(cursor.at, cursor.id);
       conditions.push(`(i.published_at, i.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);
@@ -213,7 +249,7 @@ export class PostgresGalleryRepository implements GalleryRepository {
       const result = await client.query<GalleryRow>(`${baseSelect("download")}
         WHERE i.id = $2 AND i.deleted_at IS NULL
           AND ((i.visibility = 'public' AND i.moderation_status = 'approved') OR ($1::integer IS NOT NULL AND i.creator_user_id = $1) OR $3::boolean)
-        LIMIT 1 FOR UPDATE OF i`, [viewer.userId ?? null, imageId, viewer.role === "admin"]);
+        LIMIT 1`, [viewer.userId ?? null, imageId, viewer.role === "admin"]);
       const row = result.rows[0];
       if (!row) throw new GalleryError("image_not_found", "Image was not found", 404);
       await client.query("INSERT INTO ai.download_logs (image_id, user_id, ip_hash, user_agent_hash) VALUES ($1, $2, $3, $4)", [imageId, viewer.userId ?? null, ipHash ?? null, userAgentHash ?? null]);
@@ -260,7 +296,7 @@ export class PostgresGalleryRepository implements GalleryRepository {
 
   private async setInteraction(table: "favorites" | "likes", countColumn: "favorite_count" | "like_count", action: string, imageId: string, userId: number, active: boolean, requestId: string): Promise<InteractionResult> {
     return this.transaction(async (client) => {
-      const visible = await client.query("SELECT 1 FROM ai.images WHERE id = $1 AND visibility = 'public' AND moderation_status = 'approved' AND deleted_at IS NULL FOR UPDATE", [imageId]);
+      const visible = await client.query("SELECT 1 FROM ai.images WHERE id = $1 AND visibility = 'public' AND moderation_status = 'approved' AND deleted_at IS NULL", [imageId]);
       if (visible.rowCount !== 1) throw new GalleryError("image_not_found", "Image was not found", 404);
       if (active) await client.query(`INSERT INTO ai.${table} (image_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [imageId, userId]);
       else await client.query(`DELETE FROM ai.${table} WHERE image_id = $1 AND user_id = $2`, [imageId, userId]);
@@ -291,6 +327,8 @@ export class PostgresGalleryRepository implements GalleryRepository {
       description: row.description,
       width: row.width,
       height: row.height,
+      mediaType: row.media_type === "video" ? "video" : "image",
+      ...(row.media_type === "video" && row.duration_seconds !== null ? { durationSeconds: Number(row.duration_seconds) } : {}),
       workflowName: row.workflow_name_snapshot,
       publishedAt: iso(row.published_at ?? row.created_at),
       asset,

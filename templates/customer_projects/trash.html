@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}回收站 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell">
+  {% include "customer_projects/_module_nav.html" %}
+  <div class="cp-page-heading"><div><p class="cp-kicker">RECYCLE BIN</p><h1>回收站</h1><p>项目默认保留 30 天；恢复不会丢失物料、竞争方案和跟进历史。</p></div></div>
+  <section class="cp-panel"><div class="cp-project-list">{% for project in projects %}<article class="cp-project-row"><span class="cp-project-identity"><strong>{{ project.name }}</strong><small>{{ project.project_code }} · 删除于 {{ project.deleted_at|china_time('%Y-%m-%d %H:%M') }}</small></span><span class="cp-next"><small>删除原因</small>{{ project.delete_reason }}</span><form method="post" action="{{ url_for('customer_projects.project_restore', project_id=project.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-primary">恢复</button></form></article>{% else %}<div class="cp-empty"><i class="bi bi-trash3"></i><h3>回收站为空</h3><p>软删除的项目会在这里等待恢复或到期清理。</p></div>{% endfor %}</div></section>
+</section>
+{% endblock %}

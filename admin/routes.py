@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from flask import abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from auth.decorators import admin_required
 from extensions import db
@@ -129,6 +130,16 @@ def users():
         .all()
     )
     user_ids = [user.id for user in items]
+    credits: dict[int, float] = {}
+    if user_ids:
+        try:
+            rows = db.session.execute(
+                text("SELECT user_id, available_amount FROM ai.credit_accounts WHERE user_id IN :ids"),
+                {"ids": tuple(user_ids)},
+            ).all()
+            credits = {int(row[0]): float(row[1]) for row in rows}
+        except Exception:  # noqa: BLE001
+            credits = {}
     private_tool_ids = [tool.id for tool in private_tools]
     grants = set()
     if user_ids and private_tool_ids:
@@ -146,6 +157,7 @@ def users():
         users=items,
         private_tools=private_tools,
         tool_grants=grants,
+        credits=credits,
         page=page,
         per_page=per_page,
         total=total,
@@ -196,6 +208,202 @@ def set_user_limit(user_id: int):
     user.custom_limits = json.dumps(new_map) if new_map else None
     db.session.commit()
     return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/nickname", methods=["POST"])
+@login_required
+@admin_required
+def set_user_nickname(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    nickname = request.form.get("nickname", "").strip()
+    if len(nickname) > 80:
+        flash("昵称最多 80 个字符。", "danger")
+        return redirect(url_for("admin.users"))
+    user.nickname = nickname or None
+    db.session.commit()
+    from auth.routes import _sync_gallery_display_name  # noqa: PLC0415
+
+    _sync_gallery_display_name(user.id, user.display_name)
+    flash(f"用户 {user.email} 的昵称已更新。", "success")
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/credits", methods=["POST"])
+@login_required
+@admin_required
+def set_user_credits(user_id: int):
+    from datetime import datetime, timezone  # noqa: PLC0415
+    from sqlalchemy import text  # noqa: PLC0415
+
+    user = db.session.get(User, user_id) or abort(404)
+    raw = request.form.get("delta", "").strip()
+    account = request.form.get("account", "free").strip().lower()
+    if account not in {"free", "member"}:
+        flash("账本类型必须是 free / member。", "danger")
+        return redirect(url_for("admin.users"))
+    try:
+        delta = round(float(raw), 4)
+        if not (-1000000000 <= delta <= 1000000000):
+            raise ValueError
+    except ValueError:
+        flash("积分调整必须是 -1000000000 ~ 1000000000 的数字。", "danger")
+        return redirect(url_for("admin.users"))
+    if delta == 0:
+        flash("调整值为 0，未做任何修改。", "warning")
+        return redirect(url_for("admin.users"))
+
+    # Stable idempotency key derived from the request payload: retrying the
+    # exact same adjustment (e.g. double-click, network retry) must not apply
+    # twice. A timestamp-based key would make every resubmission distinct and
+    # double-adjust credits.
+    idempotency = f"admin-credit:{user.id}:{account}:{delta:.4f}"
+    table = "ai.member_credit_accounts" if account == "member" else "ai.credit_accounts"
+    account_type = "member" if account == "member" else "free"
+    try:
+        with db.engine.begin() as conn:
+            # Idempotency: if this exact adjustment was already applied, do not
+            # touch the balance again (credit_ledger_entries has a UNIQUE
+            # (user_id, account_type, idempotency_key) constraint).
+            already = conn.execute(
+                text(
+                    "SELECT 1 FROM ai.credit_ledger_entries "
+                    "WHERE user_id = :uid AND account_type = :acct AND idempotency_key = :idem"
+                ),
+                {"uid": user.id, "acct": account_type, "idem": idempotency},
+            ).scalar()
+            if already:
+                flash("该笔积分调整已应用过（重复提交已忽略）。", "warning")
+                return redirect(url_for("admin.users"))
+
+            current = conn.execute(
+                text(f"SELECT available_amount FROM {table} WHERE user_id = :uid FOR UPDATE"),
+                {"uid": user.id},
+            ).scalar() or 0
+            new_available = round(float(current) + delta, 4)
+            if new_available < 0:
+                flash("调整后积分不能为负数（当前可用积分不足）。", "danger")
+                return redirect(url_for("admin.users"))
+            conn.execute(
+                text(
+                    f"INSERT INTO {table} (user_id, available_amount, reserved_amount, lifetime_granted, lifetime_spent, version, created_at, updated_at) "
+                    "VALUES (:uid, :delta, 0, GREATEST(:delta, 0), 0, 0, now(), now()) "
+                    "ON CONFLICT (user_id) DO UPDATE SET "
+                    f"available_amount = {table}.available_amount + :delta, "
+                    f"lifetime_granted = {table}.lifetime_granted + GREATEST(:delta, 0), "
+                    f"version = {table}.version + 1, updated_at = now()"
+                ),
+                {"uid": user.id, "delta": delta},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO ai.credit_ledger_entries (user_id, account_type, entry_type, delta_available, delta_reserved, available_after, reserved_after, source_type, source_ref, idempotency_key, metadata) "
+                    "VALUES (:uid, :account_type, 'admin_adjustment', :delta, 0, :after, 0, 'admin', :ref, :idem, jsonb_build_object('operator_user_id', :op))"
+                ),
+                {"uid": user.id, "account_type": account_type, "delta": delta, "after": new_available, "ref": f"user:{user.id}", "idem": idempotency, "op": current_user.id},
+            )
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        flash("积分调整失败，请确认 ai 数据库表已迁移（0005）。", "danger")
+        return redirect(url_for("admin.users"))
+    flash(f"用户 {user.email} 积分调整 {delta:+,}，当前可用 {new_available:,.4f}。", "success")
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_user(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    if user.id == current_user.id:
+        flash("不能删除自己的账号。", "warning")
+        return redirect(url_for("admin.users"))
+    if user.is_admin:
+        flash("不能删除管理员账号。", "warning")
+        return redirect(url_for("admin.users"))
+    # Soft delete: disable login and anonymize the account while preserving
+    # audit history, usage logs and generated artwork attribution.
+    user.is_active_user = False
+    user.email = f"deleted-{user.id}@invalid.local"
+    user.nickname = None
+    user.password_hash = "!"
+    db.session.commit()
+    flash(f"用户 #{user.id} 已删除（停用并匿名化，历史记录保留）。", "success")
+    return redirect(url_for("admin.users"))
+
+
+@admin_bp.route("/users/<int:user_id>/plan", methods=["POST"])
+@login_required
+@admin_required
+def set_user_plan(user_id: int):
+    user = db.session.get(User, user_id) or abort(404)
+    plan = request.form.get("plan", "free").strip().lower()
+    if plan not in {"free", "member", "pro", "vip"}:
+        flash("会员等级必须是 free / member / pro / vip。", "danger")
+        return redirect(url_for("admin.users"))
+    user.plan = plan
+    db.session.commit()
+    flash(f"用户 {user.email} 的会员等级已设为 {plan}。", "success")
+    return redirect(url_for("admin.users"))
+
+
+# -----------------------------------------------------------------------------
+# Redemption codes (Phase 3: China-friendly credit top-up)
+# -----------------------------------------------------------------------------
+@admin_bp.route("/redemption")
+@login_required
+@admin_required
+def redemption():
+    codes: list[dict] = []
+    total = 0
+    try:
+        rows = db.session.execute(
+            text("SELECT code, amount, status, created_at, redeemed_at, redeemed_by FROM ai.redemption_codes ORDER BY created_at DESC LIMIT 200")
+        ).all()
+        codes = [
+            {
+                "code": row[0],
+                "amount": float(row[1]),
+                "status": row[2],
+                "created_at": row[3],
+                "redeemed_at": row[4],
+                "redeemed_by": row[5],
+            }
+            for row in rows
+        ]
+        total = db.session.execute(text("SELECT count(*) FROM ai.redemption_codes")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        pass
+    return render_template("admin/redemption.html", codes=codes, total=total, generated=[])
+
+
+@admin_bp.route("/redemption/generate", methods=["POST"])
+@login_required
+@admin_required
+def redemption_generate():
+    try:
+        amount = round(float(request.form.get("amount", "")), 4)
+        count = int(request.form.get("count", ""))
+    except ValueError:
+        flash("金额/数量格式不正确。", "danger")
+        return redirect(url_for("admin.redemption"))
+    if not (0 < amount <= 1000000) or not (1 <= count <= 200):
+        flash("金额需在 0–1000000 之间，数量需在 1–200 之间。", "danger")
+        return redirect(url_for("admin.redemption"))
+    generated: list[str] = []
+    try:
+        with db.engine.begin() as conn:
+            for _ in range(count):
+                code = "MP-" + "-".join(secrets.token_hex(2).upper() for _ in range(3))
+                conn.execute(
+                    text("INSERT INTO ai.redemption_codes (code, amount, created_by) VALUES (:code, :amount, :by)"),
+                    {"code": code, "amount": amount, "by": current_user.id},
+                )
+                generated.append(code)
+    except Exception:  # noqa: BLE001
+        flash("生成失败，请确认 ai.redemption_codes 表已迁移（0010）。", "danger")
+        return redirect(url_for("admin.redemption"))
+    flash(f"已生成 {len(generated)} 个兑换码，每个 {amount:g} 会员积分。", "success")
+    return render_template("admin/redemption.html", codes=[], total=0, generated=generated)
 
 
 @admin_bp.route(
@@ -326,6 +534,7 @@ def settings():
         "site_tagline",
         "daily_free_limit",
         "anon_free_limit",
+        "signup_credit_grant",
     )
     if request.method == "POST":
         submitted = {
@@ -347,7 +556,7 @@ def settings():
             else:
                 row.value = value
         db.session.commit()
-        apply_runtime_settings(current_app)
+        apply_runtime_settings(current_app, force=True)
         flash("设置已保存。", "success")
         return redirect(url_for("admin.settings"))
 

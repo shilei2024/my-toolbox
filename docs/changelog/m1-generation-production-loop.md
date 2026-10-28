@@ -26,9 +26,78 @@
 
 验证：Generation Service typecheck + 62 项测试、Gallery Web ESLint + SEO 测试 + 生产构建、Python 迁移契约测试 14 项全部通过。
 
+## M1.2 创作工作台反馈闭环
+
+解决"生成完成后只能看外链、失败后只能重填表单"的两个体验缺口：
+
+- **最近任务列表**：`GET /v1/generations` 返回当前用户的最近生成任务（默认 24，最大 50），支持签名 keyset 游标分页与可选 `status` 过滤；任务只按 owner 可见，游标带 scope 与 HMAC，防跨用户遍历与篡改。
+- **Prompt 回填**：`GenerationView` 增加 `prompt` / `negativePrompt`（仅用户本人与管理员可见），失败任务可在工作台一键回填原参数后重新创作，避免手工复制丢失参数。
+- **内嵌预览**：任务完成后工作台直接通过既有 Gallery BFF（`/api/gallery/{slug}`）获取资产 URL 并内嵌展示图片，不再只有"查看作品"外链；最近任务面板同时显示完成缩略图。
+- **历史任务操作**：最近任务面板支持点击查看状态、对排队/运行中任务发起取消、对失败任务回填重试；取消仍走原有幂等协作取消链路，积分释放逻辑不变。
+
+实现边界：列表查询直接落在 `ai.generation_jobs`（PostgreSQL 事实源），不新增表、不引入新基础设施；游标复用 Gallery 签名编解码器，BFF 仅透传。该能力是未来 M3 平台任务中心在生成模块内的模块级前身，暂不做跨模块抽象。
+
+验证：Generation Service typecheck + 65 项测试（新增列表权限/校验/游标/HTTP 契约）。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
+
+## M1.3 创作首页体验与工作流约束修复
+
+修复 Preview 验收反馈的首页问题，并清理同类体验缺陷：
+
+- **工作流选项**：`GenerationWorkflow` 新增 `countRange` 与 `sizes`（由 `workflow_versions.input_schema` 派生）；创建任务时服务端按 input_schema 校验尺寸与数量，前端按所选创作方式动态渲染比例（1:1 / 3:4 / 4:3 / 9:16 / 16:9 / 2:3 / 3:2）与生成数量，避免"只能 1 张却可选 4 张"。
+- **登录态**：创作工作台改为通过 `/api/me/session` 判定登录，计费接口不可用时不再把登录用户显示成游客；账户卡片区分游客 / 已登录 / 余额暂不可用三种状态。
+- **首页精简**：移除"平台级安全边界"说明与冗长占位文案，未生成时仅显示"生成结果将显示在这里"；工作流加载失败时显示中文提示并提供"重试"按钮。
+- **错误文案本地化**：`GalleryClientError` 与 BFF 代理的英文报错统一改为中文，覆盖画廊、作品详情、账单、后台等所有会把错误透出给用户的页面。
+
+验证：Generation Service typecheck + 66 项测试。Gallery Web ESLint + 11 项测试 + Next.js 生产构建。
+
+## M1.4 本地开发环境与登录桥修复
+
+解决"主站登录后跳到 Gallery 仍显示游客"与"其他服务没有起来"两类问题：
+
+- **本地一键链路**：新增 `scripts/dev/setup-local-env.ps1`（幂等补齐三份 `.env`，不打印密钥）、`dev-up.ps1`（Flask 8100 / Gallery 3000 / Generation API 3101 / Dispatcher / Worker + Redis）、`dev-health.ps1`（端点、introspection、工作流列表、进程检查）、`dev-down.ps1`。
+- **Generation Service 自动加载 .env**：npm run 脚本加入 `--env-file-if-exists=.env`，本地启动不再需要手工导环境变量；补 `apps/gallery-web/.env.example` 与 `services/generation-service/.env.example`。
+- **外链本地开发支持**：`tools/__init__.py` 允许 loopback HTTP 的 `AI_IMAGE_EXTERNAL_URL`（生产仍强制 HTTPS），本地首页可显示 AI 作图卡片。
+- **COS 上传签名修复**：上传图片时不再发送 `x-cos-meta-*` 自定义元数据头
+  （对象键本身已包含任务 ID 与输出序号，元数据无业务用途），彻底消除腾讯 COS
+  `SignatureDoesNotMatch`（线上 0.5.6 已采用该行为并验证通过）；
+  `TencentCosStorage` 同时保留元数据键名规范化（`job_id` → `job-id`）作为
+  防御性兜底，并补回归测试。
+- **本地数据库**：开发环境切换到本机 PostgreSQL（5433，`mavis_dev`），避免本地进程指向不可达的远端库；文档给出建库、迁移、启用 Mock Provider 的完整步骤。
+
+验证：Generation Service typecheck + 67 项测试；Python 新增 `test_tools_external_url.py` 3 项通过；本地端到端冒烟（登录 → 积分 → 创建 → completed → 画廊取图）通过。
+
+## M1.5 工作流 / API 分开与公开默认值
+
+- **目录分离**：迁移 0012 为 `ai.workflows` 增加 `mode`（workflow/api）；每个已启用
+  Provider 模型生成一个 API 模式工作流，绑定且仅绑定该 Provider + 该模型。
+  `GET /v1/generation/workflows` 返回带 `mode` 的完整目录并支持
+  `?mode=workflow|api` 过滤；`/create` 以「工作流 / API 模型」Tab 分开选择，
+  统一后台与本地管理控制台显示模式标签。Provider 保持 disabled，未启用前 API
+  模式不出现在创作目录。
+- **公开默认值**：新任务 `visibility` 与 `prompt_visibility` 默认公开（前端初始
+  值、workflow defaults、服务端解析回退三层一致）；历史私有/隐藏作品不回填。
+- **验证**：Generation Service typecheck + 测试、Gallery lint/测试/生产构建通过。
+
 ## 待 Staging 验证
 
 需要真实 PostgreSQL、Redis、COS、共享 Flask Session 和 Provider 才能完成数据库/对象存储/Vercel Preview 端到端验收。Preview 清单与发布批准完成前，生产发布为 No-Go。
+
+## 真实联调验证（2026-08-06，线上实测）
+
+- ✅ `gallery.mindfulpenpal.com/api/me/session` 200（`bridge:"guest"`）、
+  `/api/generation/workflows` 200（返回带 countRange 的四个 workflow）、
+  `/api/generations` 401（未登录鉴权正常，不再是旧版本 404）、`/create` 200。
+- ✅ 主站 `mindfulpenpal.com` 与 `/login` 正常（含 CSRF token）。
+- ⚠️ `api-ai.mindfulpenpal.com` 从国内网络直连 TLS 握手失败（curl 35），
+  Vercel 边缘经 BFF 可达后端；正式命名隧道（Cloudflare 站点 + CNAME）待配置。
+- ⚠️ 统一后台 `/admin/gallery` 曾报“缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”：
+  根因是 Vercel 原 Flask 项目（my-toolbox）Production 未配置
+  `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`（DEPLOY_GUIDE §8.1
+  此前漏列）。已补齐文档、报错引导与治理测试；生产需在 Vercel my-toolbox 补这两个
+  变量（与 my-toolbox-gallery 完全一致）并重新部署后，后台即可显示待审核队列。
+- ⏳ 未完成：带登录态的完整任务闭环（注册/登录 → 积分发放 → 创建 →
+  即梦生成 → COS 持久化 → 最近任务/内嵌预览 → 失败回填重试）需测试账号在
+  Preview/线上环境人工验收；生产发布仍为 No-Go。
 
 ## Staging 部署资产
 

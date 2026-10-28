@@ -327,24 +327,15 @@ tools:
     enabled: true
     order: 65
 
-  - id: zip_extractor
-    name: 批量提取PDF发票
-    description: 上传多个压缩包，递归解压多层嵌套.zip，自动提取所有PDF发票文件。
-    icon: bi-file-zip
-    color: "#6f42c1"
-    route: /tools/zip-extractor
-    blueprint_module: tools.zip_extractor
-    category: business
-    enabled: true
-    order: 66
-
   - id: invoice_printer
-    name: 批量发票打印
-    description: 上传发票文件（PDF/图片），本地预览、一键多份打印、打包导出ZIP，全程不上传服务器。
+    name: 发票提取与批量打印
+    description: 上传ZIP、PDF或图片；安全提取压缩包内发票后，统一预览、批量打印或导出。
     icon: bi-printer
     color: "#198754"
     route: /tools/invoice-printer
+    route_aliases:
+      - /tools/zip-extractor
     blueprint_module: tools.invoice_printer
     category: business
     enabled: true
-    order: 67
+    order: 66

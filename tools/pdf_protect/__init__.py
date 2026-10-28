@@ -11,6 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
 from utils.helpers import is_allowed_ext, safe_download_path, safe_filename
+from utils.pdf_limits import PdfResourceLimitError, enforce_pdf_page_count
 
 logger = logging.getLogger(__name__)
 tool_bp = Blueprint("pdf_protect", __name__)
@@ -48,6 +49,10 @@ def process():
     except Exception as exc:
         commit_usage("pdf_protect", success=False, message=str(exc))
         return jsonify(error=f"PDF 解析失败：{exc}"), 400
+    try:
+        enforce_pdf_page_count(len(reader.pages))
+    except PdfResourceLimitError as exc:
+        return jsonify(error=str(exc)), 400
 
     try:
         if mode == "encrypt":

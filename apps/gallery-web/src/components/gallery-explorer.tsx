@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { GalleryImageSummary, GalleryPageData } from "@/lib/gallery-types";
 
 type ViewMode = "masonry" | "grid" | "compact";
@@ -18,8 +18,17 @@ export function GalleryExplorer({ initialPage, initialError, authenticated }: { 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const requestSequenceRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => requestControllerRef.current?.abort(), []);
 
   async function loadPage(options: { replace: boolean; cursor?: string } = { replace: true }) {
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     setError(undefined);
     const params = new URLSearchParams({ limit: "24" });
@@ -27,15 +36,17 @@ export function GalleryExplorer({ initialPage, initialError, authenticated }: { 
     if (orientation) params.set("orientation", orientation);
     if (options.cursor) params.set("cursor", options.cursor);
     try {
-      const response = await fetch(`/api/gallery?${params}`, { headers: { Accept: "application/json" } });
+      const response = await fetch(`/api/gallery?${params}`, { headers: { Accept: "application/json" }, signal: controller.signal });
       const body = await response.json() as GalleryPageData & { error?: { message?: string } };
       if (!response.ok) throw new Error(body.error?.message || "暂时无法读取作品");
+      if (requestSequence !== requestSequenceRef.current) return;
       setItems((current) => options.replace ? body.items : [...current, ...body.items]);
       setNextCursor(body.nextCursor);
     } catch (caught) {
+      if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
       setError(caught instanceof Error ? caught.message : "暂时无法读取作品");
     } finally {
-      setLoading(false);
+      if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
   }
 
@@ -107,8 +118,28 @@ export function ArtworkCard({ item, authenticated, onFavorite }: { item: Gallery
     <article className="art-card">
       <Link href={`/gallery/${item.slug}`} className="art-link" aria-label={item.title || "查看未命名作品"}>
         {/* The backend validates every asset URL against the configured COS/CDN allowlist. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="real-art" src={item.asset.url} width={item.asset.width} height={item.asset.height} alt={item.title || "AI 生成作品"} loading="lazy" />
+        {item.mediaType === "video" || item.asset.mimeType.startsWith("video/") ? (
+          // 视频卡片：静态显示首帧（preload=metadata + #t=0.1 保证 Safari 也出画面），
+          // 仅在鼠标悬停时静音播放，移开即复位回首帧，与图片卡片视觉一致。
+          <video
+            className="real-art"
+            src={`${item.asset.url}#t=0.1`}
+            width={item.asset.width}
+            height={item.asset.height}
+            muted
+            playsInline
+            preload="metadata"
+            aria-label={item.title || "AI 生成视频"}
+            onMouseEnter={(event) => { void event.currentTarget.play().catch(() => undefined); }}
+            onMouseLeave={(event) => { const video = event.currentTarget; video.pause(); video.currentTime = 0.1; }}
+          />
+        ) : (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="real-art" src={item.asset.url} width={item.asset.width} height={item.asset.height} alt={item.title || "AI 生成作品"} loading="lazy" />
+          </>
+        )}
+        {(item.mediaType === "video" || item.asset.mimeType.startsWith("video/")) && <span className="media-badge video">视频{item.durationSeconds ? ` · ${item.durationSeconds}s` : ""}</span>}
       </Link>
       <div className="card-body">
         <div className="card-title-row">

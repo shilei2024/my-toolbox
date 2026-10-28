@@ -47,7 +47,8 @@ def _import_module(module_path: str) -> Any | None:
 def sync_tool_registry(app: Flask) -> None:
     """Sync the YAML registry into the DB so the admin UI sees them."""
     with app.app_context():
-        for entry in _load_yaml_config(app):
+        entries = _load_yaml_config(app)
+        for entry in entries:
             tool = db.session.get(Tool, entry["id"])
             if tool is None:
                 tool = Tool(id=entry["id"])
@@ -62,8 +63,9 @@ def sync_tool_registry(app: Flask) -> None:
             if entry["id"] == "ai_image" and app.config.get("AI_IMAGE_EXTERNAL_URL"):
                 configured_external_url = str(app.config["AI_IMAGE_EXTERNAL_URL"]).strip()
             parsed_external_url = urlparse(configured_external_url)
-            if configured_external_url and (parsed_external_url.scheme != "https" or not parsed_external_url.netloc):
-                logger.error("Tool %s external URL must be an absolute HTTPS URL; hiding entry", entry["id"])
+            loopback_http = parsed_external_url.scheme == "http" and parsed_external_url.hostname in {"localhost", "127.0.0.1", "::1"}
+            if configured_external_url and (parsed_external_url.scheme not in {"https", "http"} or not parsed_external_url.netloc or (parsed_external_url.scheme == "http" and not loopback_http)):
+                logger.error("Tool %s external URL must be an absolute HTTPS URL (HTTP allowed only on loopback); hiding entry", entry["id"])
                 configured_external_url = ""
             tool.external_url = configured_external_url
             tool.order = int(entry.get("order", 100))
@@ -71,6 +73,22 @@ def sync_tool_registry(app: Flask) -> None:
             tool.required_plan = entry.get("required_plan", "free") or "free"
             if "enabled" in entry:
                 tool.enabled = bool(entry["enabled"])
+        if entries:
+            # The YAML registry is the single source of truth: disable rows
+            # that were removed from it (or never implemented) so the homepage
+            # never renders a dead link to a route that does not exist.
+            configured_ids = {entry["id"] for entry in entries}
+            configured_routes = {entry.get("route", f"/tools/{entry['id']}") for entry in entries}
+            stale = (
+                db.session.query(Tool)
+                .filter(
+                    Tool.enabled.is_(True),
+                    (Tool.id.notin_(configured_ids)) | (Tool.route.notin_(configured_routes)),
+                )
+                .all()
+            )
+            for tool in stale:
+                tool.enabled = False
         db.session.commit()
 
 
@@ -130,6 +148,17 @@ def register_tools(app: Flask) -> None:
             logger.error("Module %s has no `tool_bp` blueprint", module_path)
             continue
         app.register_blueprint(bp, url_prefix=entry.get("route", f"/tools/{tid}"))
+        # A merged/renamed tool may keep historical URLs without creating a
+        # duplicate homepage card or copying its business logic.
+        for alias_index, alias in enumerate(entry.get("route_aliases", []) or []):
+            if not isinstance(alias, str) or not alias.startswith("/tools/"):
+                logger.warning("Tool %s: ignoring invalid route alias %r", tid, alias)
+                continue
+            app.register_blueprint(
+                bp,
+                url_prefix=alias.rstrip("/"),
+                name_prefix=f"legacy_{tid}_{alias_index}",
+            )
         registered.add(tid)
 
     # Sync enabled state: disable tools that failed to import, re-enable those

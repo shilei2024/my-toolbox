@@ -3,8 +3,10 @@ import type { GenerationRequest, ProviderDescriptor } from "./types.ts";
 
 export function supportsRequest(descriptor: ProviderDescriptor, request: GenerationRequest): boolean {
   const capability = descriptor.capabilities;
+  const mediaType = request.mediaType ?? "image";
   return (
     descriptor.availability !== "disabled" &&
+    (capability.mediaTypes ?? ["image"]).includes(mediaType) &&
     capability.modes.includes(request.mode) &&
     (capability.workflowKinds.length === 0 || capability.workflowKinds.includes(request.workflow.kind)) &&
     request.width >= capability.minWidth &&

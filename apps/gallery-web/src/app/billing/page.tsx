@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PortalButton } from "@/components/billing-actions";
+import { RedeemCodeForm } from "@/components/redeem-code-form";
 import type { BillingSummary } from "@/lib/billing-types";
 import { getBillingSummary } from "@/server/billing-client";
 import { GalleryClientError } from "@/server/gallery-client";
@@ -15,6 +16,7 @@ export default async function BillingPage() {
   let summary: BillingSummary;
   try { summary = await getBillingSummary(viewer); } catch (error) { return <main className="page-shell"><section className="billing-auth"><h1>账单服务暂不可用</h1><p>{error instanceof GalleryClientError ? error.message : "请稍后再试。"}</p></section></main>; }
   const account = summary.account!;
+  const memberAccount = summary.memberAccount;
   return <main className="page-shell billing-page">
     <section className="billing-heading"><div><p className="eyebrow"><span className="eyebrow-dot" />Account billing</p><h1>积分与账单</h1><p>余额来自内部账本；支付渠道只负责完成交易。</p></div><Link className="button" href="/pricing">查看方案</Link></section>
     <section className="balance-grid">
@@ -23,6 +25,11 @@ export default async function BillingPage() {
       <article><span>累计获得</span><strong>{trimDecimal(account.lifetimeGranted)}</strong><small>会员、积分包与调整</small></article>
       <article><span>累计使用</span><strong>{trimDecimal(account.lifetimeSpent)}</strong><small>仅成功生成计入</small></article>
     </section>
+    {memberAccount ? <section className="balance-grid member-balance">
+      <article className="balance-primary"><span>会员积分（可用）</span><strong>{trimDecimal(memberAccount.availableAmount)}</strong><small>可调用高阶模型</small></article>
+      <article><span>会员积分（占用）</span><strong>{trimDecimal(memberAccount.reservedAmount)}</strong><small>任务结束后结算或释放</small></article>
+      <article className="redeem-card"><span>充值/兑换</span><RedeemCodeForm /></article>
+    </section> : null}
     <section className="billing-columns">
       <article className="membership-panel"><p className="panel-label">当前会员</p>{summary.subscription ? <><div className="membership-title"><h2>{summary.subscription.planName}</h2><span className={`status-pill status-${summary.subscription.status}`}>{statusLabel(summary.subscription.status)}</span></div><dl><div><dt>续订状态</dt><dd>{summary.subscription.cancelAtPeriodEnd ? "本周期结束后取消" : "自动续订"}</dd></div><div><dt>当前周期</dt><dd>{summary.subscription.currentPeriodEnd ? `至 ${formatDate(summary.subscription.currentPeriodEnd)}` : "等待支付渠道同步"}</dd></div></dl><PortalButton /></> : <><h2>Free</h2><p>当前没有付费订阅。你仍可使用免费方案包含的功能。</p><Link className="button primary" href="/pricing">比较会员方案</Link></>}</article>
       <article className="ledger-panel"><div className="ledger-heading"><div><p className="panel-label">Credit ledger</p><h2>积分流水</h2></div><span>最近 30 条</span></div>{summary.ledger.length ? <ol className="ledger-list">{summary.ledger.map((entry) => <li key={entry.id}><div><strong>{entryLabel(entry.entryType)}</strong><time>{formatDateTime(entry.createdAt)}</time></div><span className={Number(entry.deltaAvailable) >= 0 ? "credit-positive" : "credit-negative"}>{signed(entry.deltaAvailable)}</span></li>)}</ol> : <div className="ledger-empty"><strong>还没有积分变动</strong><p>购买方案、系统赠送或完成生成后，流水会出现在这里。</p></div>}</article>

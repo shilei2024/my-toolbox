@@ -80,6 +80,8 @@ services:
     restart: unless-stopped
     env_file:
       - ${GENERATION_ENV_FILE:-/etc/mindfulpenpal.production.env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"

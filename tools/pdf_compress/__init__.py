@@ -11,6 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
 from utils.helpers import is_allowed_ext, safe_download_path, safe_filename
+from utils.pdf_limits import PdfResourceLimitError, enforce_pdf_page_count
 
 logger = logging.getLogger(__name__)
 tool_bp = Blueprint("pdf_compress", __name__)
@@ -58,6 +59,10 @@ def process():
             reader.decrypt("")
         except Exception:
             return jsonify(error="PDF 已加密，请先解除密码再压缩。"), 400
+    try:
+        enforce_pdf_page_count(len(reader.pages))
+    except PdfResourceLimitError as exc:
+        return jsonify(error=str(exc)), 400
 
     try:
         writer = PdfWriter()
@@ -68,16 +73,15 @@ def process():
         for page in writer.pages:
             page.compress_content_streams()
 
-        # 激进模式：去元数据 + 去重复对象
+        # 激进模式：去掉元数据（减小体积；元数据可能含作者/软件信息）
         if level == "aggressive":
-            # remove metadata
-            writer.add_metadata({})
-            reader_info = reader.metadata
-            if reader_info:
-                try:
-                    writer.add_metadata(reader_info)
-                except Exception:
-                    pass
+            # add_metadata({}) 替换为只含基础信息的空元数据字典：
+            # 注意不能先 add_metadata({}) 再把 reader.metadata 加回来——
+            # 那样等于没删。pypdf 的 add_metadata 是整体替换。
+            try:
+                writer.add_metadata({})
+            except Exception:
+                pass
 
         # 输出
         out = io.BytesIO()

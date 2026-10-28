@@ -45,6 +45,7 @@ export interface SubscriptionView {
 export interface BillingSummary {
   readonly plans: readonly BillingPlan[];
   readonly account?: CreditAccountView;
+  readonly memberAccount?: CreditAccountView;
   readonly subscription?: SubscriptionView;
   readonly ledger: readonly CreditLedgerEntryView[];
 }

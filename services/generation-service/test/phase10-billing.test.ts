@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BillingService, BillingWebhookProcessor } from "../src/billing/billing-service.ts";
+import { BillingError } from "../src/billing/errors.ts";
 import { loadBillingConfig } from "../src/billing/config.ts";
 import { PaymentProviderRegistry, type PaymentProvider } from "../src/billing/payment-provider.ts";
 import type { BillingRepository } from "../src/billing/repository.ts";
 import { normalizeStripeEvent } from "../src/billing/stripe-provider.ts";
-import type { BillingPlan, BillingSummary, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent } from "../src/billing/types.ts";
+import type { BillingPlan, BillingSummary, CreditAccountView, NormalizedPaymentEvent, PaymentOrder, StoredPaymentEvent } from "../src/billing/types.ts";
 
 const plan: BillingPlan = {
   id: "plan-1", slug: "creator-monthly", displayName: "Creator", description: "", kind: "subscription",
@@ -19,8 +20,13 @@ class FakeRepository implements BillingRepository {
   readonly failed: string[] = [];
   readonly granted: string[] = [];
   readonly grantedUsers = new Set<number>();
+  readonly redeemed: string[] = [];
   claimed: StoredPaymentEvent[] = [];
   checkout?: { orderId: string; externalId: string };
+  redeemCode(userId: number, code: string): Promise<{ amount: string; memberAccount: CreditAccountView }> {
+    this.redeemed.push(`${userId}:${code}`);
+    return Promise.resolve({ amount: "50.0000", memberAccount: { availableAmount: "50.0000", reservedAmount: "0.0000", lifetimeGranted: "50.0000", lifetimeSpent: "0.0000" } });
+  }
   ensureSignupGrant(userId: number, amount: string): Promise<void> {
     if (!this.grantedUsers.has(userId)) {
       this.grantedUsers.add(userId);
@@ -48,6 +54,18 @@ class FakeProvider implements PaymentProvider {
 const logger = { info() {}, error() {} };
 
 describe("Phase 10 billing boundary", () => {
+  it("redeems a redemption code into the member account and rejects bad formats", async () => {
+    const repository = new FakeRepository();
+    const providers = new PaymentProviderRegistry();
+    providers.register(new FakeProvider());
+    const service = new BillingService({ repository, providers, logger, publicBaseUrl: "https://mindfulpenpal.com" });
+    const result = await service.redeem(7, { code: "mp-ab12-cd34-ef56" });
+    assert.equal(result.amount, "50.0000");
+    assert.deepEqual(repository.redeemed, ["7:MP-AB12-CD34-EF56"]);
+    await assert.rejects(service.redeem(7, { code: "bad code!" }), (error: unknown) => error instanceof BillingError && error.code === "invalid_request");
+    await assert.rejects(service.redeem(undefined, { code: "MP-AB12-CD34-EF56" }), (error: unknown) => error instanceof BillingError && error.code === "authentication_required");
+  });
+
   it("creates hosted checkout without exposing provider details to the caller", async () => {
     const repository = new FakeRepository(); const providers = new PaymentProviderRegistry(); providers.register(new FakeProvider());
     const service = new BillingService({ repository, providers, logger, publicBaseUrl: "https://mindfulpenpal.com" });
@@ -71,6 +89,17 @@ describe("Phase 10 billing boundary", () => {
     assert.equal(event.eventType, "checkout.completed");
     assert.equal(event.data.orderId, "order-1");
     assert.equal("subscriptionId" in event.data ? event.data.subscriptionId : undefined, "sub_1");
+  });
+
+  it("normalizes delayed Checkout and owned payment-intent success events", () => {
+    const delayed = normalizeStripeEvent({ id: "evt_async", created: 1_786_000_000, type: "checkout.session.async_payment_succeeded", data: { object: { id: "cs_async", mode: "payment", payment_status: "paid", payment_intent: "pi_1", metadata: { order_id: "order-async" } } } } as never);
+    assert.equal(delayed.eventType, "checkout.completed");
+    assert.equal(delayed.data.orderId, "order-async");
+    const intent = normalizeStripeEvent({ id: "evt_pi", created: 1_786_000_000, type: "payment_intent.succeeded", data: { object: { id: "pi_2", metadata: { order_id: "order-intent" } } } } as never);
+    assert.equal(intent.eventType, "checkout.completed");
+    assert.equal(intent.data.orderId, "order-intent");
+    const foreign = normalizeStripeEvent({ id: "evt_foreign", created: 1_786_000_000, type: "payment_intent.succeeded", data: { object: { id: "pi_foreign", metadata: {} } } } as never);
+    assert.equal(foreign.eventType, "ignored");
   });
 
   it("keeps Stripe disabled by default and rejects partial secret configuration", () => {

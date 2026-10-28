@@ -21,7 +21,7 @@ from models import (
     ReimbursementPeriod,
     ReimbursementProductLine,
 )
-from tools.reimbursement import PRODUCT_LINES, tool_bp
+from tools.reimbursement import ENTERTAINMENT_CATEGORIES, PRODUCT_LINES, tool_bp
 from tools.reimbursement.manager import (
     COVER_TEMPLATE,
     DEFAULT_CATEGORIES,
@@ -34,6 +34,8 @@ from tools.reimbursement.manager import (
     _normalize_vehicle_rows,
     _period_parts,
     _seed_product_lines,
+    _sort_rows_by_date,
+    _summary,
     _sync_invoice_aux,
     register_routes,
 )
@@ -99,7 +101,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             "grand_totals": {**{key: 0 for key in keys}, "entertainment": 100.5},
             "level_groups": [
                 {
-                    "level": "level 1",
+                    "level": "A",
                     "entertainment": 100.5,
                     "travel": 0,
                     "other": 0,
@@ -141,20 +143,39 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(rows[1]["km_start"], 110.0)
         self.assertEqual(rows[1]["km_end"], 130.0)
 
-    def assert_template_layout_preserved(self, template, output, style_cells):
+    def test_detail_rows_sort_by_date_stably_with_missing_dates_last(self):
+        rows = [
+            {"date": "", "label": "missing"},
+            {"date": "2026-07-03", "label": "later"},
+            {"date": "2026-07-01", "label": "earlier-first"},
+            {"date": "2026-07-01", "label": "earlier-second"},
+            {"date": "not-a-date", "label": "invalid"},
+        ]
+
+        sorted_rows = _sort_rows_by_date(rows)
+
+        self.assertEqual(
+            [row["label"] for row in sorted_rows],
+            ["earlier-first", "earlier-second", "later", "missing", "invalid"],
+        )
+
+    def assert_template_layout_preserved(
+        self, template, output, style_cells, *, preserve_dimensions=True
+    ):
         source = xlrd.open_workbook(str(template), formatting_info=True)
         generated = xlrd.open_workbook(file_contents=output.getvalue(), formatting_info=True)
         self.assertEqual(source.sheet_names(), generated.sheet_names())
         for index in range(source.nsheets):
             left, right = source.sheet_by_index(index), generated.sheet_by_index(index)
-            self.assertEqual((left.nrows, left.ncols), (right.nrows, right.ncols))
+            if preserve_dimensions:
+                self.assertEqual((left.nrows, left.ncols), (right.nrows, right.ncols))
             self.assertEqual(set(left.merged_cells), set(right.merged_cells))
             self.assertEqual(left.vertical_page_breaks, right.vertical_page_breaks)
             self.assertEqual(left.horizontal_page_breaks, right.horizontal_page_breaks)
-            for row in range(left.nrows):
+            for row in range(min(left.nrows, right.nrows)):
                 left_info, right_info = left.rowinfo_map.get(row), right.rowinfo_map.get(row)
                 self.assertEqual(left_info.height if left_info else None, right_info.height if right_info else None)
-            for col in range(left.ncols):
+            for col in range(min(left.ncols, right.ncols)):
                 left_info, right_info = left.colinfo_map.get(col), right.colinfo_map.get(col)
                 self.assertEqual(left_info.width if left_info else None, right_info.width if right_info else None)
         for sheet_index, row, col in style_cells:
@@ -357,7 +378,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             diodes = ReimbursementProductLine.query.filter_by(
                 owner_type="anon", owner_id="product-test", name="DIODES"
             ).one()
-            self.assertEqual(diodes.code, "01")
+            self.assertEqual(diodes.code, "10")
             invoice = ReimbursementInvoice(
                 owner_type="anon",
                 owner_id="product-test",
@@ -374,11 +395,103 @@ class ReimbursementManagerTests(unittest.TestCase):
                 },
             )
             self.assertIsNone(error)
-            self.assertEqual((invoice.product_line, invoice.product_line_code), ("DIODES", "01"))
+            self.assertEqual((invoice.product_line, invoice.product_line_code), ("DIODES", "10"))
             self.assertEqual(
                 _assign_invoice_product_line(invoice, {"product_line_id": 999999}),
                 "请选择有效的产品线",
             )
+
+    def test_product_lines_replace_legacy_directory_once(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            db.session.add(
+                ReimbursementProductLine(
+                    owner_type="anon",
+                    owner_id="legacy-product-test",
+                    name="DIODES",
+                    code="01",
+                    office="深圳办",
+                    sort_order=10,
+                )
+            )
+            db.session.commit()
+
+            rows = _seed_product_lines("anon", "legacy-product-test")
+            self.assertEqual(
+                [(item.code, item.name) for item in rows],
+                [(item["code"], item["name"]) for item in PRODUCT_LINES],
+            )
+            self.assertEqual(rows[0].code, "01")
+            self.assertEqual(rows[0].name, "3PEAK")
+            self.assertEqual(rows[-1].code, "86")
+            self.assertEqual(rows[-1].name, "致象尔微")
+
+            rows[0].name = "自定义品牌"
+            db.session.commit()
+            rows_again = _seed_product_lines("anon", "legacy-product-test")
+            self.assertEqual(rows_again[0].name, "自定义品牌")
+
+    def test_product_line_79_is_renamed_to_xianji(self):
+        """ERP renamed product line 79; the seeded catalog must use the new label."""
+        self.assertEqual(PRODUCT_LINES[78]["code"], "79")
+        self.assertEqual(PRODUCT_LINES[78]["name"], "先楫")
+
+    def test_product_line_79_rename_propagates_to_directory_and_records(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            db.session.add(
+                ReimbursementProductLine(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    name="物料分组",
+                    code="79",
+                    office="",
+                    sort_order=790,
+                )
+            )
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    period_id=1,
+                    product_line="物料分组",
+                    product_line_code="79",
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="rename-79",
+                    period_id=1,
+                    kind="entertainment",
+                    data_json=json.dumps({"purpose": "物料分组", "amount": "100"}),
+                )
+            )
+            db.session.commit()
+
+            rows = _seed_product_lines("anon", "rename-79")
+            self.assertEqual([(item.code, item.name) for item in rows], [("79", "先楫")])
+
+            invoice = ReimbursementInvoice.query.filter_by(owner_id="rename-79").one()
+            self.assertEqual((invoice.product_line, invoice.product_line_code), ("先楫", "79"))
+            aux = ReimbursementAuxDetail.query.filter_by(owner_id="rename-79").one()
+            self.assertEqual(json.loads(aux.data_json)["purpose"], "先楫")
+
+            # Idempotent: a later read must not rewrite anything again.
+            again = _seed_product_lines("anon", "rename-79")
+            self.assertEqual([(item.code, item.name) for item in again], [("79", "先楫")])
 
     def test_product_line_crud_updates_and_migrates_linked_invoices(self):
         app = Flask(__name__)
@@ -424,7 +537,7 @@ class ReimbursementManagerTests(unittest.TestCase):
             },
         )
         self.assertEqual(invoice_response.status_code, 201)
-        self.assertEqual(invoice_response.get_json()["invoice"]["product_line_code"], "01")
+        self.assertEqual(invoice_response.get_json()["invoice"]["product_line_code"], "10")
 
         updated = client.put(
             f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}",
@@ -442,12 +555,12 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 409)
         self.assertTrue(blocked.get_json()["needs_migration"])
         migrated = client.delete(
-            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}?migrate_to={by_name['MSTAR']['id']}",
+            f"/tools/reimbursement/api/product-lines/{by_name['DIODES']['id']}?migrate_to={by_name['3PEAK']['id']}",
             headers=headers,
         )
         self.assertEqual(migrated.status_code, 200)
         invoices = client.get("/tools/reimbursement/api/invoices", headers=headers).get_json()["invoices"]
-        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("MSTAR", "02"))
+        self.assertEqual((invoices[0]["product_line"], invoices[0]["product_line_code"]), ("3PEAK", "01"))
 
     def test_office_crud_is_independent_and_prints_retained_invoice(self):
         app = Flask(__name__)
@@ -593,6 +706,117 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertEqual(cover.cell_value(6, 5), 100.5)
         self.assertEqual(cover.cell_value(20, 7), 100.5)
 
+    def test_entertainment_categories_include_gift(self):
+        self.assertIn("餐费", ENTERTAINMENT_CATEGORIES)
+        self.assertIn("礼品", ENTERTAINMENT_CATEGORIES)
+
+    def test_summary_vehicle_row_includes_dispatch_fees_and_replaces_covered_invoices(self):
+        app = Flask(__name__)
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+            SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        )
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            period = ReimbursementPeriod(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="2026年7-8月",
+                start_year=2026,
+                start_month=7,
+                end_year=2026,
+                end_month=8,
+                office="深圳办",
+            )
+            vehicle = ReimbursementCategory(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="车辆费用",
+                export_key="vehicle",
+            )
+            other = ReimbursementCategory(
+                owner_type="anon",
+                owner_id="summary-vehicle",
+                name="其他",
+                export_key="other",
+            )
+            db.session.add_all([period, vehicle, other])
+            db.session.flush()
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    category_id=vehicle.id,
+                    total_amount=999,
+                    product_line="DIODES",
+                    product_line_code="01",
+                )
+            )
+            db.session.add(
+                ReimbursementInvoice(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    category_id=vehicle.id,
+                    total_amount=40,
+                    product_line="MSTAR",
+                    product_line_code="02",
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=0,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 100,
+                            "km_end": 135.5,
+                            "toll_fee": 10,
+                            "parking_fee": 5,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.add(
+                ReimbursementAuxDetail(
+                    owner_type="anon",
+                    owner_id="summary-vehicle",
+                    period_id=period.id,
+                    kind="vehicle",
+                    sort_order=1,
+                    data_json=json.dumps(
+                        {
+                            "km_start": 200,
+                            "km_end": 220,
+                            "toll_fee": 2,
+                            "parking_fee": 3,
+                            "product_line": "DIODES",
+                        }
+                    ),
+                )
+            )
+            db.session.commit()
+
+            summary = _summary(period)
+            vehicle_row = next(
+                item
+                for item in summary["by_category"]
+                if item["export_key"] == "vehicle"
+            )
+            # DIODES 派车单：35.5 + 10 + 5 + 20 + 2 + 3 = 75.5，替代同产品线发票 999；
+            # MSTAR 无派车单，保留车辆类发票 40。
+            self.assertEqual(vehicle_row["invoice_count"], 2)
+            self.assertEqual(vehicle_row["total_amount"], 115.5)
+            self.assertEqual(vehicle_row["amount"], 115.5)
+            self.assertEqual(vehicle_row["tax_amount"], 0)
+            self.assertEqual(summary["total_amount"], 115.5)
+
     def test_vehicle_details_replace_invoice_vehicle_fee_and_group_by_product_line(self):
         app = Flask(__name__)
         app.config.update(
@@ -621,13 +845,13 @@ class ReimbursementManagerTests(unittest.TestCase):
             product_line = ReimbursementProductLine(
                 owner_type="anon",
                 owner_id="vehicle-cover",
-                name="DIODES",
+                name="3PEAK",
                 code="01",
             )
             second_product_line = ReimbursementProductLine(
                 owner_type="anon",
                 owner_id="vehicle-cover",
-                name="MSTAR",
+                name="Adaps",
                 code="02",
             )
             db.session.add_all(
@@ -641,7 +865,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                     period_id=period.id,
                     category_id=category.id,
                     total_amount=999,
-                    product_line="DIODES",
+                    product_line="3PEAK",
                     product_line_code="01",
                     office="深圳办",
                 )
@@ -659,7 +883,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 135.5,
                             "toll_fee": 10,
                             "parking_fee": 5,
-                            "product_line": "DIODES",
+                            "product_line": "3PEAK",
                         }
                     ),
                 )
@@ -677,7 +901,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 220,
                             "toll_fee": 2,
                             "parking_fee": 3,
-                            "product_line": "DIODES",
+                            "product_line": "3PEAK",
                         }
                     ),
                 )
@@ -695,7 +919,7 @@ class ReimbursementManagerTests(unittest.TestCase):
                             "km_end": 310,
                             "toll_fee": 1,
                             "parking_fee": 1,
-                            "product_line": "MSTAR",
+                            "product_line": "Adaps",
                         }
                     ),
                 )
@@ -704,10 +928,10 @@ class ReimbursementManagerTests(unittest.TestCase):
 
             payload = _cover_payload(period)
             group = next(
-                item for item in payload["groups"] if item["product_line"] == "DIODES"
+                item for item in payload["groups"] if item["product_line"] == "3PEAK"
             )
             second_group = next(
-                item for item in payload["groups"] if item["product_line"] == "MSTAR"
+                item for item in payload["groups"] if item["product_line"] == "Adaps"
             )
             self.assertEqual(group["totals"]["vehicle"], 75.5)
             self.assertEqual(second_group["totals"]["vehicle"], 12)
@@ -725,6 +949,15 @@ class ReimbursementManagerTests(unittest.TestCase):
             self.cover_data,
             {
                 "entertainment": [
+                    {
+                        "date": "2026-06-30",
+                        "category": "礼品",
+                        "place": "更早地点",
+                        "customer": "客户B",
+                        "participants": "李四",
+                        "amount": 50,
+                        "purpose": "MSTAR",
+                    },
                     {
                         "date": "2026-07-01",
                         "category": "餐费",
@@ -745,6 +978,16 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "toll_fee": 10,
                         "parking_fee": 5,
                         "product_line": "DIODES",
+                    },
+                    {
+                        "date": "2026-07-01",
+                        "from_location": "家",
+                        "to_location": "公司",
+                        "km_start": 90,
+                        "km_total": 10,
+                        "toll_fee": 0,
+                        "parking_fee": 0,
+                        "product_line": "MSTAR",
                     }
                 ],
                 "travel": [
@@ -755,6 +998,14 @@ class ReimbursementManagerTests(unittest.TestCase):
                         "expense_type": "住宿费",
                         "amount": 300,
                         "purpose": "DIODES",
+                    },
+                    {
+                        "date": "2026-07-01",
+                        "location": "杭州",
+                        "customer": "客户B",
+                        "expense_type": "交通费",
+                        "amount": 80,
+                        "purpose": "MSTAR",
                     }
                 ],
             },
@@ -763,16 +1014,27 @@ class ReimbursementManagerTests(unittest.TestCase):
             DETAIL_TEMPLATE,
             output,
             [(0, 0, 0), (0, 1, 0), (0, 2, 0), (0, 3, 0), (0, 3, 5), (1, 0, 0), (2, 0, 0)],
+            preserve_dimensions=False,
+        )
+        self.assertEqual(
+            [(sheet.nrows, sheet.ncols) for sheet in generated.sheets()],
+            [(13, 8), (16, 10), (21, 6)],
         )
         detail = generated.sheet_by_name("应酬费明细表")
         self.assertEqual(detail.cell_value(1, 0), "员工姓名：测试员工")
-        self.assertEqual(detail.cell_value(3, 2), "测试餐厅")
-        self.assertEqual(detail.cell_value(3, 5), 100.5)
+        self.assertEqual(detail.cell_value(3, 2), "更早地点")
+        self.assertEqual(detail.cell_value(3, 3), "客户B")
+        self.assertEqual(detail.cell_value(3, 5), 50)
+        self.assertEqual(detail.cell_value(4, 2), "测试餐厅")
         self.assertEqual(detail.cell_value(12, 0), "合计")
         vehicle = generated.sheet_by_name("派车单")
         self.assertEqual(vehicle.cell_value(2, 9), "产品线")
-        self.assertEqual(vehicle.cell_value(4, 9), "DIODES")
-        self.assertEqual(generated.sheet_by_name("出差明细表").cell_value(20, 0), "合计")
+        self.assertEqual(vehicle.cell_value(4, 9), "MSTAR")
+        self.assertEqual(vehicle.cell_value(5, 9), "DIODES")
+        travel = generated.sheet_by_name("出差明细表")
+        self.assertEqual(travel.cell_value(3, 1), "杭州")
+        self.assertEqual(travel.cell_value(4, 1), "上海")
+        self.assertEqual(travel.cell_value(20, 0), "合计")
         formulas = _formula_cells(output.getvalue())
         self.assertTrue(
             {
@@ -782,6 +1044,115 @@ class ReimbursementManagerTests(unittest.TestCase):
                 (1, 15, 7),
                 (1, 15, 8),
                 (2, 20, 4),
+            }.issubset(formulas)
+        )
+
+    def test_detail_export_expands_past_template_row_limits(self):
+        entertainment = [
+            {
+                "date": f"2026-07-{index + 1:02d}",
+                "category": "餐费",
+                "place": f"应酬地点{index}",
+                "amount": index + 1,
+            }
+            for index in range(12)
+        ]
+        vehicles = [
+            {
+                "date": "2026-07-01",
+                "from_location": "公司",
+                "to_location": f"目的地{index}",
+                "km_start": 100 if index == 0 else "",
+                "km_total": index + 1,
+                "toll_fee": 1,
+                "parking_fee": 2,
+                "product_line": f"产品线{index}",
+            }
+            for index in range(14)
+        ]
+        travels = [
+            {
+                "date": f"2026-07-{index + 1:02d}",
+                "location": f"出差地{index}",
+                "amount": index + 1,
+            }
+            for index in range(20)
+        ]
+
+        output = _build_detail_xls(
+            self.cover_data,
+            {
+                "entertainment": entertainment,
+                "vehicle": vehicles,
+                "travel": travels,
+            },
+        )
+        generated = xlrd.open_workbook(
+            file_contents=output.getvalue(), formatting_info=True
+        )
+        baseline = xlrd.open_workbook(
+            file_contents=_build_detail_xls(
+                self.cover_data,
+                {"entertainment": [], "vehicle": [], "travel": []},
+            ).getvalue(),
+            formatting_info=True,
+        )
+        self.assertEqual(
+            [(sheet.nrows, sheet.ncols) for sheet in generated.sheets()],
+            [(16, 8), (19, 10), (24, 6)],
+        )
+
+        detail = generated.sheet_by_name("应酬费明细表")
+        baseline_detail = baseline.sheet_by_name("应酬费明细表")
+        self.assertEqual(detail.cell_value(14, 2), "应酬地点11")
+        self.assertEqual(detail.cell_value(15, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, detail, 14, 2),
+            _style_signature(baseline, baseline_detail, 3, 2),
+        )
+        self.assertEqual(
+            _style_signature(generated, detail, 15, 5),
+            _style_signature(baseline, baseline_detail, 12, 5),
+        )
+        self.assertEqual(detail.rowinfo_map[14].height, baseline_detail.rowinfo_map[3].height)
+
+        vehicle = generated.sheet_by_name("派车单")
+        baseline_vehicle = baseline.sheet_by_name("派车单")
+        self.assertEqual(vehicle.cell_value(17, 9), "产品线13")
+        self.assertEqual(vehicle.cell_value(18, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, vehicle, 17, 9),
+            _style_signature(baseline, baseline_vehicle, 4, 9),
+        )
+        self.assertEqual(
+            _style_signature(generated, vehicle, 18, 6),
+            _style_signature(baseline, baseline_vehicle, 15, 6),
+        )
+        self.assertEqual(vehicle.rowinfo_map[17].height, baseline_vehicle.rowinfo_map[4].height)
+
+        travel = generated.sheet_by_name("出差明细表")
+        baseline_travel = baseline.sheet_by_name("出差明细表")
+        self.assertEqual(travel.cell_value(22, 1), "出差地19")
+        self.assertEqual(travel.cell_value(23, 0), "合计")
+        self.assertEqual(
+            _style_signature(generated, travel, 22, 1),
+            _style_signature(baseline, baseline_travel, 3, 1),
+        )
+        self.assertEqual(
+            _style_signature(generated, travel, 23, 4),
+            _style_signature(baseline, baseline_travel, 20, 4),
+        )
+        self.assertEqual(travel.rowinfo_map[22].height, baseline_travel.rowinfo_map[3].height)
+
+        formulas = _formula_cells(output.getvalue())
+        self.assertTrue(
+            {
+                (0, 15, 5),
+                (1, 17, 5),
+                (1, 18, 6),
+                (1, 18, 7),
+                (1, 18, 8),
+                (2, 23, 4),
             }.issubset(formulas)
         )
 
@@ -806,6 +1177,7 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("pointer-events:none", template)
         self.assertIn(".rb-nav-frame { position:relative; z-index:1;", template)
         self.assertIn('id="rbNavNext"', template)
+        self.assertIn("this.state.aux=d.aux;this.renderAux()", template)
         self.assertIn("scrollNav(direction)", template)
         self.assertIn("revealNavButton(button)", template)
         self.assertIn("normalizeVehicleRows()", template)
@@ -814,6 +1186,26 @@ class ReimbursementManagerTests(unittest.TestCase):
         self.assertIn("rbViewExport').addEventListener('input'", template)
         self.assertIn("['product_line','产品线','product-line']", template)
         self.assertIn("['purpose','产品线','product-line']", template)
+        self.assertIn("invoiceCategories=this.state.categories.filter", template)
+        self.assertIn("['communication','welfare']", template)
+        self.assertIn("if(i&&!i.category_id", template)
+        self.assertIn("entertainmentCategories()", template)
+        self.assertIn("categoryOptions(value)", template)
+        self.assertIn("（历史数据）", template)
+        self.assertIn("礼品", template)
+        self.assertNotIn('id="rbInvStatus"', template)
+        self.assertNotIn("status:val('rbInvStatus')", template)
+        self.assertIn('id="rbAddCustomerButton"', template)
+        self.assertIn("/tools/reimbursement/api/customers", template)
+        self.assertIn("customer_creation_enabled", template)
+        self.assertEqual(
+            template.count("${this.esc(c.display_name)} · ${this.esc(c.grade||'未评级')}"),
+            1,
+        )
+        self.assertIn(
+            "${this.esc(c.display_name)}</option>`).join('')",
+            template,
+        )
         self.assertEqual(
             template.count("['purpose','产品线','product-line']"),
             2,

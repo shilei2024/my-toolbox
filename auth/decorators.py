@@ -127,6 +127,8 @@ def remaining_for(tool_id: str) -> int:
     if current_user.is_authenticated:
         if getattr(current_user, "is_admin", False):
             return 10**9
+        if getattr(current_user, "plan", "free") in {"member", "pro", "vip"}:
+            return 10**9
         limit = current_user.limit_for(tool_id, current_app.config["DAILY_FREE_LIMIT"])
         used = _user_count(current_user.id, tool_id, china_today_str())
         return max(0, limit - used)
@@ -155,6 +157,9 @@ def require_usage(tool_id: str) -> Callable:
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             # admins bypass everything
             if current_user.is_authenticated and getattr(current_user, "is_admin", False):
+                return view_func(*args, **kwargs)
+            # members get unlimited access to the main-site tools
+            if current_user.is_authenticated and getattr(current_user, "plan", "free") in {"member", "pro", "vip"}:
                 return view_func(*args, **kwargs)
 
             ip = get_client_ip()

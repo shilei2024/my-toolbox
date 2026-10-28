@@ -22,6 +22,30 @@
 
 Vercel 变量变更只应用于之后的新 deployment，不会修改已经存在的 deployment。[Vercel Environment Variables](https://vercel.com/docs/environment-variables)
 
+> **主站 500 排查**：若 `mindfulpenpal.com` 所有路由返回 500，且 Vercel 错误为
+> `FUNCTION_INVOCATION_FAILED`，先看 Vercel → my-toolbox → Deployments → 最新
+> Production → Runtime Logs。常见根因是 `DATABASE_URL` / `POSTGRES_URL_*` 指向
+> 不可达数据库（例如 `127.0.0.1` 本地库、已停用旧库、或已暂停的 Vercel Prisma
+> Postgres），Flask 冷启动建管理员时连接失败导致整个函数崩溃。修复环境变量后
+> 重新部署，并用 `https://mindfulpenpal.com/healthz` 验证。
+>
+> **特别注意 Prisma 池化地址**：`DATABASE_URL` 不要使用带
+> `uselibpqcompat=true` / `pgbouncer=true` 的 Prisma 池化连接串——psycopg2 会
+> 在连网前直接报 `invalid URI query parameter "uselibpqcompat"`，同样导致冷启动
+> 崩溃。应使用 `POSTGRES_URL_NON_POOLING` 的直连地址，或去掉该参数。程序现在会
+> 自动剥离这两个参数，但生产环境仍应配置直连地址。
+>
+> `prisma://` 开头的地址是 Prisma 专用协议，psycopg2/SQLAlchemy 无法使用
+> （`Can't load plugin: sqlalchemy.dialects:prisma`），也会秒崩且不产生外呼。
+> 请确保 `POSTGRES_URL_NON_POOLING` 是 `postgresql://` 直连地址；程序现在会
+> 跳过 `prisma://` 并回退到下一个可用地址。
+>
+> **Suspended 状态**：Vercel Storage 中 Prisma Postgres 显示 **Suspended** 时
+> （免费档闲置后自动暂停），所有连接会快速失败，表现与“数据库不可达”相同。
+> 恢复：Vercel → Storage → 该数据库 → 点击 **Resume**（若没有按钮，打开查询
+> 控制台执行 `SELECT 1;` 唤醒），等状态变为 **Running** 后再验证站点；如仍 500，
+> 对最新部署执行 Redeploy 让函数冷启动重试。
+
 ## 分类规则
 
 公开变量仅限明确允许进入浏览器的信息。任何以 `NEXT_PUBLIC_` 开头的变量都会进入前端 bundle，禁止存放：
@@ -46,7 +70,54 @@ M1.1 新增服务端变量：
 | --- | --- | --- | --- |
 | `BILLING_SIGNUP_GRANT` | Generation API（Billing） | `10` | 新用户首次账户汇总时发放的一次性积分；`0` 关闭 |
 | `GALLERY_DEFAULT_MODERATION` | Generation Worker | `pending` | 新图片审核状态；`approved` 会直接发布公开图片 |
+| `MAVIS_SITE_URL` | Next Server Runtime | 无 | 主站公开 Origin，用于 Gallery 的“返回工具箱”导航；可选，未配置时从安全的登录 URL 推导 |
 | `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL` | Next Server Runtime | 无 | Flask 登录/退出页 HTTPS URL，Gallery 登录入口依赖前者 |
+
+## 主站 ↔ Gallery 登录桥接变量
+
+Flask 主站与 Vercel Gallery Web 通过共享 Cookie 与签名会话内省识别同一登录态。这些变量缺失或值不合法时，首页 AI 入口自动隐藏、Gallery 回退为游客（fail closed）。
+
+| 变量 | 归属 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `AI_IMAGE_EXTERNAL_URL` | Flask 主站 | 空 | Gallery 公网 HTTPS URL（如 `https://gallery.example.com/create`）；未配置时首页隐藏 AI 作图入口，主站 `/create`、`/gallery` 保持 404（fail-closed） |
+| `GALLERY_INTROSPECTION_SECRET` | Flask + Vercel | 空 | 内部会话内省共享密钥，至少 32 个 UTF-8 字节；只保存在服务端，禁止 `NEXT_PUBLIC_` |
+| `APP_BASE_URL` | Flask 主站 | `http://localhost:8000` | 主站公网 HTTPS Origin；预检用它校验双方同处 `SESSION_COOKIE_DOMAIN` 之下 |
+| `SESSION_COOKIE_DOMAIN` | Flask 主站 | 空 | 双方共享受控父域（如 `.example.com`）；`*.vercel.app` 无法共享业务 Cookie |
+| `SESSION_COOKIE_SECURE` | Flask 主站 | `false` | 生产必须为 `true`；Gallery 为 HTTPS 时预检直接失败 |
+| `MAVIS_AUTH_INTROSPECTION_URL` | Vercel | 空 | Flask 内部会话检查 HTTPS URL（`/internal/gallery/session`） |
+| `MAVIS_SITE_URL` | Vercel | 空 | Flask 主站公开 Origin；只接受 HTTPS（本地回环可用 HTTP），非法值会隐藏 Gallery 的主站返回入口；未配置时回退到 `MAVIS_AUTH_LOGIN_URL` 的 Origin |
+| `MAVIS_AUTH_LOGIN_URL` | Vercel | 空 | Flask 登录页 HTTPS URL；未配置时 Gallery 隐藏登录入口 |
+| `MAVIS_AUTH_LOGOUT_URL` | Vercel | 空 | Flask 退出页 HTTPS URL；可选，未配置时隐藏退出入口 |
+
+### 统一管理后台变量
+
+主站 Flask 后台直连 Generation Service 管理 API，使用与 Next.js BFF 相同的 HMAC 契约；Gallery 不再维护独立后台。
+
+| 变量 | 归属 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `GALLERY_SERVICE_BASE_URL` | Flask 主站 | 空 | Generation Service 公网 HTTPS API Origin（与 Vercel 侧同名变量一致） |
+| `GALLERY_INTERNAL_HMAC_SECRET` | Flask 主站 + Generation Service | 空 | 管理上下文签名密钥，至少 32 个 UTF-8 字节，与 Vercel 侧一致 |
+| `MAVIS_ADMIN_URL` | Vercel（服务端） | 空 | 统一后台地址（如 `https://mindfulpenpal.com/admin/gallery`）；配置后 Gallery `/admin` 自动重定向 |
+| `NEXT_PUBLIC_MAVIS_ADMIN_URL` | Vercel（公开） | 空 | 同一后台地址，供 Gallery 导航栏对管理员显示“后台”入口；不含敏感信息 |
+
+### 预检命令（不输出密钥）
+
+Flask 主站：
+
+```bash
+flask --app app check-gallery-integration
+```
+
+每项输出以 `[PASS]` 或 `[FAIL]` 开头，只报告变量名与状态；任一 `[FAIL]` 时退出码为 1。输出永远不包含密钥正文或完整内网地址。
+
+Gallery Web：
+
+```bash
+cd apps/gallery-web
+node --experimental-strip-types scripts/check-bridge-config.ts
+```
+
+同样只报告变量名与状态，退出码 0 表示桥接配置就绪。
 
 ## 新增变量流程
 

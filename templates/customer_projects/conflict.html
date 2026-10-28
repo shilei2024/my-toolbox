@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}编辑冲突 — 客户项目跟进{% endblock %}
+{% block head_extra %}<link href="{{ 'customer_projects/customer-projects.css'|static_url }}" rel="stylesheet" />{% endblock %}
+{% block content %}
+<section class="cp-shell cp-narrow">
+  {% include "customer_projects/_module_nav.html" %}
+  <div class="cp-page-heading"><div><p class="cp-kicker">VERSION CONFLICT</p><h1>项目已被其他成员更新</h1><p>你的内容没有覆盖服务器最新版本。请复制需要保留的内容，再返回详情页手动合并。</p></div></div>
+  <div class="cp-two-column">
+    <section class="cp-panel"><div class="cp-panel-heading"><div><h2>你的输入</h2><p>以下内容尚未保存</p></div></div><dl>{% for key,value in submitted.items() %}{% if key not in ['csrf_token','idempotency_key','project_version'] %}<dt>{{ key }}</dt><dd class="mb-3 text-break">{{ value or '—' }}</dd>{% endif %}{% endfor %}</dl></section>
+    <section class="cp-panel"><div class="cp-panel-heading"><div><h2>服务器最新状态</h2><p>当前版本 {{ current_version }}</p></div></div>{% if project %}<dl><dt>项目</dt><dd>{{ project.name }}</dd><dt>阶段</dt><dd>{{ project.stage_code }}</dd><dt>下一步</dt><dd>{{ project.next_action }}</dd><dt>下次跟进</dt><dd>{{ project.next_follow_up_at|china_time('%Y-%m-%d %H:%M') }}</dd></dl><a class="btn btn-primary w-100" href="{{ url_for('customer_projects.project_detail', project_id=project.id) }}">刷新并返回详情</a>{% endif %}</section>
+  </div>
+</section>
+{% endblock %}

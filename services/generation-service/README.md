@@ -56,6 +56,38 @@ M1 adds the production loop and operational defaults:
 - `GALLERY_DEFAULT_MODERATION` controlling immediate public publish vs. pending admin review;
 - Next.js login/logout redirects through `MAVIS_AUTH_LOGIN_URL` / `MAVIS_AUTH_LOGOUT_URL`.
 
+M1.2 adds the creation-workbench feedback loop:
+
+- `GET /v1/generations` viewer-scoped recent task list with signed keyset cursors and an optional status filter;
+- `GenerationView` now includes the owner's `prompt`/`negativePrompt` so the workbench can restore parameters after a failure;
+- the Next.js workbench renders inline completed-image previews through the existing Gallery BFF, a recent-tasks panel, per-task cancellation, and one-click parameter restore for failed tasks.
+
+M1.3 fixes creation-homepage feedback and workflow constraints:
+
+- `GenerationWorkflowView` exposes schema-derived `countRange`/`sizes`; `create` now rejects dimensions or counts outside the workflow `input_schema`;
+- the workbench derives login state from the session route instead of billing, localizes all user-facing service errors, and removes non-essential homepage copy.
+
+M1.4 adds local development tooling and fixes a production-blocking COS issue:
+
+- npm run scripts load `./.env` automatically via `--env-file-if-exists=.env`;
+- `TencentCosStorage` normalizes custom metadata header names (`job_id` -> `job-id`); Tencent COS rejects underscore metadata headers with `SignatureDoesNotMatch`;
+- repository root `scripts/dev/*.ps1` provide one-command local stack setup/start/health/stop.
+
+M4 adds the first provider-agnostic media extension:
+
+- workflow catalog filtering by `mediaType=image|video` while preserving workflow/API mode;
+- a Fire-and-poll Ark/Seedance video adapter behind the existing provider registry;
+- bounded streaming video persistence to Tencent COS and durable `generation_assets` records;
+- owner-scoped video results in the creation workbench and task center;
+- fail-closed provider/model/workflow defaults and queued-only video cancellation.
+- ComfyUI image/video execution, including Video Helper Suite MP4 discovery,
+  server-generated seeds when omitted, and durable COS persistence.
+
+See [M4 architecture](../../docs/architecture/m4-media-generation.md) and the
+[beginner deployment guide](../../docs/deployment/m4-media-generation.md).
+For a complete Gallery-to-local-ComfyUI walkthrough, see the
+[local ComfyUI guide](../../docs/deployment/gallery-local-comfyui.md).
+
 ## Run tests
 
 ```powershell

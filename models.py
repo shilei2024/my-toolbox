@@ -1,15 +1,15 @@
 """
-SQLAlchemy ORM models.
+Legacy/shared SQLAlchemy ORM models.
 
-We use SQLite locally but keep code ORM-only so a future swap to PostgreSQL is
-just a `DATABASE_URL` change. The schema is created on first run via
-`db.create_all()` inside the app factory — no Alembic needed at this scale.
+Local development may still use SQLite and ``db.create_all()`` for convenience.
+Production schema changes are migration-managed; new business-domain models
+belong in their domain package rather than this legacy root module.
 """
 from __future__ import annotations
 
 import json
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Optional
 
 from flask_login import UserMixin
@@ -29,10 +29,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db
+from utils.helpers import utc_naive_now
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    """UTC wall time for this module's legacy timezone-naive columns."""
+    return utc_naive_now()
 
 
 # -----------------------------------------------------------------------------
@@ -46,6 +48,7 @@ class User(UserMixin, db.Model):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active_user: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    nickname: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     plan: Mapped[str] = mapped_column(String(32), default="free", nullable=False)
     # custom_limits: {tool_id: int_limit, ...}; null means use global default
     custom_limits: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -67,6 +70,12 @@ class User(UserMixin, db.Model):
             return {str(k): int(v) for k, v in json.loads(self.custom_limits).items()}
         except (ValueError, TypeError):
             return {}
+
+    @property
+    def display_name(self) -> str:
+        """Nickname when set, otherwise the registered account (email)."""
+        name = (self.nickname or "").strip()
+        return name if name else (self.email or "未设置")
 
     def limit_for(self, tool_id: str, default: int) -> int:
         return self.custom_limit_map.get(tool_id, default)
@@ -378,6 +387,7 @@ class ReimbursementInvoice(db.Model):
     __table_args__ = (
         Index("ix_rb_invoice_period", "period_id"),
         Index("ix_rb_invoice_category", "category_id"),
+        Index("ix_rb_invoice_customer", "customer_id"),
         Index("ix_rb_invoice_owner_status", "owner_type", "owner_id", "status"),
     )
 
@@ -400,6 +410,9 @@ class ReimbursementInvoice(db.Model):
     product_line: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     product_line_code: Mapped[str] = mapped_column(String(20), nullable=False, default="")
     office: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        db.ForeignKey("customers.id", ondelete="SET NULL"), nullable=True
+    )
     customer_level: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     remarks: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     upload_date: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)

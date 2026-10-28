@@ -5,6 +5,7 @@ import os
 import unittest
 
 from app import _has_external_database
+from config import _auto_db_url
 
 
 class VercelDatabaseFallbackTests(unittest.TestCase):
@@ -49,6 +50,59 @@ class VercelDatabaseFallbackTests(unittest.TestCase):
             os.environ.pop(key, None)
         os.environ["DATABASE_URL"] = "sqlite:///app.db"
         self.assertFalse(_has_external_database())
+
+    def test_uselibpqcompat_param_is_stripped_from_database_url(self) -> None:
+        for key in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL"):
+            os.environ.pop(key, None)
+        os.environ["DATABASE_URL"] = (
+            "postgres://u:p@host/db?uselibpqcompat=true&sslmode=require"
+        )
+        self.assertEqual(
+            _auto_db_url(),
+            "postgresql://u:p@host/db?sslmode=require",
+        )
+
+    def test_pgbouncer_param_is_stripped_from_postgres_url(self) -> None:
+        for key in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL"):
+            os.environ.pop(key, None)
+        os.environ["DATABASE_URL"] = (
+            "postgresql://u:p@host/db?pgbouncer=true&connect_timeout=10"
+        )
+        self.assertEqual(
+            _auto_db_url(),
+            "postgresql://u:p@host/db?connect_timeout=10",
+        )
+
+    def test_prisma_pooled_url_falls_back_to_sqlite(self) -> None:
+        os.environ.pop("POSTGRES_URL_NON_POOLING", None)
+        os.environ.pop("DATABASE_URL", None)
+        os.environ["POSTGRES_URL"] = "prisma://u:p@host/db"
+        self.assertEqual(_auto_db_url(), "sqlite:///app.db")
+        self.assertFalse(_has_external_database())
+
+    def test_prisma_pooled_url_falls_back_to_database_url(self) -> None:
+        os.environ.pop("POSTGRES_URL_NON_POOLING", None)
+        os.environ["POSTGRES_URL"] = "prisma://u:p@host/db"
+        os.environ["DATABASE_URL"] = "postgresql://u:p@direct/db?sslmode=require"
+        self.assertEqual(
+            _auto_db_url(),
+            "postgresql://u:p@direct/db?sslmode=require",
+        )
+        self.assertTrue(_has_external_database())
+
+
+class EngineOptionsTests(unittest.TestCase):
+    def test_postgres_engine_options_include_short_connect_timeout(self) -> None:
+        from config import engine_options_for
+
+        options = engine_options_for("postgresql://u:p@host/db")
+        self.assertEqual(options["connect_args"]["connect_timeout"], 5)
+
+    def test_sqlite_engine_options_have_no_connect_args(self) -> None:
+        from config import engine_options_for
+
+        options = engine_options_for("sqlite:///app.db")
+        self.assertNotIn("connect_args", options)
 
 
 if __name__ == "__main__":

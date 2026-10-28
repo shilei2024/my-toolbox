@@ -15,6 +15,8 @@ export interface AdminImageItem {
   readonly slug: string;
   readonly title: string;
   readonly workflowName: string;
+  /** 作品媒体类型：视频与图片共用审核队列，前端据此切换预览方式。 */
+  readonly mediaType: "image" | "video";
   readonly moderationStatus: "pending" | "manual_review" | "approved" | "rejected";
   readonly visibility: "public" | "private";
   readonly promptVisibility: "public" | "hidden";
@@ -34,6 +36,19 @@ export interface AdminProviderItem {
   readonly consecutiveFailures: number;
   readonly lastHealthAt?: string;
   readonly updatedAt: string;
+  readonly models: readonly AdminProviderModelItem[];
+}
+
+export interface AdminProviderModelItem {
+  readonly id: string;
+  readonly providerId: string;
+  readonly modelCode: string;
+  readonly displayName: string;
+  readonly tier: "free" | "member";
+  readonly creditCost?: number;
+  readonly isDefault: boolean;
+  readonly isEnabled: boolean;
+  readonly updatedAt: string;
 }
 
 export interface AdminWorkflowItem {
@@ -41,6 +56,7 @@ export interface AdminWorkflowItem {
   readonly slug: string;
   readonly name: string;
   readonly category: string;
+  readonly mode: "workflow" | "api";
   readonly isEnabled: boolean;
   readonly sortOrder: number;
   readonly activeVersion?: number;
@@ -88,8 +104,79 @@ export interface UpdateProviderCommand {
   readonly expectedUpdatedAt: string;
 }
 
+export interface UpdateProviderModelCommand {
+  readonly tier: "free" | "member";
+  readonly creditCost?: number;
+  readonly isDefault: boolean;
+  readonly isEnabled: boolean;
+  readonly expectedUpdatedAt: string;
+}
+
 export interface UpdateWorkflowCommand {
   readonly isEnabled: boolean;
   readonly sortOrder: number;
   readonly expectedUpdatedAt: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 策展作品（Curated works）
+ * 管理员上传"图片 + 提示词"，直接进入公开画廊；提示词原样保留。
+ * ------------------------------------------------------------------ */
+
+export interface AdminCuratedImageItem {
+  readonly id: string;
+  readonly slug: string;
+  readonly title: string;
+  readonly description: string;
+  readonly prompt: string;
+  readonly negativePrompt: string;
+  readonly model: string;
+  readonly tags: readonly string[];
+  readonly width: number;
+  readonly height: number;
+  readonly mediaType: "image" | "video";
+  readonly promptVisibility: "public" | "hidden";
+  readonly thumbnailUrl: string;
+  readonly publishedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** 已写入对象存储的一份派生资源（原图/预览/缩略图）。 */
+export interface CuratedImageAssetRecord {
+  readonly variant: "original" | "preview" | "thumbnail";
+  readonly storageProvider: string;
+  readonly bucket: string;
+  readonly region: string;
+  readonly objectKey: string;
+  readonly publicUrl?: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly width: number;
+  readonly height: number;
+  readonly sha256: string;
+}
+
+export interface CreateCuratedImageCommand {
+  readonly slug: string;
+  readonly title: string;
+  readonly description: string;
+  readonly prompt: string;
+  readonly negativePrompt: string;
+  readonly model: string;
+  readonly tags: readonly string[];
+  readonly width: number;
+  readonly height: number;
+  readonly promptVisibility: "public" | "hidden";
+  readonly assets: readonly CuratedImageAssetRecord[];
+}
+
+export interface UpdateCuratedImageCommand {
+  readonly title?: string;
+  readonly description?: string;
+  readonly prompt?: string;
+  readonly negativePrompt?: string;
+  readonly model?: string;
+  readonly tags?: readonly string[];
+  readonly promptVisibility?: "public" | "hidden";
 }

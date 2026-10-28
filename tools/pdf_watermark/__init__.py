@@ -28,7 +28,6 @@ from flask import (
     render_template,
     request,
     send_file,
-    send_from_directory,
     url_for,
 )
 from pypdf import PdfReader, PdfWriter, Transformation
@@ -39,7 +38,8 @@ from reportlab.pdfgen import canvas
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
-from utils.helpers import is_allowed_ext, safe_filename
+from utils.helpers import is_allowed_ext, safe_download_path, safe_filename, stage_download
+from utils.pdf_limits import PdfResourceLimitError, enforce_pdf_page_count
 
 logger = logging.getLogger(__name__)
 tool_bp = Blueprint("pdf_watermark", __name__)
@@ -48,13 +48,17 @@ tool_bp = Blueprint("pdf_watermark", __name__)
 _FONT_REGISTERED: set[str] = set()
 
 # Candidate CJK + Latin fonts, tried in order. The first that loads wins.
+# The bundled Noto Sans SC (static/fonts/) ships with the repo so Linux
+# servers without CJK fonts still render Chinese watermarks correctly.
 _FONT_CANDIDATES = [
+    ("bundled-noto", str(Path(__file__).resolve().parent.parent.parent / "static" / "fonts" / "NotoSansSC-Regular.ttf")),
     ("msyh",   "C:/Windows/Fonts/msyh.ttc"),     # Microsoft YaHei (Windows, CJK)
     ("simhei", "C:/Windows/Fonts/simhei.ttf"),    # SimHei (Windows, CJK)
     ("simsun", "C:/Windows/Fonts/simsun.ttc"),    # SimSun (Windows, CJK)
     ("arial",  "C:/Windows/Fonts/arial.ttf"),      # Arial (Windows, Latin)
     ("noto",   "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     ("wqy",    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
 ]
 # Built-in fallback name (Helvetica — Latin only, always available in reportlab).
 _FALLBACK_FONT = "Helvetica"
@@ -195,6 +199,10 @@ def process():
         except Exception:  # noqa: BLE001
             return _fail("PDF 已加密，无法加水印。", is_ajax)
     total_pages = len(reader.pages)
+    try:
+        enforce_pdf_page_count(total_pages)
+    except PdfResourceLimitError as exc:
+        return _fail(str(exc), is_ajax)
     if total_pages == 0:
         return _fail("PDF 没有页面。", is_ajax)
 
@@ -261,14 +269,10 @@ def process():
 
 @tool_bp.get("/download/<path:filename>")
 def download(filename: str):
-    if not is_allowed_ext(filename, {"pdf"}):
+    target = safe_download_path(current_app.config["UPLOAD_DIR"], filename)
+    if not is_allowed_ext(filename, {"pdf"}) or target is None or not target.exists():
         abort(404)
-    return send_from_directory(
-        current_app.config["UPLOAD_DIR"],
-        filename,
-        as_attachment=True,
-        download_name=filename,
-    )
+    return send_file(target, as_attachment=True, download_name=filename)
 
 
 def _fail(message: str, is_ajax: bool = False):
@@ -280,8 +284,4 @@ def _fail(message: str, is_ajax: bool = False):
 
 
 def _stage_to_uploads(suggested_name: str, data: bytes) -> str:
-    upload_dir: Path = current_app.config["UPLOAD_DIR"]
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / suggested_name
-    target.write_bytes(data)
-    return suggested_name
+    return stage_download(suggested_name, data)

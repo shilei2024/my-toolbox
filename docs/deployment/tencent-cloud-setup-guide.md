@@ -174,7 +174,7 @@ ssh -i C:\Users\你的用户名\Downloads\mykey.pem root@<服务器公网IP>
       "Action": ["cos:GetObject"],
       "Effect": "Allow",
       "Principal": { "qcs": ["*"] },
-      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/jobs/*"]
+      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/*"]
     }
   ],
   "Version": "2.0"
@@ -245,6 +245,9 @@ rediss://:密码@Redis内网或公网地址:端口
 预期：`nslookup api-ai.<你的域名>` 返回 CVM IP；`https://api-ai.<你的域名>` 能打开 Caddy 页面/`/health`。
 
 > TLS 证书不用手动申请：Caddy 会自动签发。前提是 DNS 已生效、80/443 安全组放行。
+
+Gallery Web 始终部署在 Vercel（Root Directory 为 `apps/gallery-web`），服务器不运行
+Gallery 容器；`<gallery子域名>` 必须保持 CNAME → `cname.vercel-dns.com`，不要改成 A 记录。
 
 ## 10. 把值填回环境文件
 

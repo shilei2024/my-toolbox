@@ -25,6 +25,19 @@ My Toolbox 是一个基于 Flask 的轻量级在线工具箱，集成 PDF、图�
 
 ## 快速开始
 
+### 项目结构
+
+```text
+apps/gallery-web             # AI 画廊前端（Next.js BFF + Gallery + 管理控制台）
+services/generation-service  # 生成服务（Provider 路由、队列、计分、COS 持久化）
+app.py / templates/ / static # 主站（Flask 工具箱 + 统一后台）
+docs/                        # 文档中心（docs/README.md 为唯一入口）
+deploy/                      # 生产部署（compose、Caddy、迁移脚本）
+```
+
+最新能力：AI 生图/画廊、昵称、双积分账本、积分兑换码、模型配置中心等，见
+[CHANGELOG.md](CHANGELOG.md) 与[平台路线图](docs/roadmap/ai-toolbox-platform-roadmap.md)。
+
 ### 1. 获取代码
 
 ```bash
@@ -114,7 +127,9 @@ Windows 也可使用 `py -3 app.py`。按 `.env.example` 的默认配置，访�
 ## 时间规则
 
 - 数据库时间字段继续使用 UTC 保存，便于迁移和跨地区部署
+- 旧版无时区字段写入前先规范化为 UTC，避免 PostgreSQL 会话时区造成重复偏移
 - 后台用户时间、登录时间和调用日志转换为中国标准时间展示
+- Python 进程日志按 `Asia/Shanghai` 输出并携带 `+0800` 偏移，避免服务器本地时区歧义
 - 后台日志的起止日期按中国自然日换算成 UTC 查询区间
 - 每日配额以中国日期为边界，在北京时间零点进入新一天
 - 时间戳工具默认输出中国标准时间，同时保留 UTC 和 ISO 8601 结果
@@ -137,14 +152,12 @@ Windows 也可使用 `py -3 app.py`。按 `.env.example` 的默认配置，访�
 | `RATELIMIT_DEFAULT` | `120/minute` | 全局 IP 限速 |
 | `RATELIMIT_TOOL` | `20/minute` | 工具处理接口限速 |
 | `RATELIMIT_STORAGE_URI` | `memory://` | 限速存储；多实例建议使用 Redis |
-| `AI_PROVIDER` | `pollinations` | `pollinations`、`openai`、`siliconflow` 或 `mock` |
-| `AI_API_KEY` | 空 | AI 服务密钥 |
-| `AI_BASE_URL` | Pollinations 地址 | AI 服务基础地址 |
-| `AI_MODEL` | 空 | AI 模型名称 |
 | `DISPLAY_TIMEZONE` | `Asia/Shanghai` | 显示时区配置 |
 | `SESSION_COOKIE_SECURE` | `False` | HTTPS 生产环境设为 `True` |
 
 环境变量是初始默认值。管理员在后台保存“站点与限额”后，数据库值优先。
+
+图像生成服务的 Provider、模型和密钥配置已迁移至 `services/generation-service/.env.example`；主站不再读取 `AI_PROVIDER`、`AI_API_KEY`、`AI_BASE_URL` 或 `AI_MODEL`。
 
 ## 测试
 

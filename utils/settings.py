@@ -1,6 +1,8 @@
 """Database-backed settings that take effect without restarting the app."""
 from __future__ import annotations
 
+import re
+import time
 from typing import Any
 
 from flask import Flask
@@ -14,7 +16,9 @@ RUNTIME_SETTING_KEYS = {
     "site_tagline": "SITE_TAGLINE",
     "daily_free_limit": "DAILY_FREE_LIMIT",
     "anon_free_limit": "ANON_FREE_LIMIT",
+    "signup_credit_grant": "SIGNUP_CREDIT_GRANT",
 }
+CACHE_TS_KEY = "_RUNTIME_SETTINGS_CACHE_TS"
 
 
 def validate_site_settings(values: dict[str, str]) -> dict[str, Any]:
@@ -38,23 +42,46 @@ def validate_site_settings(values: dict[str, str]) -> dict[str, Any]:
     if not 0 <= anon_limit <= 100:
         raise ValueError("匿名用户免费次数必须在 0–100 之间。")
 
+    signup_grant = values.get("signup_credit_grant", "10").strip() or "10"
+    if not re.fullmatch(r"(?:0|[1-9]\d{0,8})(?:\.\d{1,4})?", signup_grant):
+        raise ValueError("新用户赠送积分必须是 0–999999999 的小数（最多 4 位小数）。")
+
     return {
         "site_name": site_name,
         "site_tagline": site_tagline,
         "daily_free_limit": daily_limit,
         "anon_free_limit": anon_limit,
+        "signup_credit_grant": signup_grant,
     }
 
 
-def apply_runtime_settings(app: Flask) -> None:
-    """Refresh effective site settings from the DB for this worker."""
-    rows = (
-        db.session.query(Setting)
-        .filter(Setting.key.in_(tuple(RUNTIME_SETTING_KEYS)))
-        .all()
-    )
+def apply_runtime_settings(app: Flask, force: bool = False) -> None:
+    """Refresh effective site settings from the DB for this worker.
+
+    Results are cached in-process for ``RUNTIME_SETTINGS_TTL_SECONDS`` so an
+    idle site does not issue one query per request; ``force=True`` (admin save)
+    applies the change immediately.
+    """
+    now = time.monotonic()
+    cached_at = app.config.get(CACHE_TS_KEY)
+    ttl = int(app.config.get("RUNTIME_SETTINGS_TTL_SECONDS", 30) or 30)
+    if not force and cached_at is not None and now - cached_at < ttl:
+        return
+    try:
+        rows = (
+            db.session.query(Setting)
+            .filter(Setting.key.in_(tuple(RUNTIME_SETTING_KEYS)))
+            .all()
+        )
+    except Exception:  # noqa: BLE001
+        # A dead database must not turn every request into a 500; keep the
+        # process defaults and let the boot log carry the full traceback.
+        app.logger.warning("Runtime settings refresh skipped: database unavailable")
+        app.config[CACHE_TS_KEY] = now
+        return
     raw = {row.key: row.value or "" for row in rows}
     if not raw:
+        app.config[CACHE_TS_KEY] = now
         return
 
     # A legacy or manually edited invalid row must not break every request.
@@ -67,6 +94,9 @@ def apply_runtime_settings(app: Flask) -> None:
         "anon_free_limit": raw.get(
             "anon_free_limit", str(app.config["ANON_FREE_LIMIT"])
         ),
+        "signup_credit_grant": raw.get(
+            "signup_credit_grant", str(app.config.get("SIGNUP_CREDIT_GRANT", "10"))
+        ),
     }
     try:
         effective = validate_site_settings(combined)
@@ -76,3 +106,4 @@ def apply_runtime_settings(app: Flask) -> None:
 
     for db_key, config_key in RUNTIME_SETTING_KEYS.items():
         app.config[config_key] = effective[db_key]
+    app.config[CACHE_TS_KEY] = now

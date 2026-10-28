@@ -19,6 +19,8 @@ export class ProviderSelectionPolicy {
   rank(request: GenerationRequest, bindings: readonly ProviderBinding[]): readonly ProviderCandidate[] {
     const candidates = bindings
       .filter((binding) => binding.enabled && binding.workflowVersionId === request.workflow.workflowVersionId)
+      // Free-tier jobs may only use free-tier models; member-tier jobs may use any.
+      .filter((binding) => request.creditTier !== "free" || binding.modelTier !== "member")
       .filter((binding) => this.#registry.has(binding.providerCode))
       .map((binding) => ({ provider: this.#registry.get(binding.providerCode), binding }))
       .filter(({ provider }) => {

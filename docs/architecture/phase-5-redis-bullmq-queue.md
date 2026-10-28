@@ -55,7 +55,8 @@ BullMQ 可能在 worker 崩溃或 lock 丢失后重新执行任务，因此不�
 
 - 数据库 `claim` 对 completed/cancelled 状态短路。
 - generation attempt 使用 job + attempt 序号唯一约束。
-- COS key 使用 `images/jobs/{jobId}/{outputIndex}.{ext}`，重放会覆盖同一对象，而不是生成孤儿副本。
+- COS key 使用 `images/{ownerKey}/{jobId}/{outputIndex}.{ext}`（ownerKey 缺省时为 `jobs`），
+  按用户名归档便于桶内管理；重放会覆盖同一对象，而不是生成孤儿副本。
 - 多图上传中途失败执行补偿删除。
 - outbox 发布与 queue add 都允许重复，业务结果仍由 PostgreSQL 唯一约束收敛。
 

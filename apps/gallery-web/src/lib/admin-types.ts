@@ -9,6 +9,8 @@ export interface AdminImageItem {
   readonly slug: string;
   readonly title?: string;
   readonly workflowName: string;
+  /** 作品媒体类型：视频与图片共用审核队列，前端据此切换预览方式。 */
+  readonly mediaType?: "image" | "video";
   readonly createdAt: string;
   readonly moderationStatus: ModerationStatus;
   /** 图片可见性：public / private / unlisted。 */
@@ -30,6 +32,19 @@ export interface AdminProviderItem {
   readonly consecutiveFailures: number;
   readonly lastHealthAt?: string;
   readonly updatedAt: string;
+  readonly models: readonly AdminProviderModelItem[];
+}
+
+export interface AdminProviderModelItem {
+  readonly id: string;
+  readonly providerId: string;
+  readonly modelCode: string;
+  readonly displayName: string;
+  readonly tier: "free" | "member";
+  readonly creditCost?: number;
+  readonly isDefault: boolean;
+  readonly isEnabled: boolean;
+  readonly updatedAt: string;
 }
 
 export interface AdminWorkflowItem {
@@ -37,6 +52,7 @@ export interface AdminWorkflowItem {
   readonly name: string;
   readonly slug: string;
   readonly category: string;
+  readonly mode: "workflow" | "api";
   readonly isEnabled: boolean;
   readonly activeVersion?: number;
   readonly bindingCount: number;
@@ -75,4 +91,16 @@ export interface AdminDashboard {
   readonly workflows: readonly AdminWorkflowItem[];
   readonly recentJobs: readonly AdminRecentJob[];
   readonly recentAudit: readonly AdminAuditEntry[];
+}
+
+export interface AdminQueueSnapshot {
+  readonly healthy: boolean;
+  readonly redisLatencyMs: number;
+  readonly workers: number;
+  readonly waiting: number;
+  readonly active: number;
+  readonly delayed: number;
+  readonly failed: number;
+  readonly completed: number;
+  readonly checkedAt: string;
 }

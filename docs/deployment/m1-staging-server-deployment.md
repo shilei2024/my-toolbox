@@ -115,7 +115,7 @@ docker compose --env-file deploy/.env.staging \
 
 重新部署 Preview 后验证 `/api/generation/workflows`。共享登录还需要：
 
-- `MAVIS_AUTH_INTROSPECTION_URL=https://<Staging Flask>/auth/internal/gallery/session`
+- `MAVIS_AUTH_INTROSPECTION_URL=https://<Staging Flask>/internal/gallery/session`
 - `GALLERY_INTROSPECTION_SECRET=<与 Staging Flask 相同的独立密钥>`
 
 普通 `vercel.app` 域名不能共享业务父域 Cookie。完整登录验证必须给 Flask 和 Gallery 配置受控的同父域 Staging 子域，并设置安全 Cookie Domain。

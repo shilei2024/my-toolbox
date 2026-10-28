@@ -11,11 +11,22 @@ export interface GalleryFilters {
   readonly tag?: string;
   readonly workflow?: string;
   readonly orientation?: "portrait" | "square" | "landscape";
+  readonly mediaType?: "image" | "video";
 }
+
+export type GallerySort = "latest" | "popular";
 
 export interface GalleryPageRequest extends GalleryFilters {
   readonly cursor?: string;
   readonly limit?: number;
+  readonly sort?: GallerySort;
+}
+
+/** 筛选面板需要的聚合信息（模型分布、媒体构成、总量）。 */
+export interface GalleryFacets {
+  readonly total: number;
+  readonly media: { readonly image: number; readonly video: number };
+  readonly workflows: readonly { readonly name: string; readonly count: number }[];
 }
 
 export interface ImageAssetView {
@@ -38,6 +49,10 @@ export interface GalleryImageSummary {
   readonly description: string;
   readonly width: number;
   readonly height: number;
+  /** 作品媒体类型：视频与图片共用画廊、审核与发布链路。 */
+  readonly mediaType: "image" | "video";
+  /** 视频时长（秒），仅 mediaType=video 时返回。 */
+  readonly durationSeconds?: number;
   readonly workflowName: string;
   readonly publishedAt: string;
   readonly asset: ImageAssetView;

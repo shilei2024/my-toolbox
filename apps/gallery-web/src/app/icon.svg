@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="mavisGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6d5cff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#mavisGrad)"/>
+  <path d="M15 18h11l6 10 6-10h11v28h-8V34l-9 13-9-13v12h-8z" fill="#fff"/>
+  <circle cx="50" cy="14" r="4" fill="#fff"/>
+</svg>

@@ -16,6 +16,24 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _strip_prisma_pool_params(url: str) -> str:
+    """Remove Prisma-pooler-only query parameters libpq/psycopg2 rejects.
+
+    Vercel Prisma Postgres pooled URLs carry ``uselibpqcompat=true`` (and
+    sometimes ``pgbouncer=true``) for Prisma clients; psycopg2 fails the DSN
+    with ``invalid URI query parameter`` before any network connection.
+    """
+    if "?" not in url:
+        return url
+    base, _, query = url.partition("?")
+    kept = [
+        part
+        for part in query.split("&")
+        if part and part.split("=", 1)[0].lower() not in {"uselibpqcompat", "pgbouncer"}
+    ]
+    return base if not kept else f"{base}?{'&'.join(kept)}"
+
+
 def _auto_db_url() -> str:
     """Auto-detect external database (Vercel Postgres) or default to SQLite.
 
@@ -24,15 +42,24 @@ def _auto_db_url() -> str:
       2. POSTGRES_URL              — Vercel Postgres pooled (fallback)
       3. DATABASE_URL              — explicit override by user (for non-Vercel envs)
       4. sqlite:///app.db          — local default
+
+    Prisma-pooler-only values are rejected: ``prisma://`` URLs have no
+    SQLAlchemy dialect and pooled URLs may carry ``uselibpqcompat`` /
+    ``pgbouncer`` query parameters that psycopg2 refuses to parse.
     """
-    vercel = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
-    if vercel:
+    for candidate in (
+        os.environ.get("POSTGRES_URL_NON_POOLING", ""),
+        os.environ.get("POSTGRES_URL", ""),
+        os.environ.get("DATABASE_URL", ""),
+    ):
+        if not candidate:
+            continue
         # SQLAlchemy 2.x requires postgresql:// not postgres://
-        return vercel.replace("postgres://", "postgresql://")
-    explicit = os.environ.get("DATABASE_URL")
-    if explicit:
-        # Also normalize in case user supplies postgres://
-        return explicit.replace("postgres://", "postgresql://")
+        normalized = _strip_prisma_pool_params(
+            candidate.replace("postgres://", "postgresql://")
+        )
+        if normalized.startswith(("postgres://", "postgresql://", "sqlite://")):
+            return normalized
     return "sqlite:///app.db"
 
 
@@ -40,6 +67,18 @@ def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def engine_options_for(database_url: str) -> dict:
+    """SQLAlchemy engine options for a detected database URL.
+
+    PostgreSQL gets a short connect timeout so a dead or paused database
+    fails fast at cold start instead of hanging the whole Vercel function.
+    """
+    options = {"pool_pre_ping": True}
+    if database_url.startswith(("postgres://", "postgresql://")):
+        options["connect_args"] = {"connect_timeout": 5}
+    return options
 
 
 class Config:
@@ -58,7 +97,7 @@ class Config:
     # Default is relative to Flask's instance/ directory.
     SQLALCHEMY_DATABASE_URI: str = _auto_db_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
+    SQLALCHEMY_ENGINE_OPTIONS: dict = engine_options_for(_auto_db_url())
 
     # --- Bootstrap admin ---
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@example.com")
@@ -69,6 +108,12 @@ class Config:
     ANON_FREE_LIMIT: int = int(os.environ.get("ANON_FREE_LIMIT", "3"))
     MAX_UPLOAD_MB: int = int(os.environ.get("MAX_UPLOAD_MB", "25"))
     MAX_CONTENT_LENGTH: int = int(os.environ.get("MAX_UPLOAD_MB", "25")) * 1024 * 1024
+    # Invoice ZIPs keep multipart headroom below the global Flask request cap.
+    INVOICE_ZIP_MAX_MB: int = int(os.environ.get("INVOICE_ZIP_MAX_MB", "20"))
+    INVOICE_ZIP_BATCH_MB: int = int(os.environ.get("INVOICE_ZIP_BATCH_MB", "20"))
+    INVOICE_ZIP_RESPONSE_MB: int = int(os.environ.get("INVOICE_ZIP_RESPONSE_MB", "48"))
+    MAX_PDF_FILES: int = int(os.environ.get("MAX_PDF_FILES", "10"))
+    MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", "200"))
     TEMP_FILE_TTL_MINUTES: int = int(os.environ.get("TEMP_FILE_TTL_MINUTES", "30"))
 
     # --- Rate limit ---
@@ -76,8 +121,46 @@ class Config:
     RATELIMIT_TOOL: str = os.environ.get("RATELIMIT_TOOL", "20/minute")
     RATELIMIT_STORAGE_URI: str = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
 
+    # --- Database operation budget ---
+    # Refresh database-backed site settings at most once per interval instead
+    # of on every request (keeps managed PostgreSQL operation counts low).
+    RUNTIME_SETTINGS_TTL_SECONDS: int = int(
+        os.environ.get("RUNTIME_SETTINGS_TTL_SECONDS", "30")
+    )
+    # Set false when the schema is migration-managed (production) to skip the
+    # cold-start schema probe and db.create_all() reflection entirely.
+    AUTO_CREATE_SCHEMA: bool = _bool(os.environ.get("AUTO_CREATE_SCHEMA"), default=True)
+
+    # --- Customer project tracking (default off for safe production rollout) ---
+    CUSTOMER_PROJECTS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECTS_ENABLED"), default=False
+    )
+    CUSTOMER_PROJECTS_DEFAULT_ORG_NAME: str = os.environ.get(
+        "CUSTOMER_PROJECTS_DEFAULT_ORG_NAME", "默认业务组织"
+    ).strip()
+    # Optional comma-separated pilot account emails. Empty means every active
+    # organization member may enter once the feature flag is enabled.
+    CUSTOMER_PROJECTS_PILOT_EMAILS: str = os.environ.get(
+        "CUSTOMER_PROJECTS_PILOT_EMAILS", ""
+    ).strip()
+    CUSTOMER_PROJECT_REMINDERS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECT_REMINDERS_ENABLED"), default=False
+    )
+    CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED: bool = _bool(
+        os.environ.get("CUSTOMER_PROJECT_NOTIFICATIONS_ENABLED"), default=False
+    )
+    NOTIFICATION_ADAPTER: str = os.environ.get("NOTIFICATION_ADAPTER", "dry-run").strip()
+    SMTP_HOST: str = os.environ.get("SMTP_HOST", "").strip()
+    SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+    SMTP_SECURITY: str = os.environ.get("SMTP_SECURITY", "starttls").strip()
+    SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "").strip()
+    SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM: str = os.environ.get("SMTP_FROM", "").strip()
+    SMTP_TIMEOUT_SECONDS: int = int(os.environ.get("SMTP_TIMEOUT_SECONDS", "10"))
+
     # --- Misc ---
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://localhost:8000")
+    APP_VERSION: str = os.environ.get("APP_VERSION", "0.4.3")
     DISPLAY_TIMEZONE: str = os.environ.get("DISPLAY_TIMEZONE", "Asia/Shanghai")
     SITE_NAME: str = os.environ.get("SITE_NAME", "Mavis 在线工具箱")
     SITE_TAGLINE: str = os.environ.get(
@@ -90,6 +173,12 @@ class Config:
     # Optional public HTTPS entry to the independently deployed Gallery Web.
     # Keeping this environment-specific avoids committing Preview/Production URLs.
     AI_IMAGE_EXTERNAL_URL: str = os.environ.get("AI_IMAGE_EXTERNAL_URL", "").strip()
+
+    # --- Gallery admin bridge (Flask admin -> Generation Service) ---
+    # Same contract the Next.js BFF uses: a public HTTPS API origin plus the
+    # shared HMAC secret that signs the internal admin viewer context.
+    GALLERY_SERVICE_BASE_URL: str = os.environ.get("GALLERY_SERVICE_BASE_URL", "").strip()
+    GALLERY_INTERNAL_HMAC_SECRET: str = os.environ.get("GALLERY_INTERNAL_HMAC_SECRET", "")
 
     # --- Paths ---
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
@@ -110,7 +199,31 @@ class DevConfig(Config):
 class ProdConfig(Config):
     DEBUG = False
 
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+
+    @classmethod
+    def verify(cls) -> None:
+        """Fail fast in production when default secrets are still in use.
+
+        Called from get_config(); raises so the app refuses to boot instead of
+        silently running with a publicly known SECRET_KEY / admin password.
+        """
+        if cls.SECRET_KEY in {"dev-only-change-me", "please-change-me-to-a-long-random-string-at-least-32-chars"}:
+            raise RuntimeError(
+                "SECRET_KEY is still the development default. Set a random value "
+                "of at least 32 characters in the production environment."
+            )
+        if cls.ADMIN_PASSWORD == "ChangeMe123!":
+            raise RuntimeError(
+                "ADMIN_PASSWORD is still the default. Set a strong password for "
+                "the bootstrap admin account in the production environment."
+            )
+
 
 def get_config() -> type[Config]:
     env = os.environ.get("FLASK_ENV", "production").lower()
-    return DevConfig if env in {"development", "dev"} else ProdConfig
+    config_cls = DevConfig if env in {"development", "dev"} else ProdConfig
+    if config_cls is ProdConfig:
+        ProdConfig.verify()
+    return config_cls

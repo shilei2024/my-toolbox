@@ -81,7 +81,8 @@ fi
 if [ -z "$(get_value COMFYUI_BASE_URL)" ] && \
    [ -z "$(get_value OPENAI_API_KEY)" ] && \
    [ -z "$(get_value GEMINI_API_KEY)" ] && \
-   [ -z "$(get_value JIMENG_API_KEY)" ]; then
+   [ -z "$(get_value JIMENG_API_KEY)" ] && \
+   [ -z "$(get_value ARK_VIDEO_API_KEY)" ]; then
   echo "preflight failed: configure at least one real generation provider" >&2
   exit 1
 fi
@@ -96,6 +97,9 @@ for provider in OPENAI GEMINI JIMENG; do
     require_value "${provider}_BASE_URL"
   fi
 done
+if [ -n "$(get_value ARK_VIDEO_API_KEY)" ]; then
+  require_value ARK_VIDEO_BASE_URL
+fi
 
 case "$(get_value GALLERY_DEFAULT_MODERATION)" in
   ""|pending|approved) ;;

@@ -1,23 +1,41 @@
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
+import type { CuratedImageService } from "../gallery/curated-image-service.ts";
 import { GalleryError } from "../gallery/errors.ts";
 import type { ViewerContext } from "../gallery/types.ts";
 import type { AdminRepository } from "./repository.ts";
-import type { AdminDashboard, AdminImageItem, AdminProviderItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { AdminCuratedImageItem, AdminDashboard, AdminImageItem, AdminProviderItem, AdminProviderModelItem, AdminWorkflowItem, ModerateImageCommand, UpdateProviderCommand, UpdateProviderModelCommand, UpdateWorkflowCommand } from "./types.ts";
+import type { GenerationQueueSnapshot } from "../queue/queue-observability.ts";
+
+export interface QueueObservabilityPort { snapshot(): Promise<GenerationQueueSnapshot>; }
 
 export class AdminService {
   readonly #repository: AdminRepository;
   readonly #logger: StructuredLogger;
   readonly #onContentChanged: () => Promise<void>;
+  readonly #queueObservability: QueueObservabilityPort | undefined;
+  readonly #curated: CuratedImageService | undefined;
 
-  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void> }) {
+  constructor(options: { repository: AdminRepository; logger: StructuredLogger; onContentChanged: () => Promise<void>; queueObservability?: QueueObservabilityPort; curated?: CuratedImageService }) {
     this.#repository = options.repository;
     this.#logger = options.logger;
     this.#onContentChanged = options.onContentChanged;
+    this.#queueObservability = options.queueObservability;
+    this.#curated = options.curated;
   }
 
   async dashboard(viewer: ViewerContext): Promise<AdminDashboard> {
     requireAdmin(viewer);
     return this.#repository.dashboard();
+  }
+
+  async queueSnapshot(viewer: ViewerContext): Promise<GenerationQueueSnapshot> {
+    requireAdmin(viewer);
+    if (!this.#queueObservability) throw new GalleryError("service_unavailable", "Queue monitoring is not configured", 503);
+    const snapshot = await this.#queueObservability.snapshot();
+    if (!snapshot.healthy || (snapshot.waiting > 0 && snapshot.workers === 0)) {
+      this.#logger.error("admin.queue_attention", { requestId: viewer.requestId, healthy: snapshot.healthy, workers: snapshot.workers, waiting: snapshot.waiting, active: snapshot.active });
+    }
+    return snapshot;
   }
 
   async moderateImage(imageId: string, input: unknown, viewer: ViewerContext): Promise<AdminImageItem> {
@@ -37,12 +55,47 @@ export class AdminService {
     return result;
   }
 
+  async updateProviderModel(modelId: string, input: unknown, viewer: ViewerContext): Promise<AdminProviderModelItem> {
+    const adminUserId = requireAdmin(viewer);
+    const command = parseProviderModel(input);
+    const result = await this.#repository.updateProviderModel(uuid(modelId), command, adminUserId, viewer.requestId);
+    this.#logger.info("admin.provider_model_updated", { requestId: viewer.requestId, actorUserId: adminUserId, modelId, tier: command.tier, isEnabled: command.isEnabled });
+    return result;
+  }
+
   async updateWorkflow(workflowId: string, input: unknown, viewer: ViewerContext): Promise<AdminWorkflowItem> {
     const adminUserId = requireAdmin(viewer);
     const command = parseWorkflow(input);
     const result = await this.#repository.updateWorkflow(uuid(workflowId), command, adminUserId, viewer.requestId);
     this.#logger.info("admin.workflow_updated", { requestId: viewer.requestId, actorUserId: adminUserId, workflowId, isEnabled: command.isEnabled, sortOrder: command.sortOrder });
     return result;
+  }
+
+  /* -------- 策展作品：管理员上传"图片 + 提示词" -------- */
+
+  async createCuratedImage(input: unknown, viewer: ViewerContext): Promise<AdminCuratedImageItem> {
+    requireAdmin(viewer);
+    return this.curatedService().create(input, viewer);
+  }
+
+  async listCuratedImages(viewer: ViewerContext, limit?: number): Promise<readonly AdminCuratedImageItem[]> {
+    requireAdmin(viewer);
+    return limit === undefined ? this.curatedService().list(viewer) : this.curatedService().list(viewer, limit);
+  }
+
+  async updateCuratedImage(imageId: string, input: unknown, viewer: ViewerContext): Promise<AdminCuratedImageItem> {
+    requireAdmin(viewer);
+    return this.curatedService().update(imageId, input, viewer);
+  }
+
+  async deleteCuratedImage(imageId: string, viewer: ViewerContext): Promise<void> {
+    requireAdmin(viewer);
+    await this.curatedService().delete(imageId, viewer);
+  }
+
+  private curatedService(): CuratedImageService {
+    if (!this.#curated) throw new GalleryError("service_unavailable", "Curated image uploads are not configured", 503);
+    return this.#curated;
   }
 }
 
@@ -65,6 +118,18 @@ function parseProvider(value: unknown): UpdateProviderCommand {
   const body = object(value, ["status", "priority", "expectedUpdatedAt"]);
   if (body.status !== "active" && body.status !== "disabled") throw invalid("status is invalid");
   return { status: body.status, priority: integer(body.priority, 0, 10_000, "priority"), expectedUpdatedAt: timestamp(body.expectedUpdatedAt) };
+}
+
+function parseProviderModel(value: unknown): UpdateProviderModelCommand {
+  const body = object(value, ["tier", "creditCost", "isDefault", "isEnabled", "expectedUpdatedAt"]);
+  if (body.tier !== "free" && body.tier !== "member") throw invalid("tier is invalid");
+  if (typeof body.isDefault !== "boolean" || typeof body.isEnabled !== "boolean") throw invalid("isDefault/isEnabled is invalid");
+  let creditCost: number | undefined;
+  if (body.creditCost !== undefined && body.creditCost !== null) {
+    if (typeof body.creditCost !== "number" || !Number.isFinite(body.creditCost) || body.creditCost < 0 || body.creditCost > 1_000_000) throw invalid("creditCost is invalid");
+    creditCost = Math.round(body.creditCost * 10_000) / 10_000;
+  }
+  return { tier: body.tier, ...(creditCost === undefined ? {} : { creditCost }), isDefault: body.isDefault, isEnabled: body.isEnabled, expectedUpdatedAt: timestamp(body.expectedUpdatedAt) };
 }
 
 function parseWorkflow(value: unknown): UpdateWorkflowCommand {

@@ -4,6 +4,10 @@
 
 - [永久工程原则与 Golden Rule](engineering-principles.md)
 - [Mavis Gallery 品牌规范](brand-spec.md)
+- [发票提取与批量打印工作台](invoice-workspace.md)
+- [报销助手（发票 OCR）架构与性能基线](reimbursement-workspace.md)
+- [客户项目跟进系统 Phase 1 核心架构](customer-project-tracking.md)
+- [客户项目跟进数据字典](customer-project-tracking-data-dictionary.md)
 
 ## Phase 架构文档
 
@@ -18,6 +22,7 @@
 9. [Phase 9：多 Provider](phase-9-multi-provider.md)
 10. [Phase 10：支付、积分与会员](phase-10-payments-credits-memberships.md)
 11. [M1：Generation 生产闭环](m1-generation-production-loop.md)
+12. [M4：Gallery 图片与视频生成](m4-media-generation.md)
 
 ## 图表
 

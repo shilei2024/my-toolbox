@@ -8,19 +8,60 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from flask import current_app
+from flask import current_app, has_request_context, session
 from werkzeug.utils import secure_filename
 
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-CHINA_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
+CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
+DOWNLOAD_SESSION_KEY = "issued_downloads"
+DOWNLOAD_SESSION_LIMIT = 24
+DOWNLOAD_TTL_SECONDS = 60 * 30
 
 
 def safe_filename(original: str) -> str:
-    """Sanitize a user-provided filename, then add a short uuid prefix to avoid collisions."""
+    """Create an unguessable, session-bound filename for a staged download."""
     base = secure_filename(original) or "file"
     base = SAFE_FILENAME_RE.sub("_", base)
-    return f"{uuid.uuid4().hex[:8]}_{base[:120]}"
+    filename = f"{uuid.uuid4().hex}_{base[:120]}"
+    bind_download_to_session(filename)
+    return filename
+
+
+def bind_download_to_session(filename: str) -> None:
+    """Authorize a staged result for the current browser session for a short time.
+
+    Tool outputs live in the shared upload directory.  A high-entropy filename is
+    useful defense in depth, but it must not be the access-control mechanism.
+    Keeping a small, expiring allow-list in Flask's signed session makes a copied
+    result URL unusable from another browser without introducing a new database
+    table for ephemeral artifacts.
+    """
+    if not filename or not has_request_context():
+        return
+    now = int(datetime.now(timezone.utc).timestamp())
+    previous = session.get(DOWNLOAD_SESSION_KEY, {})
+    allowed = {
+        name: expires_at
+        for name, expires_at in previous.items()
+        if isinstance(name, str) and isinstance(expires_at, int) and expires_at > now
+    }
+    allowed[filename] = now + DOWNLOAD_TTL_SECONDS
+    if len(allowed) > DOWNLOAD_SESSION_LIMIT:
+        allowed = dict(sorted(allowed.items(), key=lambda item: item[1], reverse=True)[:DOWNLOAD_SESSION_LIMIT])
+    session[DOWNLOAD_SESSION_KEY] = allowed
+    session.modified = True
+
+
+def current_session_can_download(filename: str) -> bool:
+    """Return whether ``filename`` was issued to this browser session."""
+    if not has_request_context():
+        return False
+    now = int(datetime.now(timezone.utc).timestamp())
+    allowed = session.get(DOWNLOAD_SESSION_KEY, {})
+    expires_at = allowed.get(filename) if isinstance(allowed, dict) else None
+    return isinstance(expires_at, int) and expires_at > now
 
 
 def sha256_of(data: bytes) -> str:
@@ -29,6 +70,17 @@ def sha256_of(data: bytes) -> str:
 
 def utc_today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def utc_naive_now() -> datetime:
+    """Return UTC wall time for legacy timezone-naive database columns.
+
+    Binding an aware datetime to PostgreSQL ``timestamp without time zone``
+    first converts it through the connection session timezone.  On a China-
+    configured database that silently adds eight hours before the display
+    layer adds another eight.  Normalize these legacy values before binding.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def china_now() -> datetime:
@@ -62,12 +114,17 @@ def china_day_utc_bounds(day: str | date) -> tuple[datetime, datetime]:
 
 
 def get_client_ip() -> str:
-    """Return the best-guess client IP, respecting X-Forwarded-For if behind a proxy."""
+    """Return the best-guess client IP.
+
+    When PROXY_FIX_COUNT is configured (app behind Nginx/Cloudflare),
+    werkzeug's ProxyFix already rewrote request.remote_addr from the trusted
+    X-Forwarded-For chain, so we trust remote_addr alone and never read the
+    header directly — otherwise a direct client could spoof X-Forwarded-For to
+    fake its IP. Without ProxyFix, remote_addr is the socket peer (the proxy),
+    which is the honest value we can compute.
+    """
     from flask import request
 
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
     return request.remote_addr or "0.0.0.0"
 
 
@@ -93,7 +150,7 @@ def safe_download_path(upload_dir: Path, filename: str) -> Optional[Path]:
     earlier. Returns ``None`` if the filename is empty, contains path separators
     / parent traversal, or resolves outside ``upload_dir``.
     """
-    if not filename:
+    if not filename or not current_session_can_download(filename):
         return None
     if "/" in filename or "\\" in filename or ".." in filename:
         return None
@@ -104,6 +161,29 @@ def safe_download_path(upload_dir: Path, filename: str) -> Optional[Path]:
     except (ValueError, OSError):
         return None
     return target
+
+
+def stage_download(suggested_name: str, data: bytes) -> str:
+    """Persist a session-authorized result under the configured upload root.
+
+    Callers must obtain ``suggested_name`` from :func:`safe_filename` first;
+    this helper intentionally rejects path components instead of silently
+    rewriting a stored filename.
+    """
+    if (
+        not suggested_name
+        or suggested_name in {".", ".."}
+        or Path(suggested_name).name != suggested_name
+    ):
+        raise ValueError("Invalid staged download filename")
+    upload_dir = ensure_dir(Path(current_app.config["UPLOAD_DIR"]))
+    target = upload_dir / suggested_name
+    try:
+        target.resolve().relative_to(upload_dir.resolve())
+    except ValueError as exc:
+        raise ValueError("Invalid staged download filename") from exc
+    target.write_bytes(data)
+    return suggested_name
 
 
 def human_bytes(num: float) -> str:

@@ -33,7 +33,7 @@
 | 服务器系统 | Ubuntu 22.04/24.04 | 已装 Docker/Compose/PostgreSQL |
 | 域名 DNS 托管 | Namecheap（registrar-servers.com） | 子域名解析在 Namecheap 控制台加 |
 | 后端域名 | `api-ai.mindfulpenpal.com` | A 记录 → 服务器 IP |
-| 前端域名 | `gallery.mindfulpenpal.com` | CNAME → Vercel |
+| 前端域名 | `gallery.mindfulpenpal.com` | CNAME → Vercel（`cname.vercel-dns.com`） |
 | COS 桶名 / 地域 | 例如 `mindfulpenpal-images` / `ap-shanghai` | 已创建 |
 | COS 密钥 | CAM 子账号 SecretId/SecretKey | 不要用主账号密钥 |
 | 原站数据库 | Vercel Postgres / Neon / 腾讯云 PG | 必须是 PostgreSQL |
@@ -216,10 +216,10 @@ sudo nano /etc/mindfulpenpal.production.env
 | `CADDY_IMAGE` | `caddy:2.10-alpine` |
 | `ALLOW_LOCAL_IMAGE_TAGS` | `true`（本机构建镜像时使用；有镜像仓库建议用 digest 并保持 `false`） |
 | `GENERATION_API_DOMAIN` | `api-ai.mindfulpenpal.com` |
-| `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?sslmode=require` |
+| `DATABASE_URL` | `postgresql://mavis:<密码>@host.docker.internal:5432/mindfulpenpal?uselibpqcompat=true&sslmode=require` |
 | `REDIS_URL` | `redis://redis:6379`（compose 内网 Redis） |
 | `ALLOW_PLAINTEXT_REDIS` | `true`（Redis 只在 Docker 内网，不发布公网端口） |
-| `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` / `GALLERY_INTROSPECTION_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
+| `GALLERY_CURSOR_SECRET` / `GALLERY_INTERNAL_HMAC_SECRET` | 各自独立随机值：`openssl rand -hex 32` |
 | `GALLERY_ASSET_HOSTS` | `<桶名>.cos.<地域>.myqcloud.com`（方案 B，见第 8 步） |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` | CAM 子账号密钥 |
 | `COS_BUCKET` / `COS_REGION` | 桶名 / 地域代码（如 `ap-shanghai`） |
@@ -227,6 +227,15 @@ sudo nano /etc/mindfulpenpal.production.env
 | `BILLING_PUBLIC_BASE_URL` | `https://mindfulpenpal.com` |
 | `BILLING_SIGNUP_GRANT` | `10`（新用户送积分） |
 | `OPENAI_API_KEY` / `GEMINI_API_KEY` / `JIMENG_API_KEY` | 至少填一个真实密钥，对应 `*_BASE_URL` 保持默认 |
+
+> 注意：`GALLERY_INTROSPECTION_SECRET` 不属于服务器环境文件，它是 Vercel 主站（Flask）与
+> Gallery Web 两个项目之间共享的独立密钥（至少 32 字节）。Generation Service 不使用它，
+> 服务器上这一项留空不会影响任何功能；必须配置在 Vercel 的两个项目里且两边完全一致。
+
+> 注意：本地 PostgreSQL 使用自签名证书，Generation Service 的 Node `pg` 驱动默认把
+> `sslmode=require` 当作 `verify-full`，会导致 worker 启动时报 `self-signed certificate`
+> 崩溃。必须在连接串里加 `uselibpqcompat=true&`（node pg 兼容 libpq 语义：加密但不校验
+> 证书）。主站 Flask（psycopg2）连 `127.0.0.1` 时不需要这个参数。
 
 生成随机值的命令：
 
@@ -325,7 +334,7 @@ curl https://api-ai.mindfulpenpal.com/health
       "Action": ["cos:GetObject"],
       "Effect": "Allow",
       "Principal": { "qcs": ["*"] },
-      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/jobs/*"]
+      "Resource": ["qcs::cos:<地域>:uid/<账号ID>:<桶名>/images/*"]
     }
   ],
   "Version": "2.0"
@@ -339,7 +348,7 @@ curl https://api-ai.mindfulpenpal.com/health
 > - `<地域>` = 桶所在地域代码，如 `ap-shanghai`；
 > - `<账号ID>` = **APPID（12 位数字）**，不是登录账号也不是昵称；
 > - `<桶名>` = **带 APPID 后缀的完整桶名**，例如桶显示为 `mavis-gallery-1393621694` 时，
->   Resource 应写成 `qcs::cos:ap-shanghai:uid/1393621694:mavis-gallery-1393621694/images/jobs/*`。
+>   Resource 应写成 `qcs::cos:ap-shanghai:uid/1393621694:mavis-gallery-1393621694/images/*`。
 > 若控制台粘贴 JSON 报错，优先检查这三个值是否还留着 `<>` 尖括号占位符。
 
 确认环境文件里已填：
@@ -399,7 +408,7 @@ Vercel 项目 Settings → Environment Variables → Production：
 | 变量 | 值 |
 | --- | --- |
 | `DATABASE_URL` | `postgresql://mavis:<密码>@<服务器公网IP>:5432/mindfulpenpal?sslmode=require` |
-| `GALLERY_INTROSPECTION_SECRET` | 与服务器环境文件完全一致 |
+| `GALLERY_INTROSPECTION_SECRET` | 与 my-toolbox-gallery 完全一致（Vercel 两个项目共享；服务器环境文件不需要此项） |
 | `SESSION_COOKIE_DOMAIN` | `.mindfulpenpal.com`（注意开头点） |
 | `SESSION_COOKIE_SECURE` | `true` |
 | `AI_IMAGE_EXTERNAL_URL` | `https://gallery.mindfulpenpal.com/create` |
@@ -410,13 +419,13 @@ Vercel 项目 Settings → Environment Variables → Production：
 
 ### 10.2 Gallery Web 项目（apps/gallery-web）
 
-新增 Production 环境变量：
+Vercel 项目 Settings → Environment Variables → Production 新增：
 
 | 变量 | 值 |
 | --- | --- |
 | `GALLERY_SERVICE_BASE_URL` | `https://api-ai.mindfulpenpal.com` |
 | `GALLERY_INTERNAL_HMAC_SECRET` | 与服务器一致 |
-| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/auth/internal/gallery/session` |
+| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/internal/gallery/session` |
 | `GALLERY_INTROSPECTION_SECRET` | 与 Flask 一致 |
 | `GALLERY_PUBLIC_ORIGIN` | `https://gallery.mindfulpenpal.com` |
 | `MAVIS_AUTH_LOGIN_URL` | `https://mindfulpenpal.com/login` |
@@ -428,6 +437,9 @@ Vercel 项目 Settings → Environment Variables → Production：
 > 在 “Git Branch” 选择 `main` 并保存（旧版在 Settings → Git 的 “Production Branch” 输入框，
 > 新版已迁移到 Environments）。若界面没有下拉框，说明该区域已改用部署管理：
 > 到 Deployments 页找到来自 `main` 的最新部署，点 “Promote to Production” 同样可让生产跟随 main。
+
+Gallery Web 始终部署在 Vercel，不在本服务器运行；`gallery.mindfulpenpal.com` 的 DNS
+保持 CNAME → `cname.vercel-dns.com`。
 
 ## 11. 第 10 步：启用 AI Provider 与验收
 

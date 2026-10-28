@@ -1,0 +1,11 @@
+[Unit]
+Description=Run My Toolbox customer-project reminders every 10 minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+RandomizedDelaySec=30
+Unit=customer-project-reminders.service
+
+[Install]
+WantedBy=timers.target

@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createHmac } from "node:crypto";
-import type { GalleryImageDetail, GalleryPageData, GalleryQuery, ViewerContext } from "@/lib/gallery-types";
+import type { GalleryFacets, GalleryImageDetail, GalleryPageData, GalleryQuery, ViewerContext } from "@/lib/gallery-types";
+import type { TaskPage } from "@/lib/task-types";
 
 export class GalleryClientError extends Error {
   readonly code: string;
@@ -9,8 +10,24 @@ export class GalleryClientError extends Error {
   constructor(code: string, message: string, status: number) { super(message); this.name = "GalleryClientError"; this.code = code; this.status = status; }
 }
 
+const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
+  unauthorized: "请先登录后再继续。",
+  forbidden: "你没有执行此操作的权限。",
+  not_found: "请求的资源不存在。",
+  invalid_request: "请求参数无效，请检查后重试。",
+  validation_failed: "提交的信息未通过校验。",
+  conflict: "资源状态已变化，请刷新后重试。",
+  insufficient_credits: "积分不足，请充值后重试。",
+  rate_limited: "操作过于频繁，请稍后重试。",
+  service_unavailable: "创作服务暂时不可用，请稍后重试。",
+};
+
 export async function getPublicGallery(query: GalleryQuery, viewer: ViewerContext): Promise<GalleryPageData> {
   return serviceRequest<GalleryPageData>(`/v1/gallery${queryString(query)}`, viewer);
+}
+
+export async function getGalleryFacets(viewer: ViewerContext): Promise<GalleryFacets> {
+  return serviceRequest<GalleryFacets>("/v1/gallery/facets", viewer);
 }
 
 export async function getGalleryDetail(slug: string, viewer: ViewerContext): Promise<GalleryImageDetail> {
@@ -23,6 +40,10 @@ export async function getMyImages(query: GalleryQuery, viewer: ViewerContext): P
 
 export async function getFavorites(query: GalleryQuery, viewer: ViewerContext): Promise<GalleryPageData> {
   return serviceRequest<GalleryPageData>(`/v1/me/favorites${queryString(query)}`, viewer);
+}
+
+export async function getTasks(viewer: ViewerContext, limit = 48): Promise<TaskPage> {
+  return serviceRequest<TaskPage>(`/v1/tasks?limit=${limit}`, viewer);
 }
 
 export async function serviceRequest<T>(path: string, viewer: ViewerContext, init: RequestInit = {}): Promise<T> {
@@ -42,7 +63,7 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
   const response = await fetch(new URL(path, base), {
     ...init,
     cache: "no-store",
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(serviceTimeoutMs()),
     headers: {
       Accept: "application/json",
       "X-Mavis-User-Context": context,
@@ -50,7 +71,11 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
       ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...(init.headers ?? {}),
     },
-  }).catch(() => { throw new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503); });
+  }).catch((reason: unknown) => {
+    const cause = reason instanceof Error && reason.cause instanceof Error ? reason.cause.message : "";
+    console.info(`[gallery] service request failed ${path}: ${String(reason)}${cause ? ` cause=${cause}` : ""}`);
+    throw new GalleryClientError("service_unavailable", "创作服务暂时不可用，请稍后重试。", 503);
+  });
 
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json") ? await response.json() as unknown : undefined;
@@ -62,23 +87,29 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
 }
 
 export function safeProxyError(error: unknown): Response {
-  const normalized = error instanceof GalleryClientError ? error : new GalleryClientError("service_unavailable", "Gallery service is temporarily unavailable", 503);
+  const normalized = error instanceof GalleryClientError ? error : new GalleryClientError("service_unavailable", "创作服务暂时不可用，请稍后重试。", 503);
   return Response.json({ error: { code: normalized.code, message: normalized.message } }, { status: normalized.status });
 }
 
 function serviceBaseUrl(): URL {
   const raw = process.env.GALLERY_SERVICE_BASE_URL?.trim();
-  if (!raw) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  if (!raw) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   let url: URL;
-  try { url = new URL(raw.endsWith("/") ? raw : `${raw}/`); } catch { throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503); }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  try { url = new URL(raw.endsWith("/") ? raw : `${raw}/`); } catch { throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503); }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   return url;
 }
 
 function internalSecret(): string {
   const secret = process.env.GALLERY_INTERNAL_HMAC_SECRET?.trim() ?? "";
-  if (Buffer.byteLength(secret, "utf8") < 32) throw new GalleryClientError("service_unavailable", "Gallery service is not configured", 503);
+  if (Buffer.byteLength(secret, "utf8") < 32) throw new GalleryClientError("service_unavailable", "创作服务未配置，请稍后重试。", 503);
   return secret;
+}
+
+function serviceTimeoutMs(): number {
+  const raw = process.env.GALLERY_SERVICE_TIMEOUT_MS?.trim();
+  const value = raw ? Number(raw) : 30_000;
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= 120_000 ? value : 30_000;
 }
 
 function queryString(query: GalleryQuery): string {
@@ -89,6 +120,8 @@ function queryString(query: GalleryQuery): string {
   if (query.tag) params.set("tag", query.tag);
   if (query.workflow) params.set("workflow", query.workflow);
   if (query.orientation) params.set("orientation", query.orientation);
+  if (query.mediaType) params.set("mediaType", query.mediaType);
+  if (query.sort) params.set("sort", query.sort);
   const result = params.toString();
   return result ? `?${result}` : "";
 }
@@ -98,11 +131,12 @@ function safeError(value: unknown): { code: string; message: string } {
     const error = (value as { error?: unknown }).error;
     if (error && typeof error === "object" && !Array.isArray(error)) {
       const code = (error as { code?: unknown }).code;
-      const message = (error as { message?: unknown }).message;
-      if (typeof code === "string" && typeof message === "string") return { code, message };
+      if (typeof code === "string" && code in PUBLIC_ERROR_MESSAGES) {
+        return { code, message: PUBLIC_ERROR_MESSAGES[code] };
+      }
     }
   }
-  return { code: "service_unavailable", message: "Gallery service is temporarily unavailable" };
+  return { code: "service_unavailable", message: "创作服务暂时不可用，请稍后重试。" };
 }
 
 function isLoopback(hostname: string): boolean { return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]"; }

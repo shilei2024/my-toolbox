@@ -20,6 +20,19 @@ JIMENG_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 
 代码不提供 Endpoint、timeout 或响应上限默认值，避免错误地域、代理或成本策略被静默接受。生产由腾讯云密钥管理/容器 secret 注入 API key；不得提交 `.env`。
 
+## 即梦真实链路冒烟
+
+在 `services/generation-service` 目录、已注入 `JIMENG_API_KEY` 的环境下执行：
+
+```bash
+npm run smoke:jimeng            # 生成 1 张 1024x1024 测试图并保存到系统临时目录
+npm run smoke:jimeng -- --health # 只检查即梦 API 连通性
+```
+
+脚本只输出模型、尺寸、MIME、字节数、耗时和外部请求 ID，不打印 API key；输出文件保存在系统临时目录 `mavis-jimeng-smoke/`。`JIMENG_BASE_URL` 默认 `https://ark.cn-beijing.volces.com/api/v3`，`JIMENG_MODEL` 默认 `doubao-seedream-4-5-251128`，均可覆盖。
+
+生产建议：先在服务器执行 `--health`，再用最小成本参数（1 张、默认尺寸）做一次完整 `generate`，确认 Ark 响应、COS 落盘与 Gallery 展示全部正常后再放开。
+
 ## 数据库发布步骤
 
 1. migration 创建 disabled Provider 和首批模型。

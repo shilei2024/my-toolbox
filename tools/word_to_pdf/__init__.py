@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import io
 import uuid
+from html import escape
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
+from utils.helpers import bind_download_to_session
 
 tool_bp = Blueprint("word_to_pdf", __name__)
 
@@ -47,20 +49,28 @@ def process():
         from reportlab.pdfbase.ttfonts import TTFont
         import os
 
-        # Try to find a CJK font
+        # Try to find a CJK font. Windows ships .ttc/.ttf under C:/Windows/Fonts;
+        # Linux servers usually lack Chinese fonts, so we also ship Noto Sans SC
+        # in this repository (static/fonts/) and try it before falling back.
         cjk_font = "Helvetica"
-        for font_name in ["msyh", "simsun", "simhei", "SimHei", "Microsoft YaHei"]:
-            for font_dir in ["C:/Windows/Fonts", "/usr/share/fonts", "/System/Library/Fonts"]:
-                path = os.path.join(font_dir, f"{font_name}.ttf")
-                if os.path.exists(path):
-                    try:
-                        pdfmetrics.registerFont(TTFont("CJK", path))
-                        cjk_font = "CJK"
-                        break
-                    except Exception:
-                        pass
-            if cjk_font != "Helvetica":
-                break
+        font_candidates = [
+            # Bundled CJK font (deployed with the app, works everywhere).
+            (str(Path(__file__).resolve().parent.parent.parent / "static" / "fonts" / "NotoSansSC-Regular.ttf"), "Noto"),
+            ("C:/Windows/Fonts/msyh.ttc", "msyh"),
+            ("C:/Windows/Fonts/simhei.ttf", "SimHei"),
+            ("C:/Windows/Fonts/simsun.ttc", "SimSun"),
+            ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "NotoCJK"),
+            ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", "WenQuanYi"),
+            ("/System/Library/Fonts/PingFang.ttc", "PingFang"),
+        ]
+        for font_path, font_name in font_candidates:
+            if os.path.exists(font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont("CJK", font_path))
+                    cjk_font = "CJK"
+                    break
+                except Exception:
+                    continue
 
         doc = Document(file.stream)
         buf = io.BytesIO()
@@ -76,15 +86,16 @@ def process():
                 story.append(Spacer(1, 6))
                 continue
             if para.style.name.startswith("Heading"):
-                story.append(Paragraph(text, heading_style))
+                story.append(Paragraph(escape(text), heading_style))
             else:
-                story.append(Paragraph(text, body_style))
+                story.append(Paragraph(escape(text), body_style))
             story.append(Spacer(1, 4))
 
         pdf.build(story)
         buf.seek(0)
 
-        filename = f"converted_{uuid.uuid4().hex[:8]}.pdf"
+        filename = f"converted_{uuid.uuid4().hex}.pdf"
+        bind_download_to_session(filename)
         upload_dir: Path = current_app.config["UPLOAD_DIR"]
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / filename

@@ -35,7 +35,7 @@
     const r = await fetch(url);
     const j = await r.json();
     if (!r.ok || !j.ok) {
-      tbody.innerHTML = `<tr><td colspan="5" class="text-danger py-3">${j.error || "加载失败"}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="text-danger py-3">${escapeHtml(j.error || "加载失败")}</td></tr>`;
       return;
     }
     countBadge.textContent = j.total;

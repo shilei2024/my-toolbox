@@ -3,7 +3,7 @@ import type { StructuredLogger } from "../pipeline/structured-logger.ts";
 import { BillingError } from "./errors.ts";
 import { PaymentProviderRegistry } from "./payment-provider.ts";
 import type { BillingRepository } from "./repository.ts";
-import type { BillingSummary } from "./types.ts";
+import type { BillingSummary, CreditAccountView } from "./types.ts";
 
 export class BillingService {
   readonly #repository: BillingRepository;
@@ -60,6 +60,16 @@ export class BillingService {
     if (!provider || !customer) throw new BillingError("payment_provider_unavailable", "Subscription management is unavailable", 503);
     const result = await provider.createCustomerPortal({ externalCustomerId: customer, returnUrl: `${this.#publicBaseUrl}/billing` });
     assertHostedUrl(result.url);
+    return result;
+  }
+
+  async redeem(userId: number | undefined, input: unknown): Promise<{ readonly amount: string; readonly memberAccount: CreditAccountView }> {
+    if (!userId) throw new BillingError("authentication_required", "Authentication is required", 401);
+    const body = record(input);
+    const code = boundedString(body.code, 40, "code").toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]{6,38}[A-Z0-9]$/.test(code)) throw new BillingError("invalid_request", "兑换码格式不正确", 400);
+    const result = await this.#repository.redeemCode(userId, code);
+    this.#logger.info("billing.code_redeemed", { userId, amount: result.amount });
     return result;
   }
 

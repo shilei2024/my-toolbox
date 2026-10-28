@@ -11,6 +11,7 @@ from PIL import Image
 
 from auth.decorators import commit_usage, remaining_for, require_usage
 from extensions import limiter
+from utils.helpers import bind_download_to_session
 
 tool_bp = Blueprint("base64", __name__)
 
@@ -79,7 +80,8 @@ def process():
             # Check if it's an image
             try:
                 img = Image.open(io.BytesIO(decoded))
-                filename = f"decoded_{uuid.uuid4().hex[:8]}.{img.format.lower() if img.format else 'png'}"
+                filename = f"decoded_{uuid.uuid4().hex}.{img.format.lower() if img.format else 'png'}"
+                bind_download_to_session(filename)
                 upload_dir: Path = current_app.config["UPLOAD_DIR"]
                 upload_dir.mkdir(parents=True, exist_ok=True)
                 target = upload_dir / filename

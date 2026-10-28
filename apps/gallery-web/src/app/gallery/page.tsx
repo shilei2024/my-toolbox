@@ -1,41 +1,84 @@
 import type { Metadata } from "next";
-import { GalleryExplorer } from "@/components/gallery-explorer";
-import type { GalleryPageData, GalleryQuery } from "@/lib/gallery-types";
+import { ShowcaseGallery } from "@/components/showcase-gallery";
+import { publicAdminConsoleUrl } from "@/lib/admin-links";
+import type { GalleryFacets, GalleryPageData, GalleryQuery } from "@/lib/gallery-types";
 import { buildGalleryJsonLd, serializeJsonLd } from "@/lib/seo";
-import { GalleryClientError, getPublicGallery } from "@/server/gallery-client";
+import { mainSiteUrl } from "@/lib/site-links";
+import { GalleryClientError, getGalleryFacets, getPublicGallery } from "@/server/gallery-client";
 import { resolveViewerFromRequest } from "@/server/viewer";
 
-const GALLERY_DESCRIPTION = "浏览公开且通过审核的 AI 图像作品，发现不同工作流、构图与创作风格。";
+const GALLERY_DESCRIPTION = "浏览公开且通过审核的 AI 图像与视频作品，每件作品都附完整提示词，可一键复制用于创作。";
+
+const EMPTY_FACETS: GalleryFacets = { total: 0, media: { image: 0, video: 0 }, workflows: [] };
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }): Promise<Metadata> {
   const params = await searchParams;
-  const filtered = ["q", "tag", "workflow", "orientation", "cursor"].some((key) => params[key] !== undefined);
+  const filtered = ["q", "tag", "workflow", "orientation", "mediaType", "cursor", "sort"].some((key) => params[key] !== undefined);
   return {
-    title: "发现 AI 图像作品",
+    title: "灵感画廊 · 每件作品都附完整提示词",
     description: GALLERY_DESCRIPTION,
     alternates: { canonical: "/gallery" },
     robots: filtered ? { index: false, follow: true } : undefined,
-    openGraph: { title: "发现 AI 图像作品", description: GALLERY_DESCRIPTION, url: "/gallery", type: "website" },
-    twitter: { card: "summary_large_image", title: "发现 AI 图像作品", description: GALLERY_DESCRIPTION },
+    openGraph: { title: "灵感画廊 · 每件作品都附完整提示词", description: GALLERY_DESCRIPTION, url: "/gallery", type: "website" },
+    twitter: { card: "summary_large_image", title: "灵感画廊 · 每件作品都附完整提示词", description: GALLERY_DESCRIPTION },
   };
 }
 
 export default async function GalleryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const viewer = await resolveViewerFromRequest();
+  const mediaType = single(params.mediaType);
+  const sort = single(params.sort);
   const query: GalleryQuery = {
-    ...(single(params.q) ? { q: single(params.q) } : {}),
-    ...(single(params.tag) ? { tag: single(params.tag) } : {}),
-    ...(single(params.workflow) ? { workflow: single(params.workflow) } : {}),
-    ...(orientation(params.orientation) ? { orientation: orientation(params.orientation) } : {}),
+    ...(single(params.q) ? { q: single(params.q)! } : {}),
+    ...(single(params.tag) ? { tag: single(params.tag)! } : {}),
+    ...(single(params.workflow) ? { workflow: single(params.workflow)! } : {}),
+    ...(orientation(params.orientation) ? { orientation: orientation(params.orientation)! } : {}),
+    ...(mediaType === "image" || mediaType === "video" ? { mediaType } : {}),
+    ...(sort === "popular" || sort === "latest" ? { sort } : {}),
   };
+
+  const [pageResult, facetsResult] = await Promise.allSettled([getPublicGallery(query, viewer), getGalleryFacets(viewer)]);
   let initialPage: GalleryPageData = { items: [] };
   let initialError: string | undefined;
-  try { initialPage = await getPublicGallery(query, viewer); }
-  catch (error) { initialError = error instanceof GalleryClientError ? error.message : "Gallery 服务暂不可用"; }
+  if (pageResult.status === "fulfilled") initialPage = pageResult.value;
+  else initialError = pageResult.reason instanceof GalleryClientError ? pageResult.reason.message : "Gallery 服务暂不可用";
+  const initialFacets = facetsResult.status === "fulfilled" ? facetsResult.value : EMPTY_FACETS;
 
-  return <main className="page-shell"><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildGalleryJsonLd()) }} /><section className="gallery-hero"><div><p className="eyebrow"><span className="eyebrow-dot" />Curated AI works</p><h1 className="hero-title">让好作品，<span>安静地被看见。</span></h1><p className="hero-copy">浏览公开且通过审核的 AI 作品。隐藏提示词只对作品拥有者和管理员可见。</p></div><aside className="phase-note"><strong>Gallery · Production</strong><span>使用服务端权限、签名游标与腾讯云 COS 资源，浏览器不会接触 Provider 或存储凭证。</span></aside></section><GalleryExplorer initialPage={initialPage} initialError={initialError} authenticated={viewer.role !== "guest"} /></main>;
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildGalleryJsonLd()) }} />
+      <ShowcaseGallery
+        initialPage={initialPage}
+        initialFacets={initialFacets}
+        {...(initialError ? { initialError } : {})}
+        viewer={{
+          role: viewer.role,
+          ...(viewer.nickname || viewer.email ? { displayName: viewer.nickname || viewer.email } : {}),
+        }}
+        links={{
+          login: `/login?next=${encodeURIComponent("/gallery")}`,
+          create: "/create",
+          ...(viewer.role === "admin" ? { admin: publicAdminConsoleUrl() } : {}),
+          ...(mainSiteUrl() ? { mainSite: mainSiteUrl() } : {}),
+        }}
+        initialFilters={{
+          ...(query.q ? { query: query.q } : {}),
+          ...(query.mediaType ? { mediaType: query.mediaType } : {}),
+          ...(query.workflow ? { model: query.workflow } : {}),
+          ...(query.orientation ? { orientation: query.orientation } : {}),
+          ...(query.sort ? { sort: query.sort } : {}),
+        }}
+      />
+    </>
+  );
 }
 
-function single(value: string | string[] | undefined): string | undefined { return typeof value === "string" ? value : undefined; }
-function orientation(value: string | string[] | undefined): GalleryQuery["orientation"] { const result = single(value); return result === "portrait" || result === "square" || result === "landscape" ? result : undefined; }
+function single(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function orientation(value: string | string[] | undefined): GalleryQuery["orientation"] {
+  const result = single(value);
+  return result === "portrait" || result === "square" || result === "landscape" ? result : undefined;
+}

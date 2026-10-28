@@ -11,10 +11,10 @@ import type {
 } from "./types.ts";
 
 /**
- * The only contract the generation domain may use to execute an image provider.
+ * The only contract the generation domain may use to execute a media provider.
  * Provider SDK objects and credentials must never cross this boundary.
  */
-export interface ImageProvider {
+export interface GenerationProvider {
   readonly descriptor: ProviderDescriptor;
 
   generate(
@@ -37,4 +37,7 @@ export interface ImageProvider {
 
   estimateCost(request: GenerationRequest, binding: ProviderBinding): Promise<CostEstimate>;
 }
+
+/** @deprecated Use GenerationProvider. Kept for source compatibility. */
+export type ImageProvider = GenerationProvider;
 

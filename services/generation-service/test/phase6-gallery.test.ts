@@ -76,18 +76,43 @@ describe("Phase 6 Gallery service", () => {
     assert.equal(repository.publicReads, 3);
   });
 
+  it("issues a usable cursor when the public feed has a second page", async () => {
+    const repository = new FakeGalleryRepository();
+    repository.publicNext = { at: "2026-08-02T00:00:00.000Z", id: IMAGE_ID };
+    const service = serviceFor(repository, new MemoryGalleryCache());
+    const guest = viewer("guest");
+    const first = await service.listPublic({ limit: 1 }, guest);
+    assert.ok(first.nextCursor);
+    await service.listPublic({ limit: 1, cursor: first.nextCursor }, guest);
+    assert.equal(repository.publicReads, 2);
+    await assert.rejects(
+      service.listPublic({ limit: 1, mediaType: "video", cursor: first.nextCursor }, guest),
+      (error: unknown) => error instanceof GalleryError && error.code === "invalid_cursor",
+    );
+  });
+
   it("requires authentication for personal feeds and interactions", async () => {
     const service = serviceFor(new FakeGalleryRepository(), new MemoryGalleryCache());
     await assert.rejects(service.listMine({}, viewer("guest")), (error: unknown) => error instanceof GalleryError && error.code === "authentication_required");
     await assert.rejects(service.setFavorite(IMAGE_ID, true, viewer("guest")), (error: unknown) => error instanceof GalleryError && error.code === "authentication_required");
   });
 
-  it("invalidates public feed cache after interactions and soft deletion", async () => {
+  it("keeps the public feed cache on interactions and invalidates it on deletion", async () => {
     const cache = new MemoryGalleryCache();
     const service = serviceFor(new FakeGalleryRepository(), cache);
     await service.setFavorite(IMAGE_ID, true, viewer("user", 8));
+    assert.equal(cache.versions.get("gallery:public-feed") ?? 0, 0);
     await service.deleteImage(IMAGE_ID, viewer("admin", 1));
-    assert.equal(cache.versions.get("gallery:public-feed"), 2);
+    assert.equal(cache.versions.get("gallery:public-feed"), 1);
+  });
+
+  it("invalidates only the affected guest detail cache entry", async () => {
+    const cache = new MemoryGalleryCache();
+    const service = serviceFor(new FakeGalleryRepository(), cache);
+    await service.getBySlug("asset-preview", viewer("guest"));
+    assert.ok(cache.values.has("gallery:detail:asset-preview"));
+    await service.setLike(IMAGE_ID, true, viewer("user", 8));
+    assert.equal(cache.values.has("gallery:detail:asset-preview"), false);
   });
 });
 
@@ -121,6 +146,7 @@ describe("Phase 6 deferred COS deletion", () => {
     const storage: StorageProvider = {
       code: "test",
       async upload() { throw new Error("unused"); },
+      async download() { return Buffer.alloc(0); },
       async delete(key) { if (key.includes("fail")) throw new Error("secret upstream detail"); },
     };
     const result = await new GalleryAssetDeletionWorker({ repository, storageProviders: [storage], logger: silentLogger }).runOnce();
@@ -132,11 +158,13 @@ describe("Phase 6 deferred COS deletion", () => {
 
 class FakeGalleryRepository implements GalleryRepository {
   publicReads = 0;
+  publicNext?: { at: string; id: string };
   deletionTasks: readonly AssetDeletionTask[] = [];
   completedDeletions: string[] = [];
   failedDeletions: Array<{ imageId: string; error: string }> = [];
 
-  async listPublic() { this.publicReads += 1; return { items: [summary()] }; }
+  async listPublic() { this.publicReads += 1; return { items: [summary()], ...(this.publicNext ? { next: this.publicNext } : {}) }; }
+  async facets() { return { total: 1, media: { image: 1, video: 0 }, workflows: [{ name: "portrait", count: 1 }] }; }
   async listOwned() { return { items: [summary()] }; }
   async listFavorites() { return { items: [summary()] }; }
   async findBySlug(): Promise<GalleryImageDetail> { return detail(); }
@@ -176,6 +204,7 @@ function summary(): GalleryImageSummary {
     description: "",
     width: 1024,
     height: 1024,
+    mediaType: "image",
     workflowName: "portrait",
     publishedAt: "2026-08-02T00:00:00.000Z",
     asset: { url: "https://assets.example.test/image.webp", width: 512, height: 512, mimeType: "image/webp", variant: "thumbnail" },

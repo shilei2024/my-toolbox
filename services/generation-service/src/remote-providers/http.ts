@@ -43,9 +43,9 @@ export async function requestRemoteJson(
       throw new ProviderError({ providerCode: config.providerCode, category: "cancelled", code: "request_aborted", message: "Provider request was cancelled", retryable: false, cause: error });
     }
     if (timeout.aborted) {
-      throw new ProviderError({ providerCode: config.providerCode, category: "timeout", code: "ambiguous_timeout", message: "Provider request timed out with an unknown billing outcome", retryable: false, cause: error });
+      throw new ProviderError({ providerCode: config.providerCode, category: "timeout", code: "provider_timeout", message: "Provider request timed out", retryable: true, cause: error });
     }
-    throw new ProviderError({ providerCode: config.providerCode, category: "unavailable", code: "ambiguous_network_failure", message: "Provider connection failed with an unknown billing outcome", retryable: false, cause: error });
+    throw new ProviderError({ providerCode: config.providerCode, category: "unavailable", code: "provider_network_failure", message: "Provider connection failed", retryable: true, cause: error });
   }
 
   const requestId = header(response, "x-request-id") ?? header(response, "x-goog-request-id") ?? header(response, "x-tt-logid");
@@ -61,11 +61,11 @@ export function mapRemoteHttpError(
 ): ProviderError {
   if (error instanceof ProviderError) return error;
   if (!(error instanceof RemoteHttpResponseError)) {
-    return new ProviderError({ providerCode, category: "unknown", code: "provider_unknown_error", message: "Image provider request failed", retryable: false, cause: error });
+    return new ProviderError({ providerCode, category: "unknown", code: "provider_unknown_error", message: "Generation provider request failed", retryable: false, cause: error });
   }
   const upstreamCode = safeErrorCode(error.data);
   if (isContentPolicyError(error.data)) {
-    return new ProviderError({ providerCode, category: "content_policy", code: "content_policy_blocked", message: "Image generation was blocked by provider safety policy", retryable: false, statusCode: error.statusCode, ...(error.requestId ? { externalRequestId: error.requestId } : {}), cause: error });
+    return new ProviderError({ providerCode, category: "content_policy", code: "content_policy_blocked", message: "Generation was blocked by provider safety policy", retryable: false, statusCode: error.statusCode, ...(error.requestId ? { externalRequestId: error.requestId } : {}), cause: error });
   }
   const category = error.statusCode === 401 || error.statusCode === 403
     ? "authentication"

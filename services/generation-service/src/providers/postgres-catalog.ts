@@ -1,5 +1,5 @@
 import type { Pool, QueryResultRow } from "pg";
-import type { JsonObject, ProviderAvailability, ProviderBinding } from "./types.ts";
+import type { CreditTier, JsonObject, ProviderAvailability, ProviderBinding } from "./types.ts";
 import type { ProviderRegistry } from "./registry.ts";
 
 interface ProviderRow extends QueryResultRow { code: string; status: ProviderAvailability; priority: number }
@@ -9,6 +9,7 @@ interface BindingRow extends QueryResultRow {
   workflow_version_id: string;
   provider_workflow_ref: string | null;
   provider_model: string | null;
+  model_tier: CreditTier | null;
   provider_config: JsonObject;
   priority: number;
   estimated_cost: string | null;
@@ -26,9 +27,23 @@ export class PostgresProviderCatalog {
     for (const row of result.rows) if (registry.has(row.code)) registry.setRouting(row.code, { availability: row.status, priority: row.priority });
   }
 
+  async recordHealth(providerCode: string, healthy: boolean, failureThreshold: number): Promise<void> {
+    if (!Number.isSafeInteger(failureThreshold) || failureThreshold < 1) throw new TypeError("failureThreshold must be a positive integer");
+    await this.#pool.query(`UPDATE ai.providers
+      SET consecutive_failures = CASE WHEN $2 THEN 0 ELSE consecutive_failures + 1 END,
+          last_health_at = now(),
+          status = CASE
+            WHEN $2 AND status = 'degraded' THEN 'active'
+            WHEN NOT $2 AND status = 'active' AND consecutive_failures + 1 >= $3 THEN 'degraded'
+            ELSE status
+          END
+      WHERE code = $1`, [providerCode, healthy, failureThreshold]);
+  }
+
   async bindingsFor(workflowVersionId: string): Promise<readonly ProviderBinding[]> {
     const result = await this.#pool.query<BindingRow>(`SELECT b.id, p.code AS provider_code, b.workflow_version_id,
         b.provider_workflow_ref, COALESCE(m.model_code, b.provider_model) AS provider_model,
+        m.tier AS model_tier,
         (p.config || b.provider_config) AS provider_config, b.priority, b.estimated_cost,
         b.timeout_seconds, b.max_attempts, b.is_enabled
       FROM ai.workflow_provider_bindings b
@@ -48,6 +63,7 @@ function binding(row: BindingRow): ProviderBinding {
     workflowVersionId: row.workflow_version_id,
     ...(row.provider_workflow_ref ? { providerWorkflowRef: row.provider_workflow_ref } : {}),
     ...(row.provider_model ? { providerModel: row.provider_model } : {}),
+    ...(row.model_tier === "free" || row.model_tier === "member" ? { modelTier: row.model_tier } : {}),
     providerConfig: row.provider_config,
     priority: row.priority,
     ...(row.estimated_cost === null ? {} : { estimatedCost: Number(row.estimated_cost) }),

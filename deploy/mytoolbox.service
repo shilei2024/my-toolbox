@@ -9,8 +9,11 @@ Group=www-data
 WorkingDirectory=/opt/mytoolbox
 Environment="PATH=/opt/mytoolbox/.venv/bin"
 EnvironmentFile=/opt/mytoolbox/.env
+# Bind 0.0.0.0 so Docker containers (Caddy/cloudflared) can reach the main site
+# via host.docker.internal:8000. Port 8000 is not exposed publicly: the Tencent
+# security group only opens 22/80/443 and ufw only allows 8000 from 172.16.0.0/12.
 ExecStart=/opt/mytoolbox/.venv/bin/gunicorn \
-    -w 2 -k gthread --threads 4 -b 127.0.0.1:8000 \
+    -w 2 -k gthread --threads 4 -b 0.0.0.0:8000 \
     --access-logfile - --error-logfile - \
     --timeout 120 \
     app:app

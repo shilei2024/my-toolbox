@@ -47,6 +47,20 @@
 sudo apt update && sudo apt upgrade -y
 ```
 
+安装中文字体（**Word 转 PDF 与 PDF 加水印工具必需**；服务器默认无任何 CJK 字体，
+不装则中文文档转换结果全是乱码/方块）：
+
+```bash
+sudo apt install -y fonts-noto-cjk
+```
+
+> 为什么需要：`word_to_pdf` / `pdf_watermark` 在渲染 PDF 时会按顺序查找项目捆绑字体
+> （`static/fonts/NotoSansSC-Regular.ttf`）、Windows 字体目录、`/usr/share/fonts` 下的
+> Noto / 文泉驿字体。Linux 服务器上如果没有 CJK 字体，会回退到仅支持拉丁字符的
+> Helvetica，中文全部丢失。安装 `fonts-noto-cjk` 后路径
+> `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` 即存在，转换自动可用。
+> 验证：`fc-list | grep -i noto` 应能看到 Noto Sans CJK。
+
 安装 Docker（腾讯云国内源会更快）：
 
 ```bash
@@ -245,12 +259,17 @@ curl https://<api-ai域名>/health
 
 | 变量 | 值 |
 | --- | --- |
-| `GALLERY_INTROSPECTION_SECRET` | 与服务器环境文件中的值完全一致（至少 32 字节） |
+| `GALLERY_INTROSPECTION_SECRET` | 与 my-toolbox-gallery 完全一致（至少 32 字节）；仅在 Vercel 两个项目间共享，服务器不需要 |
 | `SESSION_COOKIE_DOMAIN` | `.mindfulpenpal.com`（注意开头的点；只有确认共享父域才设置） |
 | `SESSION_COOKIE_SECURE` | `true` |
 | `AI_IMAGE_EXTERNAL_URL` | `https://<gallery域名>/create` |
+| `GALLERY_SERVICE_BASE_URL` | `https://<api-ai域名>`（与 8.2 Gallery Web 项目完全一致） |
+| `GALLERY_INTERNAL_HMAC_SECRET` | 与 my-toolbox-gallery / 服务器完全一致（至少 32 字节） |
 
 > 风险提示：`SESSION_COOKIE_DOMAIN` 配置错误会让整个站点的登录 Cookie 失效。先在 staging 子域验证，再上生产。
+>
+> 统一后台 `/admin/gallery` 依赖最后两项：漏配或与 Gallery Web 不一致时，页面会显示
+> “缺少有效的 GALLERY_INTERNAL_HMAC_SECRET”，且无法读取待审核队列。保存后 Vercel 会自动重新部署。
 
 ### 8.2 Gallery Web 项目（apps/gallery-web）
 
@@ -260,8 +279,8 @@ curl https://<api-ai域名>/health
 | --- | --- |
 | `GALLERY_SERVICE_BASE_URL` | `https://<api-ai域名>` |
 | `GALLERY_INTERNAL_HMAC_SECRET` | 与服务器一致 |
-| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/auth/internal/gallery/session` |
-| `GALLERY_INTROSPECTION_SECRET` | 与 Flask 一致 |
+| `MAVIS_AUTH_INTROSPECTION_URL` | `https://mindfulpenpal.com/internal/gallery/session` |
+| `GALLERY_INTROSPECTION_SECRET` | 与主站 Flask 完全一致（Vercel 两个项目共享） |
 | `GALLERY_PUBLIC_ORIGIN` | `https://<gallery域名>` |
 | `MAVIS_AUTH_LOGIN_URL` | `https://mindfulpenpal.com/login` |
 | `MAVIS_AUTH_LOGOUT_URL` | `https://mindfulpenpal.com/logout` |

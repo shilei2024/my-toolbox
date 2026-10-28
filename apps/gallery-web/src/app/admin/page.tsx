@@ -1,11 +1,15 @@
+import { redirect } from "next/navigation";
 import { AdminConsole } from "@/components/admin-console";
 import type { AdminDashboard } from "@/lib/admin-types";
+import { adminConsoleUrl } from "@/lib/admin-links";
 import { GalleryClientError } from "@/server/gallery-client";
 import { getAdminDashboard } from "@/server/admin-client";
 import { resolveViewerFromRequest } from "@/server/viewer";
 
 export default async function AdminPage() {
   const viewer = await resolveViewerFromRequest();
+  const unifiedAdmin = adminConsoleUrl();
+  if (unifiedAdmin) redirect(unifiedAdmin);
   let dashboard: AdminDashboard | undefined;
   let error: string | undefined;
   try { dashboard = await getAdminDashboard(viewer); }

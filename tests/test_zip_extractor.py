@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flask import Flask
 
-from extensions import csrf, limiter  # 复用项目里的扩展
+from extensions import csrf, db, limiter, login_manager  # 复用项目里的扩展
 
 
 def make_pdf_bytes(label: str, size_kb: int = 5) -> bytes:
@@ -46,13 +46,22 @@ def make_app() -> Flask:
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "test"
     app.config["WTF_CSRF_ENABLED"] = False
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["ANON_FREE_LIMIT"] = 100
+    app.config["DAILY_FREE_LIMIT"] = 100
     # 限速相关的存储
     app.config["RATELIMIT_ENABLED"] = False
     csrf.init_app(app)
+    db.init_app(app)
+    login_manager.init_app(app)
+    login_manager.user_loader(lambda _user_id: None)
     limiter.init_app(app)
 
     from tools.zip_extractor import tool_bp
     app.register_blueprint(tool_bp, url_prefix="/tools/zip-extractor")
+    with app.app_context():
+        db.create_all()
     return app
 
 
@@ -82,15 +91,13 @@ def main():
     assert d.get("skipped_oversize") == []
     print("  PASS")
 
-    # ===== B: 多批（模拟前端 planBatches 逻辑）=====
-    print("\n=== B. 多批：6 个 ~1.1MB zip（每个含 1 个 ~1MB PDF，store 模式）===")
-    # 单 zip ≈ 1.1MB（1MB PDF + zip 头 + 中央目录）；6 个 ≈ 6.6MB → 切 2-3 批
-    # 单批 3 个 = 3MB PDF → 4MB base64，会被响应体限制截断一些（验证 truncated 标记）
+    # ===== B: 前端按当前 20MB 上限规划批次 =====
+    print("\n=== B. 当前 20MB 批量上限：6 个 ~1MB zip 可在同批处理 ===")
     big_zips = [make_zip(f"big{i}.zip", [(f"inv{i}.pdf", 1000)], store=True) for i in range(6)]
     total_size = sum(len(z) for z in big_zips)
     print(f"  6 个 zip 总大小: {total_size/1024/1024:.2f} MB")
 
-    BATCH = 3 * 1024 * 1024
+    BATCH = 20 * 1024 * 1024
     batches = []
     cur, cur_bytes = [], 0
     for z in big_zips:
@@ -124,15 +131,14 @@ def main():
     assert len(all_files) + trunc_count == 6, f"got {len(all_files)} + {trunc_count} truncated != 6"
     print("  PASS")
 
-    # ===== C: 单文件 > 4MB → skipped =====
-    print("\n=== C. 单 zip > 4MB（应跳过）===")
-    # 构造一个明确的 5MB+ ZIP 流（用 stored 模式避免压缩缩体积）
+    # ===== C: 旧 4MB 门槛已取消 =====
+    print("\n=== C. 5MB ZIP（应正常处理）===")
     huge_pdf = make_pdf_bytes("huge", size_kb=5 * 1024)  # ~5MB
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
         zf.writestr("huge.pdf", huge_pdf)
     huge_bytes = buf.getvalue()
-    print(f"  huge.zip 大小: {len(huge_bytes)/1024/1024:.2f} MB (single file > 4MB 上限)")
+    print(f"  huge.zip 大小: {len(huge_bytes)/1024/1024:.2f} MB")
 
     resp = client.post(
         "/tools/zip-extractor/analyze",
@@ -142,12 +148,13 @@ def main():
     d = resp.get_json()
     print(f"  status: {resp.status_code}, skipped: {d.get('skipped_oversize')}")
     assert resp.status_code == 200
-    assert any("huge.zip" in s for s in d.get("skipped_oversize", []))
+    assert d.get("total") == 1
+    assert d.get("skipped_oversize") == []
     print("  PASS")
 
-    # ===== D: 单批内 PDF 过多 → truncated =====
-    print("\n=== D. 6 个 ~400KB PDF → 响应 base64 > 3MB → truncated ===")
-    # 6 × 400KB = 2.4MB PDF → 3.2MB base64 > 3MB；zip 自身 < 3MB（请求体能过）
+    # ===== D: 可配置响应门限仍会安全截断 =====
+    print("\n=== D. 将测试响应门限设为 3MB，验证安全截断 ===")
+    app.config["INVOICE_ZIP_RESPONSE_MB"] = 3
     many_pdfs = [(f"inv{i:03d}.pdf", 400) for i in range(6)]
     many_zip = make_zip("many.zip", many_pdfs, store=True)
     print(f"  many.zip 大小: {len(many_zip)/1024/1024:.2f} MB")
@@ -165,6 +172,7 @@ def main():
     assert d.get("truncated_count") > 0
     assert d.get("total") + d.get("truncated_count") == 6
     print(f"  PASS（返回 {d['total']} 个，截断 {d['truncated_count']} 个）")
+    app.config["INVOICE_ZIP_RESPONSE_MB"] = 48
 
     # ===== E: 单批内 PDF 数量刚好 =====
     print("\n=== E. 单批 zip 内 PDF 全部能装下（不截断）===")

@@ -2,44 +2,70 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
-import type { ViewerContext, ViewerRole } from "@/lib/gallery-types";
+import { cache } from "react";
+import type { ViewerBridge, ViewerContext, ViewerRole } from "@/lib/gallery-types";
+import { hasNamedCookie } from "./cookie-utils";
 
-export async function resolveViewerFromRequest(): Promise<ViewerContext> {
+export const resolveViewerFromRequest = cache(async (): Promise<ViewerContext> => {
   return resolveViewerFromCookieHeader((await cookies()).toString());
-}
+});
 
 export async function resolveViewerFromCookieHeader(cookieHeader: string): Promise<ViewerContext> {
-  const fallback: ViewerContext = { role: "guest", requestId: randomUUID() };
+  const requestId = randomUUID();
+  const fallback = (bridge: ViewerBridge): ViewerContext => ({ role: "guest", requestId, bridge });
   const url = process.env.MAVIS_AUTH_INTROSPECTION_URL?.trim();
   const secret = process.env.GALLERY_INTROSPECTION_SECRET?.trim();
-  if (!url || !secret || Buffer.byteLength(secret, "utf8") < 32) return fallback;
+  if (!url || !secret || Buffer.byteLength(secret, "utf8") < 32) {
+    console.info(
+      `[viewer] introspection unconfigured (url=${Boolean(url)}, secretLength=${secret ? Buffer.byteLength(secret, "utf8") : 0})`,
+    );
+    return fallback("unconfigured");
+  }
 
   let endpoint: URL;
-  try { endpoint = new URL(url); } catch { return fallback; }
-  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && isLoopback(endpoint.hostname))) return fallback;
+  try { endpoint = new URL(url); } catch { return fallback("unconfigured"); }
+  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && isLoopback(endpoint.hostname))) {
+    return fallback("unconfigured");
+  }
+  const sessionCookieName = process.env.MAVIS_AUTH_SESSION_COOKIE_NAME?.trim() || "mytoolbox_session";
+  // Most anonymous requests have no Flask session at all. Avoid a cross-service
+  // round trip (and its 10-second timeout budget) when the browser cannot
+  // possibly authenticate, while retaining full introspection for any session.
+  if (!hasNamedCookie(cookieHeader, sessionCookieName)) return fallback("guest");
 
   try {
     const response = await fetch(endpoint, {
       method: "GET",
       cache: "no-store",
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Accept: "application/json",
         Cookie: cookieHeader,
         "X-Mavis-Introspection-Secret": secret,
       },
     });
-    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return fallback;
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+      console.info(
+        `[viewer] introspection failed status=${response.status} type=${response.headers.get("content-type") ?? "none"}`,
+      );
+      return fallback("error");
+    }
     const body = await response.json() as unknown;
-    if (!body || typeof body !== "object" || Array.isArray(body)) return fallback;
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fallback("error");
     const role = (body as { role?: unknown }).role;
     const userId = (body as { userId?: unknown }).userId;
-    if (!isRole(role)) return fallback;
-    if (role === "guest") return fallback;
-    if (!Number.isInteger(userId) || Number(userId) <= 0) return fallback;
-    return { role, userId: Number(userId), requestId: fallback.requestId };
-  } catch {
-    return fallback;
+    const emailValue = (body as { email?: unknown }).email;
+    const nicknameValue = (body as { nickname?: unknown }).nickname;
+    if (!isRole(role)) return fallback("error");
+    if (role === "guest") return fallback("guest");
+    if (!Number.isInteger(userId) || Number(userId) <= 0) return fallback("error");
+    const email = typeof emailValue === "string" && emailValue.trim() ? emailValue.trim().slice(0, 255) : undefined;
+    const nickname = typeof nicknameValue === "string" && nicknameValue.trim() ? nicknameValue.trim().slice(0, 80) : undefined;
+    console.info(`[viewer] introspection ok role=${role} userId=${Number(userId)}${email ? ` email=${email}` : ""}${nickname ? ` nickname=${nickname}` : ""}`);
+    return { role, userId: Number(userId), ...(email ? { email } : {}), ...(nickname ? { nickname } : {}), requestId, bridge: "ok" };
+  } catch (reason) {
+    console.info(`[viewer] introspection exception ${String(reason)}`);
+    return fallback("error");
   }
 }
 

@@ -23,6 +23,10 @@
 | 8 | Gallery 展示 | 公开作品（或本人作品）能打开，图片可下载/点赞/收藏 | 浏览器访问详情页 |
 | 9 | Vercel build 成功 | 两个 Vercel 项目生产构建均为 Success，路由清单完整 | Vercel Deployments |
 | 10 | 服务器服务稳定 | 运行 24h：api healthy，dispatcher/worker 无异常重启，日志无密钥泄露 | `docker compose ps` + 日志 |
+| 11 | 桥接预检 | Flask 与 Gallery 两侧预检全部 PASS 且退出码 0，输出不含密钥 | 服务器执行 `flask --app app check-gallery-integration`；本地执行 Gallery 预检脚本 |
+| 12 | 回跳安全 | Gallery 发起登录/注册/退出后回到原页面；伪造 `next` 只回主站首页，不跳外部域名 | 浏览器实测 + 契约测试 `tests/test_gallery_round_trip.py` |
+| 13 | 身份透传 | Gallery 正确显示登录账号/角色；缺失或错误内省密钥时返回 404 且不泄露身份字段 | 契约测试 + 浏览器 Network 检查 |
+| 14 | 统一管理后台 | 主站 `/admin/gallery` 可查看概览/审核/Provider/工作流/任务/审计并执行审核与配置变更；Gallery `/admin` 自动跳转主站；非管理员访问被拒 | 浏览器实测 + `tests/test_admin_gallery_routes.py` |
 
 ## 记录要求
 
@@ -31,5 +35,7 @@
 ## 验收后开关
 
 1. 确认全部通过后，把 `PRODUCTION_RELEASE_APPROVED=true` 写入服务器环境文件并重启后端。
-2. 在 Vercel 原站项目设置 `AI_IMAGE_EXTERNAL_URL` 与 `SESSION_COOKIE_DOMAIN`，触发一次生产部署。
+2. 在 Vercel 原站项目设置 `AI_IMAGE_EXTERNAL_URL`、`SESSION_COOKIE_DOMAIN`、
+   `GALLERY_SERVICE_BASE_URL` 与 `GALLERY_INTERNAL_HMAC_SECRET`（后两项与 Gallery Web
+   完全一致），触发一次生产部署。
 3. 复测第 1-3 项与登录；异常时按回滚指南恢复，不要继续扩大流量。

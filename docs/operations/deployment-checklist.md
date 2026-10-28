@@ -45,6 +45,9 @@ sudo ss -lntp
 ## 环境变量与密钥
 
 - [ ] `.env`、Vercel Preview/Production、CVM env 相互隔离。
+- [ ] Vercel 原站（my-toolbox）Production 已配置 `GALLERY_SERVICE_BASE_URL` 与
+  `GALLERY_INTERNAL_HMAC_SECRET`（与 my-toolbox-gallery 完全一致），`/admin/gallery`
+  能读取待审核队列与 Provider/Workflow 数据。
 - [ ] 没有密钥使用 `NEXT_PUBLIC_`。
 - [ ] GitHub CI 不读取部署密钥。
 - [ ] production Environment 有人工审批和分支限制。

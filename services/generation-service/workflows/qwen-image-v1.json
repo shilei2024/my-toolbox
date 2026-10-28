@@ -1,0 +1,33 @@
+{
+  "1": { "class_type": "UNETLoader", "inputs": { "unet_name": "{{model}}", "weight_dtype": "default" } },
+  "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": "Qwen\\qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image", "device": "default" } },
+  "3": { "class_type": "VAELoader", "inputs": { "vae_name": "QWEN\\qwen_image_vae.safetensors" } },
+  "4": {
+    "class_type": "QwenImageIntegratedKSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "clip": ["2", 0],
+      "vae": ["3", 0],
+      "positive_prompt": "{{prompt}}",
+      "negative_prompt": "{{negative_prompt}}",
+      "generation_mode": "文生图 text-to-image",
+      "batch_size": 1,
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "seed": "{{seed}}",
+      "steps": "{{steps}}",
+      "cfg": "{{cfg}}",
+      "sampler_name": "{{sampler}}",
+      "scheduler": "{{scheduler}}",
+      "denoise": 1.0,
+      "auraflow_shift": 3.0,
+      "cfg_norm_strength": 1.0,
+      "enable_clean_gpu_memory": true,
+      "enable_clean_cpu_memory_after_finish": true,
+      "enable_sound_notification": false,
+      "auto_save_output_folder": "",
+      "output_filename_prefix": "auto_save"
+    }
+  },
+  "5": { "class_type": "SaveImage", "inputs": { "images": ["4", 0], "filename_prefix": "generation/qwen" } }
+}

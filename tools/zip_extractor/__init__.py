@@ -1,38 +1,108 @@
-"""
-批量压缩包 PDF 提取 — 递归解压多层嵌套 zip，筛选出所有 PDF 文件。
-
-Vercel 兼容：单次请求/响应体严格控制在 3MB 以内（Vercel Serverless
-Function 上限 4.5MB，留出 multipart boundary 与 base64 膨胀空间）。
-超出时返回 413 + 明确提示，前端会自动拆分分批。
-"""
+"""Secure recursive ZIP extraction shared by the invoice workspace."""
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import logging
+import time
 import zipfile
-from pathlib import Path
+from pathlib import PurePosixPath
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
-from auth.decorators import remaining_for
-from extensions import csrf, limiter
+from auth.decorators import commit_usage, remaining_for, require_usage
+from extensions import limiter
 
 log = logging.getLogger(__name__)
 
 tool_bp = Blueprint("zip_extractor", __name__, template_folder="templates")
 
-# ---------------------------------------------------------------------------
-# Vercel-friendly 上限
-# ---------------------------------------------------------------------------
-# Vercel Serverless Function 单次请求/响应上限 4.5MB。multipart 边界、filename、
-# base64 膨胀（×1.33）都要扣掉，单批 zip 净数据 ≤ 3MB、返回 PDF base64 ≤ 3MB
-# 比较稳。超出后端会显式 413，前端据此自动分批。
-MAX_REQUEST_ZIP_BYTES = 3 * 1024 * 1024       # 3 MB（本批 zip 总大小上限）
-MAX_RESPONSE_B64_BYTES = 3 * 1024 * 1024      # 3 MB（返回 PDF base64 总大小上限）
-MAX_SINGLE_FILE_BYTES = 4 * 1024 * 1024       # 4 MB（单 zip 上限，超出直接拒收）
+MB = 1024 * 1024
+DEFAULT_SINGLE_ZIP_MB = 20
+DEFAULT_BATCH_ZIP_MB = 20
+DEFAULT_RESPONSE_B64_MB = 48
 MAX_DEPTH = 8                                 # 递归层数上限
+# Limits apply before decompression. The upload limit alone cannot protect a
+# worker from a highly-compressible ZIP expanding into gigabytes of memory.
+MAX_ENTRY_UNCOMPRESSED_BYTES = 32 * MB
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 64 * MB
+MAX_COMPRESSION_RATIO = 100
+MAX_ARCHIVE_WORKERS = 2
+ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+
+
+def invoice_zip_limits() -> dict[str, int]:
+    """Return limits aligned with the current Flask deployment.
+
+    The main site now runs on Tencent Cloud, so the former 3/4 MB Vercel
+    gateway limits are obsolete.  Keep a 1 MB multipart safety margin below
+    Flask's application-wide request cap and retain independent extraction and
+    response limits to protect worker/browser memory.
+    """
+    app_request_bytes = int(current_app.config.get("MAX_CONTENT_LENGTH") or 25 * MB)
+    request_budget = max(MB, app_request_bytes - MB)
+    single_bytes = min(
+        int(current_app.config.get("INVOICE_ZIP_MAX_MB", DEFAULT_SINGLE_ZIP_MB)) * MB,
+        request_budget,
+    )
+    batch_bytes = min(
+        int(current_app.config.get("INVOICE_ZIP_BATCH_MB", DEFAULT_BATCH_ZIP_MB)) * MB,
+        request_budget,
+    )
+    response_bytes = int(
+        current_app.config.get("INVOICE_ZIP_RESPONSE_MB", DEFAULT_RESPONSE_B64_MB)
+    ) * MB
+    return {
+        "single_bytes": max(MB, single_bytes),
+        "batch_bytes": max(MB, batch_bytes),
+        "response_bytes": max(MB, response_bytes),
+        "single_mb": max(1, single_bytes // MB),
+        "batch_mb": max(1, batch_bytes // MB),
+    }
+
+
+class _ExtractionBudget:
+    def __init__(self, limit: int = MAX_ARCHIVE_UNCOMPRESSED_BYTES) -> None:
+        self.remaining = limit
+
+    def reserve(self, size: int) -> bool:
+        if size < 0 or size > self.remaining:
+            return False
+        self.remaining -= size
+        return True
+
+
+def _member_within_limits(info: zipfile.ZipInfo) -> bool:
+    """Reject a dangerous member before reading even its signature."""
+    if info.file_size > MAX_ENTRY_UNCOMPRESSED_BYTES:
+        log.warning("ZIP member exceeds uncompressed limit: %s (%d bytes)", info.filename, info.file_size)
+        return False
+    if info.file_size and (info.compress_size == 0 or info.file_size / info.compress_size > MAX_COMPRESSION_RATIO):
+        log.warning("ZIP member exceeds compression-ratio limit: %s", info.filename)
+        return False
+    return True
+
+
+def _safe_to_extract(info: zipfile.ZipInfo, budget: _ExtractionBudget) -> bool:
+    """Reject dangerous ZIP members without materialising their payload."""
+    if not _member_within_limits(info):
+        return False
+    if not budget.reserve(info.file_size):
+        log.warning("ZIP archive exceeds cumulative extraction limit at: %s", info.filename)
+        return False
+    return True
+
+
+def _member_signature(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    """Read only enough bytes to identify extensionless PDF/ZIP members."""
+    try:
+        with zf.open(info, "r") as member:
+            return member.read(5)
+    except Exception as exc:
+        log.warning("read ZIP member signature failed %s: %s", info.filename, exc)
+        return b""
 
 
 @tool_bp.route("/")
@@ -53,138 +123,279 @@ def index():
 # ---------------------------------------------------------------------------
 # 递归解压核心
 # ---------------------------------------------------------------------------
-def _extract_deep(zip_bytes: bytes, source_name: str, depth: int = 0) -> list[dict]:
+def _extract_deep(
+    zip_bytes: bytes,
+    source_name: str,
+    depth: int = 0,
+    budget: _ExtractionBudget | None = None,
+    diagnostics: dict | None = None,
+) -> list[dict]:
     """
     递归解压 zip 字节流，最深 8 层。
     返回找到的所有 PDF 文件列表 [{filename, size, path_chain, data}].
     """
     if depth > MAX_DEPTH:
+        if diagnostics is not None:
+            diagnostics.setdefault("issues", []).append(f"嵌套层数超过 {MAX_DEPTH} 层")
         return []
+    budget = budget or _ExtractionBudget()
+    diagnostics = diagnostics if diagnostics is not None else {"issues": [], "nested_archives": 0}
 
     results = []
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            diagnostics["archives_opened"] = diagnostics.get("archives_opened", 0) + 1
             for info in zf.infolist():
-                name = info.filename.rstrip("/")
+                name = info.filename.rstrip("/\\")
+                normalized_name = name.replace("\\", "/")
                 # 跳过目录、macOS 资源、隐藏文件
-                if info.is_dir() or name.startswith("__MACOSX") or Path(name).name.startswith("."):
+                if info.is_dir() or normalized_name.startswith("__MACOSX"):
                     continue
-                basename = Path(name).name
+                basename = PurePosixPath(normalized_name).name
+                if basename.startswith("."):
+                    continue
 
-                if basename.lower().endswith(".pdf"):
+                lower_name = basename.lower()
+                member_kind = "pdf" if lower_name.endswith(".pdf") else (
+                    "zip" if lower_name.endswith((".zip", ".zipx")) else ""
+                )
+
+                # 部分发票平台生成的内层压缩包或 PDF 没有可靠扩展名，
+                # 读取最少量文件头识别真实格式，避免递归链路静默中断。
+                if not member_kind:
+                    # Known non-PDF files (XML/OFD/images/signatures, etc.) are
+                    # irrelevant to this tool. Opening every one merely to read
+                    # five bytes is disproportionately expensive for invoice
+                    # bundles containing thousands of auxiliary files. Only
+                    # extensionless members need signature-based discovery.
+                    if PurePosixPath(lower_name).suffix:
+                        continue
+                    if not _member_within_limits(info):
+                        continue
+                    signature = _member_signature(zf, info)
+                    if signature.startswith(b"%PDF-"):
+                        member_kind = "pdf"
+                    elif signature[:4] in ZIP_SIGNATURES:
+                        member_kind = "zip"
+                    else:
+                        continue
+
+                if not _safe_to_extract(info, budget):
+                    continue
+
+                if member_kind == "pdf":
                     try:
                         data = zf.read(info)
                         results.append({
-                            "filename": basename,
+                            "filename": basename if lower_name.endswith(".pdf") else f"{basename}.pdf",
                             "size": len(data),
-                            "path_chain": [source_name, *info.filename.split("/")],
+                            "path_chain": [source_name, *normalized_name.split("/")],
                             "data": data,
                         })
                     except Exception as e:
+                        reason = "PDF 所在压缩包已加密" if "password" in str(e).lower() else "PDF 读取失败"
+                        diagnostics.setdefault("issues", []).append(f"{basename}：{reason}")
                         log.warning("read PDF failed %s: %s", info.filename, e)
 
-                elif basename.lower().endswith(".zip"):
+                elif member_kind == "zip":
                     try:
+                        diagnostics["nested_archives"] = diagnostics.get("nested_archives", 0) + 1
                         inner_data = zf.read(info)
                         inner_source = f"{source_name} → {basename}"
-                        results.extend(_extract_deep(inner_data, inner_source, depth + 1))
+                        results.extend(
+                            _extract_deep(
+                                inner_data,
+                                inner_source,
+                                depth + 1,
+                                budget,
+                                diagnostics,
+                            )
+                        )
                     except Exception as e:
+                        reason = "内层压缩包已加密" if "password" in str(e).lower() else "内层压缩包读取失败"
+                        diagnostics.setdefault("issues", []).append(f"{basename}：{reason}")
                         log.warning("read inner zip failed %s: %s", info.filename, e)
 
     except zipfile.BadZipFile:
+        diagnostics.setdefault("issues", []).append(f"{source_name}：不是有效 ZIP 或文件已损坏")
         log.warning("BadZipFile from %s", source_name)
     except Exception as e:
+        diagnostics.setdefault("issues", []).append(f"{source_name}：解压异常")
         log.warning("extract exception %s: %s", source_name, e)
 
     return results
+
+
+def _extract_archive_payload(zip_bytes: bytes, source_name: str) -> tuple[list[dict], dict]:
+    """Extract and hash one archive without depending on Flask context."""
+    started_at = time.perf_counter()
+    diagnostics = {"issues": [], "nested_archives": 0, "archives_opened": 0}
+    pdfs = _extract_deep(zip_bytes, source_name, diagnostics=diagnostics)
+    encoded: list[dict] = []
+    for pdf in pdfs:
+        data = pdf["data"]
+        pdf["content_hash"] = _quick_hash(data)
+        encoded.append(pdf)
+    log.info(
+        "analyze complete: %s (%d PDFs, %d nested archives, %.3fs)",
+        source_name,
+        len(encoded),
+        diagnostics["nested_archives"],
+        time.perf_counter() - started_at,
+    )
+    return encoded, diagnostics
 
 
 # ---------------------------------------------------------------------------
 # API：上传并分析
 # ---------------------------------------------------------------------------
 @tool_bp.post("/analyze")
-@csrf.exempt
 @limiter.limit(lambda: "20/minute")
+@require_usage("zip_extractor")
 def analyze():
+    return analyze_uploaded_archives("zip_extractor")
+
+
+def analyze_uploaded_archives(usage_tool_id: str):
     """接收本批 zip 文件，递归解压找出 PDF，按大小上限截断返回。
 
-    入参：本批 zip 总大小 ≤ MAX_REQUEST_ZIP_BYTES。
-    出参：本批 PDF base64 总大小 ≤ MAX_RESPONSE_B64_BYTES；超出则返回部分 + truncated=true。
+    Limits follow ``invoice_zip_limits()`` and the Flask request cap.
     """
     try:
         files = request.files.getlist("files")
         if not files or all(not (f and f.filename) for f in files):
             return jsonify(success=False, error="请选择至少一个 zip 文件"), 400
 
-        # ---- 单批请求体大小门禁：避免到 Vercel 网关层才被 413 砍掉 ----
-        # 用 Content-Length 提前拦截，不必真把全部流读完。
+        limits = invoice_zip_limits()
+        max_single_file_bytes = limits["single_bytes"]
+        max_request_zip_bytes = limits["batch_bytes"]
+        max_response_b64_bytes = limits["response_bytes"]
+
+        # Keep multipart overhead below Flask's application-wide request cap.
         cl = request.content_length or 0
-        if cl > MAX_REQUEST_ZIP_BYTES * 2:  # multipart 边界等约 1 倍开销
+        if cl > max_request_zip_bytes + MB:
             return jsonify(
                 success=False,
-                error=f"本批上传体积过大（{cl/1024/1024:.1f}MB），前端应已自动分批；"
-                      f"若仍失败请刷新页面或单批 ≤ {MAX_REQUEST_ZIP_BYTES//(1024*1024)}MB",
+                error=f"本批上传体积过大（{cl/MB:.1f}MB），请保持单批不超过 {limits['batch_mb']}MB",
             ), 413
 
         all_pdfs: list[dict] = []
         received_bytes = 0
         skipped_oversize: list[str] = []
+        archive_results: list[dict] = []
+        accepted_archives: list[tuple[int, str, bytes]] = []
 
         for f in files:
             if not f.filename:
                 continue
             if not f.filename.lower().endswith(".zip"):
                 continue
+            archive_result = {"name": f.filename, "pdf_count": 0}
+            archive_results.append(archive_result)
             try:
                 # 先看 stream 长度，提前拦掉超大单文件
                 f.stream.seek(0, io.SEEK_END)
                 size = f.stream.tell()
                 f.stream.seek(0)
                 if size == 0:
+                    archive_result["skipped"] = True
                     continue
-                if size > MAX_SINGLE_FILE_BYTES:
-                    skipped_oversize.append(f"{f.filename}（{size/1024/1024:.1f}MB）")
+                if size > max_single_file_bytes:
+                    archive_result["skipped"] = True
+                    skipped_oversize.append(
+                        f"{f.filename}（{size/MB:.1f}MB，单包上限 {limits['single_mb']}MB）"
+                    )
                     continue
                 # 累加本批总大小，提前拦
-                if received_bytes + size > MAX_REQUEST_ZIP_BYTES:
+                if received_bytes + size > max_request_zip_bytes:
+                    archive_result["skipped"] = True
                     skipped_oversize.append(
-                        f"{f.filename}（{size/1024/1024:.1f}MB，超出本批 {MAX_REQUEST_ZIP_BYTES//(1024*1024)}MB 上限）"
+                        f"{f.filename}（{size/MB:.1f}MB，超出本批 {limits['batch_mb']}MB 上限）"
                     )
                     continue
                 zip_bytes = f.read()
                 received_bytes += len(zip_bytes)
                 log.info("analyze: %s (%d bytes)", f.filename, len(zip_bytes))
-                pdfs = _extract_deep(zip_bytes, f.filename)
-                all_pdfs.extend(pdfs)
+                accepted_archives.append((len(archive_results) - 1, f.filename, zip_bytes))
             except Exception as e:
+                archive_result["error"] = True
                 log.warning("Failed to read %s: %s", f.filename, e)
 
-        if not all_pdfs and not skipped_oversize:
-            return jsonify(success=False, error="本批没有可解压的 zip 或未提取到 PDF"), 400
+        # A multi-ZIP request previously decompressed each archive serially.
+        # Two individually valid archives could therefore exceed the edge
+        # gateway deadline when uploaded together. Keep one HTTP request and
+        # one usage charge, but process at most two independent archives in
+        # parallel so total latency approaches the slowest archive, not their
+        # sum. Iterating futures in input order preserves response ordering.
+        if accepted_archives:
+            with ThreadPoolExecutor(
+                max_workers=min(MAX_ARCHIVE_WORKERS, len(accepted_archives)),
+                thread_name_prefix="invoice-zip",
+            ) as executor:
+                jobs = [
+                    (
+                        result_index,
+                        source_name,
+                        executor.submit(_extract_archive_payload, zip_bytes, source_name),
+                    )
+                    for result_index, source_name, zip_bytes in accepted_archives
+                ]
+                for result_index, source_name, future in jobs:
+                    archive_result = archive_results[result_index]
+                    try:
+                        pdfs, diagnostics = future.result()
+                        archive_result["pdf_count"] = len(pdfs)
+                        archive_result["nested_archives"] = diagnostics["nested_archives"]
+                        if diagnostics["issues"]:
+                            archive_result["issues"] = diagnostics["issues"][:5]
+                        all_pdfs.extend(pdfs)
+                    except Exception as exc:
+                        archive_result["error"] = True
+                        log.warning("Failed to extract %s: %s", source_name, exc)
+
+        if not all_pdfs and skipped_oversize:
+            return jsonify(
+                success=False,
+                error=(
+                    f"压缩包超过上传上限，请将单包控制在 {limits['single_mb']}MB、"
+                    f"单批控制在 {limits['batch_mb']}MB 以内"
+                ),
+                skipped_oversize=skipped_oversize,
+            ), 413
+
+        if not all_pdfs:
+            return jsonify(
+                success=False,
+                error="本批压缩包未提取到 PDF，请查看每个文件的具体原因",
+                archive_results=archive_results,
+            ), 400
 
         # 按内容哈希去重
         seen: set[str] = set()
         unique: list[dict] = []
         for p in all_pdfs:
-            data = p.pop("data")
-            h = _quick_hash(data)
+            h = p["content_hash"]
             if h in seen:
                 continue
             seen.add(h)
-            p["data_b64"] = base64.b64encode(data).decode("ascii")
-            p["size_kb"] = round(len(data) / 1024, 1)
             unique.append(p)
 
-        # ---- 响应体大小门禁：按 base64 累计截断 ----
+        # ---- 响应体大小门禁：先判断预算，再做昂贵的 base64 编码 ----
+        # The previous implementation encoded every extracted PDF and only
+        # then discarded overflow. Large archives therefore spent CPU and
+        # memory on data that could never be returned, increasing 524 risk.
         kept: list[dict] = []
-        truncated: list[dict] = []  # 没塞下的，附带 client 可继续请求的提示
+        truncated_count = 0
         acc = 0
         for p in unique:
-            sz = len(p["data_b64"])
-            if acc + sz > MAX_RESPONSE_B64_BYTES:
-                truncated.append(p)
+            data = p.pop("data")
+            encoded_size = 4 * ((len(data) + 2) // 3)
+            if acc + encoded_size > max_response_b64_bytes:
+                truncated_count += 1
                 continue
-            acc += sz
+            p["data_b64"] = base64.b64encode(data).decode("ascii")
+            p["size_kb"] = round(len(data) / 1024, 1)
+            acc += encoded_size
             kept.append(p)
 
         body: dict = {
@@ -192,20 +403,22 @@ def analyze():
             "total": len(kept),
             "files": kept,
             "skipped_oversize": skipped_oversize,
+            "archive_results": archive_results,
         }
-        if truncated:
+        if truncated_count:
             body["truncated"] = True
-            body["truncated_count"] = len(truncated)
+            body["truncated_count"] = truncated_count
             body["truncated_msg"] = (
-                f"本批还剩 {len(truncated)} 个 PDF 未返回（响应体超 "
-                f"{MAX_RESPONSE_B64_BYTES//(1024*1024)}MB 上限）。"
+                f"本批还剩 {truncated_count} 个 PDF 未返回（响应体超 "
+                f"{max_response_b64_bytes//MB}MB 上限）。"
                 f"建议：① 改用更小的压缩包分批；② 减少单包内文件数。"
             )
+        commit_usage(usage_tool_id, success=True)
         return jsonify(body)
 
-    except Exception as e:
+    except Exception:
         log.exception("analyze fatal error")
-        return jsonify(success=False, error=f"服务器错误：{type(e).__name__}: {str(e)[:200]}"), 500
+        return jsonify(success=False, error="发票压缩包处理失败，请稍后重试"), 500
 
 
 def _quick_hash(data: bytes) -> str:

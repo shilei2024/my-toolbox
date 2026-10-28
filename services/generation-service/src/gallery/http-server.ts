@@ -6,11 +6,14 @@ import type { BillingService } from "../billing/billing-service.ts";
 import { BillingError } from "../billing/errors.ts";
 import type { GenerationService } from "../generation/generation-service.ts";
 import { GenerationError, normalizeGenerationError } from "../generation/errors.ts";
+import type { GenerationListRequest, GenerationStatus } from "../generation/types.ts";
 import type { StructuredLogger } from "../pipeline/structured-logger.ts";
 import { GalleryError, normalizeGalleryError } from "./errors.ts";
 import type { GalleryService } from "./gallery-service.ts";
 import type { InternalViewerContextCodec } from "./internal-auth.ts";
 import type { GalleryPageRequest, ViewerContext } from "./types.ts";
+import type { TaskCenterService } from "../tasks/task-center-service.ts";
+import type { TaskListRequest, TaskModule } from "../tasks/types.ts";
 
 export async function createGalleryHttpServer(options: {
   readonly service: GalleryService;
@@ -21,6 +24,7 @@ export async function createGalleryHttpServer(options: {
   readonly admin?: AdminService;
   readonly billing?: BillingService;
   readonly generation?: GenerationService;
+  readonly tasks?: TaskCenterService;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: options.trustProxy ?? false, bodyLimit: 16 * 1024 });
   await app.register(rateLimit, {
@@ -34,6 +38,10 @@ export async function createGalleryHttpServer(options: {
   app.get("/health", async () => ({ status: "ok" }));
 
   app.get("/v1/gallery", async (request) => options.service.listPublic(parsePageRequest(request.query), viewer(request, options.auth)));
+  app.get("/v1/gallery/facets", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {
+    viewer(request, options.auth);
+    return options.service.facets();
+  });
   app.get("/v1/gallery/:slug", async (request) => options.service.getBySlug(pathParam(request.params, "slug"), viewer(request, options.auth)));
   app.get("/v1/seo/images", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
     viewer(request, options.auth);
@@ -46,9 +54,13 @@ export async function createGalleryHttpServer(options: {
   if (options.generation) {
     app.get("/v1/generation/workflows", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
       viewer(request, options.auth);
-      return { items: await options.generation!.listWorkflows() };
+      const filter = parseWorkflowFilter(request.query);
+      return { items: await options.generation!.listWorkflows(filter.mode, filter.mediaType) };
     });
-    app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    app.get("/v1/generations", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+      return options.generation!.list(parseGenerationListRequest(request.query), viewer(request, options.auth));
+    });
+    app.post("/v1/generations", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } }, bodyLimit: 6 * 1024 * 1024 }, async (request, reply) => {
       const result = await options.generation!.create(request.body, scalarHeader(request.headers["idempotency-key"]), viewer(request, options.auth));
       return reply.code(202).send(result);
     });
@@ -57,6 +69,12 @@ export async function createGalleryHttpServer(options: {
     });
     app.delete("/v1/generations/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
       return options.generation!.cancel(pathParam(request.params, "id"), viewer(request, options.auth));
+    });
+  }
+
+  if (options.tasks) {
+    app.get("/v1/tasks", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => {
+      return options.tasks!.list(parseTaskListRequest(request.query), viewer(request, options.auth));
     });
   }
 
@@ -69,6 +87,10 @@ export async function createGalleryHttpServer(options: {
       const context = viewer(request, options.auth);
       return options.billing!.checkout(context.userId, request.body);
     });
+    app.post("/v1/billing/redeem", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => {
+      const context = viewer(request, options.auth);
+      return options.billing!.redeem(context.userId, request.body);
+    });
     app.post("/v1/billing/portal", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request) => {
       const context = viewer(request, options.auth);
       return options.billing!.portal(context.userId);
@@ -77,9 +99,24 @@ export async function createGalleryHttpServer(options: {
 
   if (options.admin) {
     app.get("/v1/admin/dashboard", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request) => options.admin!.dashboard(viewer(request, options.auth)));
+    app.get("/v1/admin/queue", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.admin!.queueSnapshot(viewer(request, options.auth)));
     app.patch("/v1/admin/images/:id/moderation", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.moderateImage(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/providers/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProvider(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    app.patch("/v1/admin/provider-models/:id", { config: { rateLimit: { max: 40, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateProviderModel(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
     app.patch("/v1/admin/workflows/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateWorkflow(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    // 策展上传：管理员直接发布"图片 + 提示词"。base64 JSON 承载，路由级放大 body 限制。
+    app.get("/v1/admin/curated-images", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {
+      return { items: await options.admin!.listCuratedImages(viewer(request, options.auth), parseListLimit(request.query)) };
+    });
+    app.post("/v1/admin/curated-images", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } }, bodyLimit: 24 * 1024 * 1024 }, async (request, reply) => {
+      const created = await options.admin!.createCuratedImage(request.body, viewer(request, options.auth));
+      return reply.code(201).send(created);
+    });
+    app.patch("/v1/admin/curated-images/:id", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.admin!.updateCuratedImage(pathParam(request.params, "id"), request.body, viewer(request, options.auth)));
+    app.delete("/v1/admin/curated-images/:id", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
+      await options.admin!.deleteCuratedImage(pathParam(request.params, "id"), viewer(request, options.auth));
+      return reply.code(204).send();
+    });
   }
 
   app.put("/v1/images/:id/favorite", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => options.service.setFavorite(pathParam(request.params, "id"), true, viewer(request, options.auth)));
@@ -119,6 +156,10 @@ function parsePageRequest(value: unknown): GalleryPageRequest {
   const query = record(value);
   const orientation = scalar(query.orientation);
   if (orientation && !new Set(["portrait", "square", "landscape"]).has(orientation)) throw new GalleryError("invalid_request", "orientation is invalid", 400);
+  const mediaType = scalar(query.mediaType);
+  if (mediaType && mediaType !== "image" && mediaType !== "video") throw new GalleryError("invalid_request", "mediaType is invalid", 400);
+  const sort = scalar(query.sort);
+  if (sort && sort !== "latest" && sort !== "popular") throw new GalleryError("invalid_request", "sort is invalid", 400);
   const cursor = scalar(query.cursor);
   const limit = scalar(query.limit);
   const search = scalar(query.q);
@@ -131,12 +172,55 @@ function parsePageRequest(value: unknown): GalleryPageRequest {
     ...(tag ? { tag } : {}),
     ...(workflow ? { workflow } : {}),
     ...(orientation ? { orientation: orientation as "portrait" | "square" | "landscape" } : {}),
+    ...(mediaType ? { mediaType: mediaType as "image" | "video" } : {}),
+    ...(sort ? { sort: sort as "latest" | "popular" } : {}),
+  };
+}
+
+function parseGenerationListRequest(value: unknown): GenerationListRequest {
+  const query = record(value);
+  const cursor = scalar(query.cursor);
+  const limit = scalar(query.limit);
+  const status = scalar(query.status);
+  return {
+    ...(cursor ? { cursor } : {}),
+    ...(limit ? { limit: Number(limit) } : {}),
+    ...(status ? { status: status as GenerationStatus } : {}),
+  };
+}
+
+function parseWorkflowFilter(value: unknown): { readonly mode?: "workflow" | "api"; readonly mediaType?: "image" | "video" } {
+  const query = record(value);
+  const mode = scalar(query.mode);
+  const mediaType = scalar(query.mediaType);
+  if (mode !== undefined && mode !== "workflow" && mode !== "api") throw new GalleryError("invalid_request", "mode must be 'workflow' or 'api'", 400);
+  if (mediaType !== undefined && mediaType !== "image" && mediaType !== "video") throw new GalleryError("invalid_request", "mediaType must be 'image' or 'video'", 400);
+  return { ...(mode ? { mode } : {}), ...(mediaType ? { mediaType } : {}) };
+}
+
+function parseTaskListRequest(value: unknown): TaskListRequest {
+  const query = record(value);
+  const module = scalar(query.module);
+  const cursor = scalar(query.cursor);
+  const limit = scalar(query.limit);
+  const status = scalar(query.status);
+  return {
+    ...(module ? { module: module as TaskModule } : {}),
+    ...(cursor ? { cursor } : {}),
+    ...(limit ? { limit: Number(limit) } : {}),
+    ...(status ? { status: status as GenerationStatus } : {}),
   };
 }
 
 function pathParam(value: unknown, key: string): string {
   const result = scalar(record(value)[key]);
   return result ?? "";
+}
+function parseListLimit(value: unknown): number | undefined {
+  const raw = scalar(record(value).limit);
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) ? parsed : undefined;
 }
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function scalar(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }

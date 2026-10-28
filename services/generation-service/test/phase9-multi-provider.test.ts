@@ -3,9 +3,11 @@ import test from "node:test";
 
 import { ConfigurationError } from "../src/config.ts";
 import { ProviderError } from "../src/providers/errors.ts";
+import { requestRemoteJson } from "../src/remote-providers/http.ts";
 import { MockImageProvider } from "../src/providers/mock.provider.ts";
 import { MultiProviderExecutor } from "../src/providers/multi-provider-executor.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
+import { ProviderHealthMonitor } from "../src/providers/provider-health-monitor.ts";
 import { ProviderSelectionPolicy } from "../src/providers/selection-policy.ts";
 import type { GenerationRequest, ProviderBinding, ProviderCallContext } from "../src/providers/types.ts";
 import { loadPhase9RemoteProviderConfig } from "../src/remote-providers/config.ts";
@@ -30,6 +32,28 @@ test("Phase 9 configuration enables only credentialed providers and requires exp
     REMOTE_PROVIDER_REQUEST_TIMEOUT_MS: "30000", REMOTE_PROVIDER_MAX_RESPONSE_BYTES: "1048576",
   });
   assert.deepEqual(Object.keys(config).sort(), ["gemini", "jimeng", "openai"]);
+});
+
+test("remote network failures are retryable so the executor can fail over", async () => {
+  await assert.rejects(
+    requestRemoteJson({ providerCode: "primary", baseUrl: "https://provider.test", apiKey: "secret", requestTimeoutMs: 1_000, maxResponseBytes: 1_024 }, "/generate", { method: "POST" }, (async () => { throw new TypeError("network unavailable"); }) as typeof fetch),
+    (error: unknown) => error instanceof ProviderError && error.category === "unavailable" && error.retryable,
+  );
+});
+
+test("provider health monitoring persists failures and refreshes shared routing", async () => {
+  const registry = new ProviderRegistry();
+  registry.register(new MockImageProvider({ code: "health-primary", availability: "disabled" }));
+  const checks: Array<{ code: string; healthy: boolean; threshold: number }> = [];
+  let refreshed = false;
+  const catalog = {
+    async recordHealth(code: string, healthy: boolean, threshold: number) { checks.push({ code, healthy, threshold }); },
+    async refreshRegistry() { refreshed = true; },
+  };
+  const monitor = new ProviderHealthMonitor(catalog as never, registry, silentLogger(), { failureThreshold: 3 });
+  await monitor.runOnce();
+  assert.deepEqual(checks, [{ code: "health-primary", healthy: false, threshold: 3 }]);
+  assert.equal(refreshed, true);
 });
 
 test("OpenAI adapter sends a provider-local request and returns validated Base64 output", async () => {
@@ -82,10 +106,48 @@ test("Jimeng adapter uses Seedream synchronous Base64 mode with seed and bounded
   });
   const result = await provider.generate({ ...request, seed: 42 }, binding("jimeng", "doubao-seedream-4-5-251128", { watermark: false, guidanceScale: 2.5 }), context);
   assert.equal(result.externalRequestId, "jimeng-request-1");
+  assert.equal(body.size, "1920x1920");
   assert.equal(body.response_format, "b64_json");
   assert.equal(body.sequential_image_generation, "disabled");
   assert.equal(body.seed, 42);
   assert.equal(body.watermark, false);
+});
+
+test("Jimeng adapter scales small sizes up to the Seedream 4.5 legal minimum while preserving aspect ratio", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const provider = new JimengImageProvider(httpConfig("jimeng"), async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ model: "doubao-seedream-4-5-251128", data: [{ b64_json: PNG }] });
+  });
+  const sizes: readonly (readonly [number, number, string])[] = [
+    [1024, 1024, "1920x1920"],
+    [768, 1024, "1664x2216"],
+    [1024, 768, "2216x1664"],
+    [2048, 2048, "2048x2048"],
+    [4096, 512, "4096x904"],
+  ];
+  for (const [width, height, expected] of sizes) {
+    await provider.generate({ ...request, width, height }, binding("jimeng", "doubao-seedream-4-5-251128"), context);
+    const body = calls[calls.length - 1]!;
+    assert.equal(body.size, expected);
+    const [w, h] = String(body.size).split("x").map(Number);
+    assert.ok(w! * h! >= 3_686_400, `${body.size} must meet the Seedream 4.5 pixel floor`);
+    assert.ok(w! * h! <= 16_777_216, `${body.size} must stay within the Seedream 4.5 pixel ceiling`);
+    assert.ok(w! <= 4096 && h! <= 4096, `${body.size} must not exceed the 4096px edge limit`);
+  }
+});
+
+test("Jimeng adapter fans out count>1 into one API call per image with distinct seeds", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const provider = new JimengImageProvider(httpConfig("jimeng"), async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ model: "doubao-seedream-4-5-251128", data: [{ b64_json: PNG, size: "1024x1024" }] }, { headers: { "x-tt-logid": `jimeng-request-${calls.length}` } });
+  });
+  const result = await provider.generate({ ...request, count: 3, seed: 42 }, binding("jimeng", "doubao-seedream-4-5-251128"), context);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((call) => call.seed), [42, 43, 44]);
+  assert.equal(result.outputs.length, 3);
+  assert.equal(result.externalRequestId, "jimeng-request-3");
 });
 
 test("database routing state overrides static adapter priority and disabled providers are excluded", () => {
@@ -96,6 +158,25 @@ test("database routing state overrides static adapter priority and disabled prov
   registry.setRouting("second", { availability: "active", priority: 2 });
   const ranked = new ProviderSelectionPolicy(registry).rank(request, [binding("first"), binding("second")]);
   assert.deepEqual(ranked.map((candidate) => candidate.provider.descriptor.code), ["second"]);
+});
+
+test("free-tier jobs exclude member-tier models while member jobs may use any model", () => {
+  const registry = new ProviderRegistry();
+  registry.register(new MockImageProvider({ code: "first", priority: 1 }));
+  registry.register(new MockImageProvider({ code: "second", priority: 2 }));
+  registry.setRouting("first", { availability: "active", priority: 1 });
+  registry.setRouting("second", { availability: "active", priority: 2 });
+  const policy = new ProviderSelectionPolicy(registry);
+  const bindings = [
+    binding("first", "free-model", {}, { modelTier: "free" }),
+    binding("second", "member-model", {}, { modelTier: "member" }),
+  ];
+  const freeRanked = policy.rank({ ...request, creditTier: "free" }, bindings);
+  assert.deepEqual(freeRanked.map((candidate) => candidate.binding.providerCode), ["first"]);
+  const memberRanked = policy.rank({ ...request, creditTier: "member" }, bindings);
+  assert.deepEqual(memberRanked.map((candidate) => candidate.binding.providerCode), ["first", "second"]);
+  const unsetRanked = policy.rank(request, bindings);
+  assert.deepEqual(unsetRanked.map((candidate) => candidate.binding.providerCode), ["first", "second"]);
 });
 
 test("multi-provider executor retries and falls back only for safe provider failures", async () => {

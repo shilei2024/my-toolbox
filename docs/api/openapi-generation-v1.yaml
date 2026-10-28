@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MindfulPenPal Generation API
-  version: 1.0.0
+  version: 1.1.0
   description: Internal API consumed only by the signed Next.js BFF.
 security:
   - viewerContext: []
@@ -9,9 +9,18 @@ paths:
   /v1/generation/workflows:
     get:
       operationId: listGenerationWorkflows
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema: { type: string, enum: [workflow, api] }
+        - in: query
+          name: mediaType
+          required: false
+          schema: { $ref: "#/components/schemas/MediaType" }
       responses:
         "200":
-          description: Enabled workflows with an eligible provider binding.
+          description: Enabled creation methods with an eligible provider binding, split by workflow/api mode.
           content:
             application/json:
               schema:
@@ -20,6 +29,28 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/Workflow" } }
   /v1/generations:
+    get:
+      operationId: listGenerations
+      parameters:
+        - in: query
+          name: cursor
+          required: false
+          schema: { type: string }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50 }
+        - in: query
+          name: status
+          required: false
+          schema: { $ref: "#/components/schemas/GenerationStatus" }
+      responses:
+        "200":
+          description: Viewer-scoped recent generation tasks with an optional signed next cursor.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationPage" }
+        "401": { $ref: "#/components/responses/Error" }
     post:
       operationId: createGeneration
       parameters:
@@ -87,20 +118,41 @@ components:
   schemas:
     Workflow:
       type: object
-      required: [slug, name, description, category, defaults, creditCost]
+      required: [slug, name, description, category, mode, mediaType, defaults, countRange, sizes, durations, creditCost]
       properties:
         slug: { type: string }
         name: { type: string }
         description: { type: string }
         category: { type: string }
+        mode: { enum: [workflow, api] }
+        mediaType: { $ref: "#/components/schemas/MediaType" }
         defaults:
           type: object
-          required: [width, height, count, visibility]
+          required: [width, height, count, visibility, promptVisibility]
           properties:
             width: { type: integer }
             height: { type: integer }
             count: { type: integer }
             visibility: { enum: [public, private] }
+            promptVisibility: { enum: [public, hidden] }
+            durationSeconds: { type: integer, minimum: 1, maximum: 300 }
+        countRange:
+          type: object
+          required: [min, max]
+          properties:
+            min: { type: integer }
+            max: { type: integer }
+        sizes:
+          type: array
+          items:
+            type: object
+            required: [width, height]
+            properties:
+              width: { type: integer }
+              height: { type: integer }
+        durations:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 300 }
         creditCost: { type: string, pattern: "^\\d+\\.\\d{4}$" }
     CreateGeneration:
       type: object
@@ -116,14 +168,29 @@ components:
         visibility: { enum: [public, private] }
         promptVisibility: { enum: [public, hidden] }
         parameters: { type: object }
+        inputImages:
+          type: array
+          maxItems: 3
+          description: 参考图 data URL（PNG/JPEG/WebP，单张不超过 3MB），用于单图/多图参考视频工作流。
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, data]
+            properties:
+              name: { type: string, maxLength: 128 }
+              data: { type: string, description: "data:image/png;base64,..." }
     Generation:
       type: object
-      required: [id, status, workflowSlug, workflowName, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images]
+      required: [id, status, workflowSlug, workflowName, mediaType, prompt, negativePrompt, width, height, count, visibility, promptVisibility, creditsReserved, creditsCharged, cancelRequested, createdAt, updatedAt, images, outputs]
       properties:
         id: { type: string }
-        status: { enum: [pending, running, completed, failed, cancelled] }
+        status: { $ref: "#/components/schemas/GenerationStatus" }
         workflowSlug: { type: string }
         workflowName: { type: string }
+        mode: { enum: [workflow, api] }
+        mediaType: { $ref: "#/components/schemas/MediaType" }
+        prompt: { type: string }
+        negativePrompt: { type: string }
         width: { type: integer }
         height: { type: integer }
         count: { type: integer }
@@ -141,3 +208,31 @@ components:
             type: object
             required: [id, slug]
             properties: { id: { type: string }, slug: { type: string } }
+        outputs:
+          type: array
+          description: Owner-scoped durable non-Gallery outputs. Image Gallery links remain in images for backward compatibility.
+          items:
+            type: object
+            required: [id, mediaType, url, mimeType, width, height]
+            properties:
+              id: { type: string }
+              mediaType: { $ref: "#/components/schemas/MediaType" }
+              url: { type: string, format: uri }
+              mimeType: { type: string }
+              width: { type: integer, minimum: 1 }
+              height: { type: integer, minimum: 1 }
+              durationSeconds: { type: number, exclusiveMinimum: 0, maximum: 300 }
+    MediaType:
+      type: string
+      enum: [image, video]
+    GenerationStatus:
+      type: string
+      enum: [pending, running, completed, failed, cancelled]
+    GenerationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Generation" }
+        nextCursor: { type: string }

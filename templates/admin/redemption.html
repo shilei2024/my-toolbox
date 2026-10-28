@@ -1,0 +1,73 @@
+{% extends "admin/_base.html" %}
+{% block admin_content %}
+<h1 class="h3 mb-3"><i class="bi bi-ticket-perforated"></i> 积分兑换码</h1>
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body">
+    <h5 class="mb-3">生成兑换码（会员积分）</h5>
+    <form method="post" action="{{ url_for('admin.redemption_generate') }}" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <div class="col-auto">
+        <label class="form-label small">每个兑换码积分</label>
+        <input type="number" name="amount" class="form-control" step="0.0001" min="0.0001" max="1000000" required placeholder="如 50"/>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">生成数量</label>
+        <input type="number" name="count" class="form-control" min="1" max="200" required placeholder="如 10"/>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary">生成</button>
+      </div>
+      <div class="col-12 form-text">用户通过微信/支付宝转账后，在 Gallery「积分与账单」页输入兑换码即可到账会员积分。</div>
+    </form>
+  </div>
+</div>
+
+{% if generated %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body">
+    <h5 class="mb-3">本次生成的兑换码（请复制发给用户）</h5>
+    <div class="d-flex flex-column gap-2">
+      {% for code in generated %}
+      <div class="d-flex align-items-center gap-2">
+        <code class="fs-6">{{ code }}</code>
+        <button class="btn btn-sm btn-outline-primary" type="button" onclick="navigator.clipboard.writeText('{{ code }}'); this.textContent='已复制';">复制</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <h5 class="mb-3">最近兑换码（共 {{ total }} 个）</h5>
+    {% if codes %}
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr><th>兑换码</th><th>积分</th><th>状态</th><th>创建时间</th><th>兑换用户/时间</th></tr>
+        </thead>
+        <tbody>
+          {% for item in codes %}
+          <tr>
+            <td><code>{{ item.code }}</code></td>
+            <td>{{ item.amount }}</td>
+            <td>
+              {% if item.status == 'unused' %}<span class="badge bg-success">未使用</span>
+              {% elif item.status == 'redeemed' %}<span class="badge bg-secondary">已兑换</span>
+              {% else %}<span class="badge bg-danger">已撤销</span>{% endif %}
+            </td>
+            <td><small>{{ item.created_at|china_time('%Y-%m-%d %H:%M') }}</small></td>
+            <td><small>{% if item.redeemed_by %}#{{ item.redeemed_by }} · {{ item.redeemed_at|china_time('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">还没有兑换码，先在上方生成。</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

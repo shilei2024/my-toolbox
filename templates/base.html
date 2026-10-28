@@ -10,29 +10,75 @@
   <meta property="og:title" content="{% block og_title %}{{ site_name }}{% endblock %}" />
   <meta property="og:description" content="{% block og_description %}{{ site_tagline }}{% endblock %}" />
   <meta property="og:type" content="website" />
-  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}" />
+  <link rel="icon" type="image/svg+xml" href="{{ 'img/favicon.svg'|static_url }}" />
+  <script>
+    (function () {
+      try {
+        var theme = localStorage.getItem("my-toolbox-theme");
+        if (["obsidian", "github", "bright"].indexOf(theme) !== -1) {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {
+        // Theme preference is optional; the CSS default remains available.
+      }
+    })();
+  </script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
-  <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet" />
+  <link href="{{ 'css/style.css'|static_url }}" rel="stylesheet" />
   {% block head_extra %}{% endblock %}
 </head>
-<body>
-<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm sticky-top">
-  <div class="container">
-    <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="/">
-      <i class="bi bi-stars text-primary"></i>
-      <span>{{ site_name }}</span>
+<body class="site-body">
+<a class="skip-link" href="#main-content">跳到主要内容</a>
+<nav class="navbar navbar-expand-lg site-navbar sticky-top" aria-label="全站导航">
+  <div class="container site-navbar-inner">
+    <a class="navbar-brand site-brand" href="/" aria-label="{{ site_name }} 首页">
+      <img src="{{ 'img/favicon.svg'|static_url }}" width="34" height="34" alt="" />
+      <span class="site-brand-copy">
+        <strong>{{ site_name }}</strong>
+        <small>AI Toolbox</small>
+      </span>
     </a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+    <button class="navbar-toggler site-nav-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+            aria-controls="mainNav" aria-expanded="false" aria-label="打开导航菜单">
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="mainNav">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <a class="nav-link" href="/">首页</a>
-        </li>
+      <ul class="navbar-nav site-primary-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/">首页</a></li>
+        <li class="nav-item"><a class="nav-link" href="/#tool-library">工具库</a></li>
+        {% if customer_projects_available %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('customer_projects.dashboard') }}">客户项目</a></li>
+        {% endif %}
+        {% if config.AI_IMAGE_EXTERNAL_URL %}
+          <li class="nav-item"><a class="nav-link" href="/gallery">Gallery</a></li>
+        {% endif %}
       </ul>
-      <ul class="navbar-nav">
+      <ul class="navbar-nav site-account-nav">
+        <li class="nav-item dropdown site-theme-menu">
+          <button class="nav-link dropdown-toggle site-theme-toggle" type="button" data-bs-toggle="dropdown"
+                  aria-expanded="false" aria-label="切换界面风格">
+            <i class="bi bi-palette2" aria-hidden="true"></i><span>界面风格</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end site-theme-dropdown" aria-label="界面风格选项">
+            <p class="site-theme-heading">界面风格</p>
+            <button class="dropdown-item site-theme-option" type="button" data-theme-option="obsidian">
+              <span class="theme-swatch theme-swatch-obsidian" aria-hidden="true"></span>
+              <span><strong>曜石专业</strong><small>沉稳、高对比的工作台</small></span>
+              <i class="bi bi-check2 theme-selected" aria-hidden="true"></i>
+            </button>
+            <button class="dropdown-item site-theme-option" type="button" data-theme-option="github">
+              <span class="theme-swatch theme-swatch-github" aria-hidden="true"></span>
+              <span><strong>GitHub 风格</strong><small>清晰、克制的代码协作感</small></span>
+              <i class="bi bi-check2 theme-selected" aria-hidden="true"></i>
+            </button>
+            <button class="dropdown-item site-theme-option" type="button" data-theme-option="bright">
+              <span class="theme-swatch theme-swatch-bright" aria-hidden="true"></span>
+              <span><strong>明亮风格</strong><small>通透、轻快的日间阅读</small></span>
+              <i class="bi bi-check2 theme-selected" aria-hidden="true"></i>
+            </button>
+          </div>
+        </li>
         {% if current_user.is_authenticated %}
           {% if is_admin %}
             <li class="nav-item">
@@ -43,10 +89,11 @@
           {% endif %}
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
-              <i class="bi bi-person-circle"></i> {{ current_user.email }}
+              <i class="bi bi-person-circle"></i> {{ current_user.display_name }}
             </a>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><span class="dropdown-item-text text-muted small">已登录</span></li>
+              <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}"><i class="bi bi-person-gear"></i> 个人资料 / 昵称</a></li>
+              <li><span class="dropdown-item-text text-muted small">{{ current_user.email }}</span></li>
               <li><hr class="dropdown-divider"></li>
               <li>
                 <form action="{{ url_for('auth.logout') }}" method="post" class="px-3">
@@ -61,7 +108,7 @@
             <a class="nav-link" href="{{ url_for('auth.login') }}">登录</a>
           </li>
           <li class="nav-item">
-            <a class="btn btn-primary btn-sm ms-2" href="{{ url_for('auth.register') }}">注册</a>
+            <a class="btn btn-primary site-nav-cta" href="{{ url_for('auth.register') }}">免费注册</a>
           </li>
         {% endif %}
       </ul>
@@ -69,7 +116,7 @@
   </div>
 </nav>
 
-<main class="container py-4">
+<main id="main-content" class="container site-main py-4">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <div class="mb-3">
@@ -85,18 +132,27 @@
   {% block content %}{% endblock %}
 </main>
 
-<footer class="border-top mt-5 py-4 bg-white">
-  <div class="container text-center text-muted small">
-    <div>© {{ now().year }} {{ site_name }} · Built with Flask + Bootstrap</div>
-    <div class="mt-1">
-      <a class="text-muted me-2" href="{{ url_for('privacy') }}">隐私</a>
-      <a class="text-muted" href="{{ url_for('terms') }}">条款</a>
+<footer class="site-footer">
+  <div class="container site-footer-inner">
+    <div>
+      <a class="site-footer-brand" href="/">{{ site_name }}</a>
+      <p>让实用工具与 AI 创作，共用一个简单可靠的账户。</p>
+    </div>
+    <div class="site-footer-links" aria-label="页脚导航">
+      <a href="/">工具首页</a>
+      {% if config.AI_IMAGE_EXTERNAL_URL %}<a href="/gallery">Gallery</a>{% endif %}
+      <a href="{{ url_for('privacy') }}">隐私</a>
+      <a href="{{ url_for('terms') }}">条款</a>
+    </div>
+    <div class="site-footer-meta">
+      <span>© {{ now().year }} {{ site_name }}</span>
+      <span>v{{ config.APP_VERSION }}</span>
     </div>
   </div>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script src="{{ 'js/main.js'|static_url }}"></script>
 {% block scripts_extra %}{% endblock %}
 </body>
 </html>
