@@ -1,0 +1,24 @@
+<view class="page">
+ <view class="message" wx:if="{{message}}">{{message}}</view>
+ <block wx:if="{{invoice}}">
+ <view class="card"><view class="section-title">识别、核对，再确认录入</view><view class="muted">{{invoice.file_name}}</view><button bindtap="original">查看原件</button><button bindtap="retryRecognize" loading="{{busy}}" disabled="{{busy}}">识别票面信息</button></view>
+ <view class="card">
+ <view wx:for="{{textFields}}" wx:key="key" class="edit-field"><text>{{item.name}}</text><input value="{{invoice[item.key]}}" data-key="{{item.key}}" bindinput="input" disabled="{{busy}}" maxlength="{{item.key==='remarks'?4000:item.key==='description'?500:item.key==='vendor'?255:64}}"/></view>
+ <view class="edit-field"><text>开票日期</text><picker mode="date" value="{{invoice.invoice_date}}" data-key="invoice_date" bindchange="input" disabled="{{busy}}"><view>{{invoice.invoice_date || '请选择日期'}} ›</view></picker></view>
+ <view wx:for="{{moneyFields}}" wx:key="key" class="edit-field"><text>{{item.name}}（元）</text><input type="digit" value="{{invoice[item.key]}}" data-key="{{item.key}}" bindinput="input" disabled="{{busy}}"/></view>
+ </view>
+ <view class="card">
+ <picker range="{{periods}}" range-key="name" value="{{period_idIndex}}" data-key="period_id" data-list="periods" bindchange="pick" disabled="{{busy}}"><view class="field">归属周期：{{periods[period_idIndex].name}} ›</view></picker>
+ <picker range="{{offices}}" range-key="name" value="{{office_idIndex}}" data-key="office_id" data-list="offices" bindchange="pick" disabled="{{busy}}"><view class="field">办事处：{{offices[office_idIndex].name}} ›</view></picker>
+ <picker range="{{categories}}" range-key="name" value="{{category_idIndex}}" data-key="category_id" data-list="categories" bindchange="pick" disabled="{{busy}}"><view class="field">费用类别：{{categories[category_idIndex].name}} ›</view></picker>
+ <picker range="{{product_lines}}" range-key="name" value="{{product_line_idIndex}}" data-key="product_line_id" data-list="product_lines" bindchange="pick" disabled="{{busy}}"><view class="field">产品线：{{product_lines[product_line_idIndex].name}} ›</view></picker>
+ <picker range="{{kinds}}" range-key="name" value="{{kindIndex}}" data-key="document_kind" data-list="kinds" bindchange="pick" disabled="{{busy}}"><view class="field">用途：{{kinds[kindIndex].name}} ›</view></picker>
+ <picker range="{{policies}}" range-key="name" value="{{policyIndex}}" data-key="inclusion_policy" data-list="policies" bindchange="pick" disabled="{{busy}}"><view class="field">计入口径：{{policies[policyIndex].name}} ›</view></picker>
+ <picker mode="date" fields="month" value="{{invoice.occurrence_month}}" data-key="occurrence_month" bindchange="input" disabled="{{busy}}"><view class="field">发生月：{{invoice.occurrence_month}} ›</view></picker>
+ <picker mode="date" fields="month" value="{{invoice.settlement_month}}" data-key="settlement_month" bindchange="input" disabled="{{busy}}"><view class="field">结算月（可选）：{{invoice.settlement_month || '未填写'}} ›</view></picker>
+ <view class="field">选中打印<switch checked="{{invoice.print_selected}}" data-key="print_selected" bindchange="toggle" disabled="{{busy}}"/></view>
+ <view class="hint">加油票、零散过路费与账单不能直接计入费用。应酬/出差专属明细请在网站补齐。</view>
+ <view class="field">我已核对原件、金额和归属<switch checked="{{confirmed}}" bindchange="agree" disabled="{{busy}}"/></view>
+ <button class="primary" bindtap="save" disabled="{{busy || !confirmed}}" loading="{{busy}}">确认并录入网站</button>
+ </view></block>
+</view>

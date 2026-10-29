@@ -1,5 +1,11 @@
 {
-  "pages": ["pages/home/index"],
+  "pages": [
+    "pages/dashboard/index",
+    "pages/home/index",
+    "pages/dispatch/index",
+    "pages/mine/index",
+    "pages/review/index"
+  ],
   "window": {
     "navigationBarTitleText": "票据助手",
     "navigationBarBackgroundColor": "#f5f8f6",
@@ -7,5 +13,28 @@
     "backgroundColor": "#f5f8f6"
   },
   "style": "v2",
-  "sitemapLocation": "sitemap.json"
+  "sitemapLocation": "sitemap.json",
+  "tabBar": {
+    "color": "#71877c",
+    "selectedColor": "#188563",
+    "backgroundColor": "#ffffff",
+    "list": [
+      {
+        "pagePath": "pages/dashboard/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/home/index",
+        "text": "发票录入"
+      },
+      {
+        "pagePath": "pages/dispatch/index",
+        "text": "派车单"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的"
+      }
+    ]
+  }
 }
