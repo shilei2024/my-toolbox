@@ -181,6 +181,10 @@ class Config:
     GALLERY_INTERNAL_HMAC_SECRET: str = os.environ.get("GALLERY_INTERNAL_HMAC_SECRET", "")
 
     # --- Paths ---
+    WECHAT_MINI_ENABLED: bool = _bool(os.environ.get("WECHAT_MINI_ENABLED"), default=False)
+    WECHAT_MINI_APP_ID: str = os.environ.get("WECHAT_MINI_APP_ID", "").strip()
+    WECHAT_MINI_APP_SECRET: str = os.environ.get("WECHAT_MINI_APP_SECRET", "").strip()
+
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     INSTANCE_DIR: Path = BASE_DIR / "instance"
     TOOLS_CONFIG_PATH: Path = BASE_DIR / "tools_config.yaml"

@@ -1,0 +1,11 @@
+{
+  "pages": ["pages/home/index"],
+  "window": {
+    "navigationBarTitleText": "票据助手",
+    "navigationBarBackgroundColor": "#f5f8f6",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f8f6"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

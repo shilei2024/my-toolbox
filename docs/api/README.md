@@ -2,6 +2,7 @@
 
 ## 业务模块契约
 
+- [微信票据录入 API](wechat-invoice-upload.md)：网站绑定、可撤销移动会话和原子上传，默认关闭。
 - [Customer Projects API v1](customer-projects-v1.md)：Phase 1 核心 API 契约；功能开关默认关闭，真实 PostgreSQL staging 与生产审批通过后才可开放。
 
 ## 边界

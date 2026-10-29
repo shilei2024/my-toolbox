@@ -28,5 +28,37 @@
       <span class="text-muted small">当前显示：<strong>{{ user.display_name }}</strong></span>
     </div>
   </form>
+  {% if config.WECHAT_MINI_ENABLED %}
+  <section class="card card-body shadow-sm border-0 mt-4">
+    <h2 class="h5">微信小程序录入票据</h2>
+    <p class="profile-note">绑定后可在手机随手上传，同步到当前网站账号。绑定码十分钟有效，请勿分享给他人。</p>
+    <label class="form-label" for="mobileBindingPassword">确认当前网站密码</label>
+    <input class="form-control mb-3" id="mobileBindingPassword" type="password" autocomplete="current-password" maxlength="256">
+    <div class="d-flex gap-2"><button class="btn btn-primary" id="mobileBindingCreate" type="button">生成绑定二维码</button><button class="btn btn-outline-secondary" id="mobileBindingRefresh" type="button">查看绑定</button></div>
+    <div id="mobileBindingMessage" class="mt-3" role="status"></div>
+    <div id="mobileBindingQr" class="mt-3 text-center"></div>
+    <div id="mobileBindingList" class="mt-3"></div>
+  </section>
+  <script>
+  (()=>{
+    const message=document.getElementById('mobileBindingMessage'),list=document.getElementById('mobileBindingList');
+    let expiryTimer=null;
+    const clearBinding=()=>{clearTimeout(expiryTimer);expiryTimer=null;document.getElementById('mobileBindingQr').replaceChildren();};
+    const api=async(path,method='GET')=>{
+      const password=document.getElementById('mobileBindingPassword');
+      const options={method,headers:{'Accept':'application/json','X-CSRFToken':document.querySelector('meta[name="csrf-token"]')?.content||''}};
+      if(method!=='GET'){options.headers['Content-Type']='application/json';options.body=JSON.stringify({password:password.value});password.value='';}
+      const r=await fetch('/auth/mobile'+path,options);let data;try{data=await r.json()}catch{throw new Error('登录可能已过期，请刷新页面后重试')}if(!r.ok)throw new Error(data.error||'操作失败，请重试');return data;
+    };
+    const refresh=async()=>{try{const data=await api('/bindings');list.replaceChildren();if(!data.bindings.length){list.textContent='尚未绑定微信';return}for(const row of data.bindings){const button=document.createElement('button');button.type='button';button.className='btn btn-outline-danger';button.textContent='解绑微信并退出所有手机登录';button.onclick=async()=>{try{await api('/bindings/'+row.id,'DELETE');clearBinding();message.textContent='已解绑，所有手机登录均已失效。';await refresh()}catch(e){message.textContent=e.message}};list.append(button)}}catch(e){message.textContent=e.message}};
+    document.getElementById('mobileBindingRefresh').addEventListener('click',refresh);
+    document.getElementById('mobileBindingCreate').addEventListener('click',async(event)=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{const data=await api('/challenge','POST');clearBinding();const box=document.getElementById('mobileBindingQr');const image=document.createElement('img');image.src=data.qr_image;image.alt='在小程序中扫码绑定';image.width=220;image.height=220;const code=document.createElement('p');code.className='font-monospace text-break mt-2';code.textContent=data.binding_code;box.append(image,code);message.textContent='请在票据助手小程序点击“扫码绑定”，或复制绑定码。';expiryTimer=setTimeout(()=>{clearBinding();message.textContent='绑定码已到期，可重新生成。'},data.expires_in*1000)}catch(e){message.textContent=e.message}finally{button.disabled=false}
+    });
+    refresh();
+  })();
+  </script>
+  {% endif %}
 </div>
 {% endblock %}
