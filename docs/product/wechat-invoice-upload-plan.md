@@ -51,3 +51,5 @@ Golden Rule延续：只写隔离恢复库，无生产网站影响；复用真实
 操作者已反馈MOBILE_API_SMOKE_OK/MOBILE_HISTORY_OK/MOBILE_STAGING_SMOKE_OK，候选ba06c23在真实PG16恢复库业务验收通过；开发者工具首页可编译、隐私指引已保存。准备0.9.48后端发布，仍不声称微信登录/真机通过。新增一次性mobile_invoice_release.py，复用现有备份、发布锁、022 Git检出等工具；仅允许实际旧SHA6239408/e4到批准main/f5，业务必须与验收候选一致，仅后续发布脚本/测试/文档可变。手机开关必须关闭，先停写最终备份、更新、服务用户读取检查、正常Alembic升级、历史用户/票据/BLOB指纹、启动及本机/公网健康和手机404/no-store/no-cookie检查。失败保持停写，不reset/downgrade。秘密和Caddy不改，保留本地开发工具配置修改。
 
 Golden Rule：短维护影响已有网站，已获用户部署授权；共享备份/锁/Git能力，不改变业务架构；无新资源/依赖成本；固定SHA单命令且失败脱敏，避免粘贴密钥；按现有systemd/PostgreSQL事实源发布，领域工件不扩展为新CD系统。测试校验故障顺序、022权限及真实PG升级；独立评审、CI及release PR后才给操作者生产命令。后续启用需服务器本机填AppSecret并核对文件对服务用户可读，真机验收独立完成。
+
+2026-10-29正式后端结果：操作者反馈be56a7a/f5、MOBILE_DEPLOY_OK、service active/HTTPS OK/mobile disabled，最终备份已完成；AppSecret已在服务器填写且入口关闭。v0.9.48标记已部署的后端来源，PR108已回流develop。本阶段完成后端发布，后续是配置启用、真实微信code换身份、预览码与账号绑定码的双阶段真机验收；备案/微信审核尚未报告通过。
