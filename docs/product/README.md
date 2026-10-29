@@ -4,6 +4,8 @@
 
 ## 当前文档
 
+- [移动完整录入实施计划](mobile-invoice-recognition-plan.md)：首页、发票识别核对、派车单与我的四个标签，基础上传之后的待发布能力。
+
 - [微信票据录入实施计划](wechat-invoice-upload-plan.md)：原生MVP已实现，待实际微信/服务器验收。
 - [客户项目跟进系统 PRD](customer-project-tracking-prd.md)：Codex 实施基线，覆盖客户项目、物料、竞品、协作、提醒和生命周期管理。
 - [客户项目跟进低保真原型](customer-project-tracking-prototype.md)：Phase 0 信息架构、桌面/移动端关键页面和冲突交互评审稿。

@@ -1,6 +1,6 @@
 # 微信票据录入 API
 
-候选实现；默认关闭。所有接口同一Flask域名。架构见[ADR-0041](../adr/0041-wechat-mobile-invoice-upload.md)，发布见[上线手册](../deployment/wechat-invoice-upload-rollout.md)。
+基础上传已由操作者验收生产绑定、上传及网站同步；新增识别/确认/派车单与仪表盘为待发布能力。开关默认关闭，生产已人工启用。所有接口同一Flask域名。架构见[ADR-0041](../adr/0041-wechat-mobile-invoice-upload.md)、[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)，发布见[上线手册](../deployment/mobile-reimbursement-entry-rollout.md)。
 
 ## 网站绑定接口 `/auth/mobile`
 
@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | POST `/session` | `{code,binding_code?}`；code为wx.login临时code | `{success,access_token,expires_at,display_name}`；未绑定428，绑定冲突409，微信换码异常503 |
 | POST `/logout` | 无 | `{success:true}`，只撤销当前会话 |
-| GET `/bootstrap` | 无 | `{display_name,periods:[{id,name,is_active}],offices:[{id,name}]}` |
+| GET `/bootstrap` | 无 | `{display_name,periods:[{id,name,is_active}],offices,categories,product_lines}`，后三类为本人目录的`{id,name}`列表 |
 | GET `/invoices?period_id=:id&page=1` | 仅本人周期；每页20条 | `{invoices,page,has_more}` |
 | GET `/invoices/:id/file` | 仅本人票据和原件 | 原始字节、附件文件名、no-store；不签发公开URL |
 | POST `/invoices` | 下面multipart | 201新建或200幂等/内容重复；`{success,duplicate,invoice}` |
@@ -38,3 +38,27 @@ multipart：`file`（20MB以内PDF/PNG/JPG）；`file_name`可选，微信临时
 普通票据review，其他retain；未确认金额，加油票/普通票默认打印选中，未知过路费/账单未选中，电脑可核对修改。一个User行锁保护重试，锁后再次鉴权和检查用量。原件、票据、幂等凭证及新票用量原子提交；失败回滚，无孤立原件/扣次。相同键+意图+内容返回原票，键被复用但内容/意图不同409。相同文件新键只在相同周期、用途、发生月、办事处复用原票；不同意图409而不悄悄覆盖。已删除票据的旧键409；重新选择文件产生新键。
 
 403/404隔离未授权资源，400参数/格式/月份错误，413体积超限，409冲突，429用量/频率限制。微信错误只返回固定说明，不回传响应体、secret或session_key。数据库并发冲突回滚后409，可原键重试。客户端本轮队列保存在内存，退出/重启后须重选；保存成功的记录和内容去重仍在服务器。
+
+## 识别与明确确认（新增）
+
+| 方法/路径 | 请求 | 响应 |
+| --- | --- | --- |
+| GET `/invoices/:id` | 本人票据 | `{invoice,snapshot}`，现有网站字段，去掉file_url；含关联明细的快照 |
+| POST `/invoices/:id/recognize` | `{retry?:boolean}` | `{success,draft,snapshot,cached}`；10次/分钟，草稿不写财务字段 |
+| POST `/invoices/:id/confirm` | `{snapshot,confirmed:true,...编辑字段}` | `{success,invoice,snapshot}`；20次/分钟 |
+
+确认白名单：period_id、office_id、category_id、product_line_id、invoice_number、invoice_date、vendor、description、amount、tax_amount、total_amount、document_kind、inclusion_policy、occurrence_month、settlement_month、print_selected、remarks。未提供字段沿用原记录；类别/产品线可null，费用口径则必须补齐二者。日期ISO YYYY-MM-DD，非负金额最多2位小数且未税+税额=合计。号码/商家必填，号码64、商家255、摘要500、备注4000字以内。其余计入口径与月份规则沿用网站，不接受owner、原件URL或客户归属修改。
+
+识别复用既有百度→腾讯→Paddle链；失败不扣识别用量，成功一次扣报销用量（上传另按原有规则扣一次）。草稿存领域审计invoice.ocr，以owner+invoice_id+原件SHA复用，跨周期移动仍复用；成功缓存即使retry也不重付费，失败缓存须retry才重试。PG事务咨询锁遇同票并发返回409。识别缺字段留空，需人工补齐；success并不保证每个字段正确。确认前不改变发票和费用；确认锁后复查会话/授权与快照，过期409。已分摊账单409。关联应酬/出差明细的票面金额/日期随修改同步，单独调整过则冲突要求网站核对；仅改备注不重置手工金额/日期。客户、参与人等手机未编辑数据保留，专属明细仍在网站维护。
+
+## 首页与派车单（新增）
+
+| 方法/路径 | 请求 | 响应 |
+| --- | --- | --- |
+| GET `/dashboard/:period_id` | 本人周期 | `{period_name,total_amount,invoice_count,pending_count,vehicle_count,km_total,toll_fee,parking_fee}` |
+| GET `/dispatch/:period_id` | 本人周期 | `{rows,snapshot,period_name,totals}` |
+| PUT `/dispatch/:period_id` | `{rows,snapshot}`，完整vehicle列表，最多1000行 | `{success,rows,snapshot,period_name,totals}`；20次/分钟 |
+
+vehicle可编辑date、from_location、to_location、contact、km_start、km_total、toll_fee、parking_fee、product_line；返回id、自动km_end、allocated。新行id=null，已有id必须属于本周期且唯一；省略原行表示删除。真实日期、km_total必填，数字非负最多2位小数，文本≤255，产品线必须属本人目录（历史原值可保留）。服务端稳定按日期排序并承接里程，不信客户端km_end/allocated，不接收toll_statement_id等来源字段。snapshot为网站全aux快照，防覆盖其他页面改动；仅写vehicle，不重建应酬/出差。已有行ID及服务端隐藏元数据保留，已分摊行删除/修改或间接受里程链影响返回409，需先在网站撤销分摊。审计vehicle.mobile.save记录前后，失败事务回滚。
+
+仪表盘费用取网站_summary同口径；invoice_count包括全部用途，pending_count仅金额未确认，公里/过桥/停车为派车已保存合计。金额以十进制字符串返回。四个原生tab共享进程内所选周期，清单校验所属；不自动修改网站active周期。退出/换登录清空页面缓存，上传识别中不允许退出/换期，派车未保存必须保存或明确放弃。

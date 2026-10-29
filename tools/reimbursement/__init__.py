@@ -558,6 +558,15 @@ def ocr():
     if not img_bytes:
         return jsonify(error="图片数据为空"), 400
 
+    result, provider = recognize_original(img_bytes)
+    if result:
+        commit_usage("reimbursement")
+        return jsonify(success=True, data=result, provider=provider)
+    return jsonify(success=False, data={}, provider="mock", note="暂未识别出可自动填写的信息，请核对原件或手动填写。")
+
+
+def recognize_original(img_bytes: bytes):
+    """Shared existing OCR chain; return suggestions only, without DB writes."""
     ocr_errors: list[str] = []
 
     # --- 策略 1: 百度云 OCR（增值税发票识别 + 通用 OCR；首选） ---
@@ -570,15 +579,14 @@ def ocr():
             if result:
                 has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
                 if has_data:
-                    commit_usage("reimbursement")
-                    return jsonify(success=True, data=result, provider="baidu")
+                    return result, "baidu"
                 current_app.logger.warning("Baidu OCR returned empty fields, trying fallbacks...")
                 ocr_errors.append("百度识别无结果")
             else:
                 ocr_errors.append("百度识别无结果或服务未开通")
         except Exception as e:
-            current_app.logger.warning("Baidu OCR error: %s", e)
-            ocr_errors.append(f"百度: {e}")
+            current_app.logger.warning("Baidu OCR failed: %s", type(e).__name__)
+            ocr_errors.append("百度识别失败")
     else:
         current_app.logger.info("Baidu OCR keys not configured, skipping...")
         ocr_errors.append("百度未配置")
@@ -592,15 +600,14 @@ def ocr():
             if result:
                 has_data = any(result.get(k) for k in ("invoice_number", "total_amount", "seller_name"))
                 if has_data:
-                    commit_usage("reimbursement")
-                    return jsonify(success=True, data=result, provider="tencent")
+                    return result, "tencent"
                 current_app.logger.warning("Tencent OCR returned empty fields, trying fallbacks...")
                 ocr_errors.append("腾讯云识别无结果")
             else:
                 ocr_errors.append("腾讯云识别无结果或服务未开通")
         except Exception as e:
-            current_app.logger.warning("Tencent OCR error: %s", e)
-            ocr_errors.append(f"腾讯云: {e}")
+            current_app.logger.warning("Tencent OCR failed: %s", type(e).__name__)
+            ocr_errors.append("腾讯云识别失败")
     else:
         current_app.logger.info("Tencent OCR keys not configured, skipping...")
         ocr_errors.append("腾讯云未配置")
@@ -609,6 +616,7 @@ def ocr():
     try:
         # 先保存为临时文件（PaddleOCR 需要文件路径）
         upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
+        upload_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = upload_dir / f"_ocr_tmp_{uuid.uuid4().hex[:8]}.png"
         try:
             # 如果是 PDF 或大图片，先转为 PNG
@@ -636,8 +644,7 @@ def ocr():
 
             result = _paddle_ocr_invoice(tmp_path)
             if result and (result.get("invoice_number") or result.get("total_amount")):
-                commit_usage("reimbursement")
-                return jsonify(success=True, data=result, provider="paddleocr")
+                return result, "paddleocr"
         finally:
             if tmp_path.exists():
                 try:
@@ -645,23 +652,10 @@ def ocr():
                 except Exception:
                     pass
     except Exception as e:
-        current_app.logger.warning("PaddleOCR fallback error: %s", e)
-        ocr_errors.append(f"PaddleOCR: {e}")
+        current_app.logger.warning("PaddleOCR failed: %s", type(e).__name__)
+        ocr_errors.append("本地识别失败")
 
-    # --- 策略 4: 模拟降级（success=false，前端据此提示手动填写） ---
-    if ocr_errors:
-        current_app.logger.info("OCR providers exhausted: %s", " | ".join(ocr_errors))
-    note = "暂未识别出可自动填写的信息，请确认票面完整、图片清晰，或手动填写"
-    return jsonify(
-        success=False,
-        data={
-            "invoice_number": "", "invoice_date": "",
-            "seller_name": "", "amount_excluding_tax": "",
-            "tax_amount": "", "total_amount": "", "description": "",
-        },
-        provider="mock",
-        note=f"{note}。请手动填写。",
-    )
+    return None, None
 
 
 # ---------------------------------------------------------------------------

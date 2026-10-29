@@ -17,6 +17,55 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def _dispatch_case(self, name):
+        from tests.test_mobile_dispatch import DispatchTests
+        self.setup_dispatch = lambda: DispatchTests.setup_dispatch(self)
+        self.row = lambda line, **fields: DispatchTests.row(self, line, **fields)
+        getattr(DispatchTests, name)(self)
+
+    def test_vehicle_snapshot_and_dashboard_on_postgres(self):
+        self._dispatch_case('test_vehicle_sync_preserves_other_details_snapshot_and_dashboard')
+
+    def test_allocated_vehicle_preservation_on_postgres(self):
+        self._dispatch_case('test_allocated_rows_keep_ids_metadata_and_reject_changes')
+
+    def _recognition_case(self,name):
+        from tests.test_mobile_recognition import RecognitionTests
+        self.prepare=lambda kind='invoice':RecognitionTests.prepare(self,kind)
+        self.values=lambda headers,id,policy='review':RecognitionTests.values(self,headers,id,policy)
+        getattr(RecognitionTests,name)(self)
+
+    def test_recognition_and_confirmation_use_real_postgres(self):
+        self._recognition_case('test_ocr_is_cached_suggestion_without_financial_write_then_confirm_shared')
+
+    def test_generated_detail_consistency_on_postgres(self):
+        self._recognition_case('test_confirm_updates_generated_detail_amount_without_erasing_manual_participants')
+
+    def test_manual_detail_preservation_on_postgres(self):
+        self._recognition_case('test_remarks_preserve_independent_amount_and_date')
+
+    def test_transferred_invoice_reuses_ocr_on_postgres(self):
+        self._recognition_case('test_successful_ocr_cache_survives_period_transfer')
+
+    def test_parallel_recognition_rejects_duplicate_provider_call(self):
+        from threading import Event
+        headers=self.login();invoice=self.upload(headers).json['invoice'];entered=Event();release=Event()
+        def provider(_raw):
+            entered.set();release.wait(10)
+            return {'invoice_number':'123','total_amount':'1'},'test'
+        def send():
+            with self.app.test_client(use_cookies=False) as client:
+                return client.post(f"/api/mobile/invoices/{invoice['id']}/recognize",headers=headers,json={}).status_code
+        with patch('tools.reimbursement.recognize_original',side_effect=provider) as upstream:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                first=pool.submit(send)
+                try:
+                    self.assertTrue(entered.wait(10))
+                    self.assertEqual(send(),409)
+                finally: release.set()
+                self.assertEqual(first.result(timeout=15),200)
+            self.assertEqual(upstream.call_count,1)
+
     def test_operator_business_smoke_against_postgres(self):
         from scripts.ops.mobile_invoice_staging_smoke import exercise
         exercise(self.app)
@@ -168,6 +217,15 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 conn.exec_driver_sql("UPDATE public.alembic_version SET version_num='e4f5a6b7c8d9'")
             from scripts.ops.mobile_invoice_release import migrate
             migrate(root,target)
+            # The incremental release must only read f5 and detect a modified
+            # historical invoice; run the exact fingerprint against real PG.
+            from scripts.ops.mobile_entry_release import database_state
+            release_url=target.render_as_string(hide_password=False)
+            before=database_state(release_url)
+            self.assertEqual(database_state(release_url),before)
+            with target_engine.begin() as conn:
+                conn.exec_driver_sql("UPDATE public.reimbursement_invoices SET remarks='synthetic release check'")
+            self.assertNotEqual(database_state(release_url),before)
         finally:
             if target_engine is not None:
                 target_engine.dispose()

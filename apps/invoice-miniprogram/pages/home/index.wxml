@@ -2,26 +2,19 @@
   <view wx:if="{{showPrivacy}}" class="privacy-mask"><view class="privacy-card"><view class="section-title">票据与隐私</view><view class="muted">选择的票据原件会上传并保存到你绑定的网站账号，用于留存、核对和打印。请确认票据属于你，或已获得上传授权。</view><view class="link privacy-link" bindtap="showPrivacy">查看完整隐私保护指引</view><button id="invoice-privacy-agree" class="primary" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePrivacy">同意并继续</button><button class="secondary" bindtap="declinePrivacy">暂不使用</button></view></view>
   <view class="hero"><image class="logo" src="/assets/logo-v1.png" mode="aspectFill"/><view><view class="eyebrow">随手上传 · 月末好整理</view><view class="title">票据助手</view><view class="subtitle">收好每一张，不漏掉每一笔。</view></view></view>
   <view wx:if="{{message}}" class="message" role="status">{{message}}</view>
-  <view wx:if="{{!loggedIn}}" class="card">
-    <view class="section-title">连接你的网站账号</view><view class="muted">首次使用：在网站「个人资料」生成绑定二维码。绑定后直接用微信登录。</view>
-    <button class="primary" bindtap="scanBinding" disabled="{{busy}}">扫码绑定</button>
-    <input class="input" value="{{bindingCode}}" bindinput="onBindingInput" placeholder="也可粘贴一次性绑定码" maxlength="64"/>
-    <button class="secondary" bindtap="signIn" loading="{{busy}}" disabled="{{busy}}">{{bindingCode ? '绑定并登录' : '已绑定，微信登录'}}</button>
-  </view>
+  <view wx:if="{{!loggedIn}}" class="card"><view class="muted">请先到“我的”登录并绑定网站账号。</view><button class="primary" bindtap="goMine">去我的登录</button></view>
   <block wx:else>
-    <view class="account"><text>{{displayName}}</text><text class="link" bindtap="logout">退出登录</text></view>
     <view class="card">
-      <view class="section-title">这次要收哪一张？</view>
-      <picker range="{{periods}}" range-key="name" value="{{periodIndex}}" bindchange="onPeriod" disabled="{{busy}}"><view class="field"><text class="muted">归属周期</text><text>{{periods.length ? periods[periodIndex].name : '请先在网站创建'}} ›</text></view></picker>
+      <view class="section-title">发票录入</view><view class="muted">当前周期：{{periods[periodIndex].name || '请在首页选择'}}；周期在首页切换。</view>
       <picker range="{{offices}}" range-key="name" value="{{officeIndex}}" bindchange="onOffice" disabled="{{busy}}"><view class="field"><text class="muted">办事处</text><text>{{offices[officeIndex].name || '请选择'}} ›</text></view></picker>
       <picker range="{{kinds}}" range-key="label" value="{{kindIndex}}" bindchange="onKind" disabled="{{busy}}"><view class="field"><text class="muted">票据用途</text><text>{{kinds[kindIndex].label}} ›</text></view></picker>
       <picker mode="date" fields="month" value="{{month}}" bindchange="onMonth" disabled="{{busy}}"><view class="field"><text class="muted">实际发生月</text><text>{{month}} ›</text></view></picker>
       <view class="upload-actions"><button class="primary" bindtap="chooseImage" disabled="{{busy || !periods.length}}">拍照 / 选图片</button><button class="secondary" bindtap="choosePdf" disabled="{{busy || !periods.length}}">微信文件选 PDF</button></view>
-      <view class="hint">加油票与过路费仅留存打印；普通发票待网站确认后再计入费用。</view>
+      <view class="hint">加油票与过路费仅留存打印；普通发票核对确认后才按所选口径计入费用。</view>
       <view class="hint">发生月与归属周期分开，可跨期留存；账单分摊须对应同自然月派车记录。</view>
     </view>
-    <view wx:if="{{queue.length}}" class="card"><view class="section-title">本次上传</view><view wx:for="{{queue}}" wx:key="key" class="receipt"><view class="file-name">{{item.name}}</view><view class="muted small">{{item.label}}</view><progress wx:if="{{item.state === 'uploading'}}" percent="{{item.progress}}" stroke-width="3" activeColor="#188563"/><view class="upload-state {{item.state}}">{{item.statusText}}</view><button wx:if="{{item.state === 'failed'}}" size="mini" class="secondary" data-index="{{index}}" bindtap="retry" disabled="{{busy}}">重试</button></view></view>
-    <view class="card"><view class="section-title">本期已收好 <text class="refresh" bindtap="refresh">刷新</text></view><view wx:if="{{!invoices.length}}" class="empty">这里还没有票据。上传一张试试。</view><view wx:for="{{invoices}}" wx:key="id" class="receipt" data-id="{{item.id}}" bindtap="viewOriginal"><view class="file-name">{{item.file_name}}</view><view class="muted small">{{item.kindLabel}} · {{item.occurrence_month}}</view><view class="tag">{{item.stateLabel}}</view></view><button wx:if="{{hasMore}}" class="secondary" bindtap="more">查看更多</button></view>
+    <view wx:if="{{queue.length}}" class="card"><view class="section-title">本次上传</view><view wx:for="{{queue}}" wx:key="key" class="receipt"><view class="file-name">{{item.name}}</view><view class="muted small">{{item.label}}</view><progress wx:if="{{item.state === 'uploading'}}" percent="{{item.progress}}" stroke-width="3" activeColor="#188563"/><view class="upload-state {{item.state}}">{{item.statusText}}</view><button wx:if="{{item.invoiceId}}" size="mini" data-id="{{item.invoiceId}}" bindtap="review">核对并录入</button><button wx:if="{{item.state === 'failed'}}" size="mini" class="secondary" data-index="{{index}}" bindtap="retry" disabled="{{busy}}">重试</button></view></view>
+    <view class="card"><view class="section-title">本期已收好 <text class="refresh" bindtap="refresh">刷新</text></view><view wx:if="{{!invoices.length}}" class="empty">这里还没有票据。上传一张试试。</view><view wx:for="{{invoices}}" wx:key="id" class="receipt" data-id="{{item.id}}" bindtap="review"><view class="file-name">{{item.file_name}}</view><view class="muted small">{{item.kindLabel}} · {{item.occurrence_month}}</view><view class="tag">{{item.stateLabel}}</view></view><button wx:if="{{hasMore}}" class="secondary" bindtap="more">查看更多</button></view>
   </block>
   <view class="footer" bindtap="showPrivacy">隐私保护指引</view>
 </view>

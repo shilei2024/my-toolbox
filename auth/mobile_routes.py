@@ -141,13 +141,58 @@ def mobile_logout():
 
 @mobile_bp.get("/bootstrap")
 def mobile_bootstrap():
-    from tools.reimbursement.manager import _seed_offices
+    from tools.reimbursement.manager import _seed_offices,_seed_categories,_seed_product_lines
     owner_id = str(current_user.id)
     offices = _seed_offices("user", owner_id)
     periods = ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id).order_by(ReimbursementPeriod.start_year.desc(), ReimbursementPeriod.start_month.desc()).all()
     return jsonify(display_name=current_user.nickname or "网站账号",
         periods=[{"id":p.id, "name":p.name, "is_active":p.is_active} for p in periods],
-        offices=[{"id":o.id, "name":o.name} for o in offices])
+        offices=[{"id":o.id, "name":o.name} for o in offices],
+        categories=[{'id':c.id,'name':c.name} for c in _seed_categories('user',owner_id)],
+        product_lines=[{'id':p.id,'name':p.name} for p in _seed_product_lines('user',owner_id)])
+
+
+@mobile_bp.get('/invoices/<int:invoice_id>')
+def mobile_detail(invoice_id):
+    from tools.reimbursement.mobile_recognition import owned,state
+    data,token=state(owned(invoice_id))
+    return jsonify(invoice=data,snapshot=token)
+
+
+@mobile_bp.get('/dispatch/<int:period_id>')
+def mobile_dispatch_get(period_id):
+    from tools.reimbursement.mobile_dispatch import period_owned,dispatch_state
+    return jsonify(**dispatch_state(period_owned(period_id)))
+
+
+@mobile_bp.put('/dispatch/<int:period_id>')
+@limiter.limit('20/minute')
+def mobile_dispatch_save(period_id):
+    from tools.reimbursement.mobile_dispatch import save_dispatch
+    return jsonify(success=True,**save_dispatch(period_id,request.get_json(silent=True)))
+
+
+@mobile_bp.get('/dashboard/<int:period_id>')
+def mobile_dashboard(period_id):
+    from tools.reimbursement.mobile_dispatch import dashboard
+    return jsonify(**dashboard(period_id))
+
+
+@mobile_bp.post('/invoices/<int:invoice_id>/recognize')
+@limiter.limit('10/minute')
+def mobile_recognize(invoice_id):
+    from tools.reimbursement.mobile_recognition import recognize
+    data=request.get_json(silent=True) or {}
+    if not isinstance(data,dict) or set(data)-{'retry'} or not isinstance(data.get('retry',False),bool):
+        raise service.MobileError('识别参数无效')
+    return jsonify(**recognize(invoice_id,data.get('retry',False)))
+
+
+@mobile_bp.post('/invoices/<int:invoice_id>/confirm')
+@limiter.limit('20/minute')
+def mobile_confirm(invoice_id):
+    from tools.reimbursement.mobile_recognition import confirm
+    return jsonify(success=True,**confirm(invoice_id,request.get_json(silent=True)))
 
 
 def invoice_data(invoice):
