@@ -53,3 +53,5 @@ Golden Rule延续：只写隔离恢复库，无生产网站影响；复用真实
 Golden Rule：短维护影响已有网站，已获用户部署授权；共享备份/锁/Git能力，不改变业务架构；无新资源/依赖成本；固定SHA单命令且失败脱敏，避免粘贴密钥；按现有systemd/PostgreSQL事实源发布，领域工件不扩展为新CD系统。测试校验故障顺序、022权限及真实PG升级；独立评审、CI及release PR后才给操作者生产命令。后续启用需服务器本机填AppSecret并核对文件对服务用户可读，真机验收独立完成。
 
 2026-10-29正式后端结果：操作者反馈be56a7a/f5、MOBILE_DEPLOY_OK、service active/HTTPS OK/mobile disabled，最终备份已完成；AppSecret已在服务器填写且入口关闭。v0.9.48标记已部署的后端来源，PR108已回流develop。本阶段完成后端发布，后续是配置启用、真实微信code换身份、预览码与账号绑定码的双阶段真机验收；备案/微信审核尚未报告通过。
+
+随后已完成启用：配置检查发现服务器AppID不匹配，操作者修正为项目AppID后确认active、health200、mobile401。独立公网确认401/no-store/no Set-Cookie。无密钥或绑定凭据输出；下一步真实手机扫码绑定及原件上传，不将401入口就绪当作微信认证成功。
