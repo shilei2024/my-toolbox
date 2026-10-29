@@ -77,6 +77,12 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 
 原件仍本地 + 数据库 BLOB，尚未迁移 COS。大量手机上传前需要测量存储增长和恢复时长。详见[契约](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)、[发布手册](../deployment/invoice-retention-rollout.md)。小程序通过下述独立鉴权边界接入，不把网站会话接口直接开放给微信身份。
 
-## 微信轻量录入边界（候选）
+## 微信轻量录入边界（0.9.48基础能力）
 
 新增原生客户端 `apps/invoice-miniprogram` 通过Bearer专用 `/api/mobile` 调用现有报销业务。同一网站User/owner和原件BLOB，不直接写DB；网站资料页经密码/CSRF建立绑定，auth域管理外部身份、挑战、可撤销会话和审计。手机上传的原件、票据、幂等凭证、用量原子提交。手机不识别金额、不改变公里数；桌面继续确认口径、ZIP、分摊、Excel和打印。f5迁移兼容e4数据，开关默认关闭；[ADR-0041](../adr/0041-wechat-mobile-invoice-upload.md)和[API](../api/wechat-invoice-upload.md)为契约来源，真机/审核完成前不声称上线。
+
+2026-10-29操作者已确认基础绑定、上传、网站同步成功，手机入口已人工启用，微信备案/正式审核尚未完成。以上“不识别”是0.9.48边界，下述新增能力仍待发布。
+
+## 手机识别确认与派车单（新候选）
+
+共享`recognize_original`提取既有OCR链，网站旧接口与手机均复用；`mobile_recognition`负责原件摘要草稿缓存、并发抑制、用量、明确确认及乐观快照，草稿不写发票。`mobile_dispatch`只修改现有vehicle明细，保留隐藏来源/ID并保护已分摊里程链；仪表盘仍读同一_summary。四个原生tab的context仅共享本人当期选择与未保存状态，登录仍属auth域。无新增表或迁移；新字段/约束、生产影响、成本与恢复边界见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)和[发布手册](../deployment/mobile-reimbursement-entry-rollout.md)。

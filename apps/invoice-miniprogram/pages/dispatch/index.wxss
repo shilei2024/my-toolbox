@@ -1,0 +1,10 @@
+.subtitle {
+  margin: 16rpx 0 30rpx;
+}
+.input {
+  margin-top: 10rpx;
+  margin-bottom: 22rpx;
+}
+button[size="mini"] {
+  margin: 16rpx 16rpx 0 0;
+}

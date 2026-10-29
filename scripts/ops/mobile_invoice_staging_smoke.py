@@ -113,6 +113,46 @@ def exercise(app):
         require(ReimbursementInvoice.query.filter_by(owner_type='user',owner_id=str(user_id)).count()==2,'duplicate-invoice')
         require(UsageLog.query.filter_by(user_id=user_id,tool_id='reimbursement',status='success').count()==2,'retry-charged-again')
         require(MobileSession.query.filter_by(user_id=user_id,token_hash=token).count()==0,'token-stored-in-plaintext')
+    # Exercise the new entry flow on synthetic data only. Mocking the provider
+    # verifies integration, never the accuracy of real images or paid OCR.
+    ordinary_id=ordinary.json['invoice']['id']
+    detail_path=f'/api/mobile/invoices/{ordinary_id}'
+    detail=call(mobile,'get',detail_path,headers=headers).json
+    with patch('tools.reimbursement.recognize_original',return_value=({'invoice_number':'stage-001',
+            'seller_name':'合成测试商家','invoice_date':'2026-06-02','amount_excluding_tax':'100',
+            'tax_amount':'6','total_amount':'106'},'synthetic')) as provider:
+        draft=call(mobile,'post',detail_path+'/recognize',headers=headers,json={}).json
+        require(draft['success'],'recognition-draft-missing')
+        require(call(mobile,'post',detail_path+'/recognize',headers=headers,json={}).json['cached'],'draft-not-cached')
+        require(provider.call_count==1,'duplicate-ocr-call')
+    require(call(web,'get',f'/tools/reimbursement/api/summary/{period}').json['summary']==after['summary'],'draft-changed-summary')
+    refs=call(mobile,'get','/api/mobile/bootstrap',headers=headers).json
+    values={**draft['draft'],'confirmed':True,'snapshot':detail['snapshot'],'inclusion_policy':'expense',
+        'category_id':next(c['id'] for c in refs['categories'] if c['name']=='办公费'),
+        'product_line_id':refs['product_lines'][0]['id']}
+    confirmed=call(mobile,'post',detail_path+'/confirm',headers=headers,json=values).json
+    require(confirmed['invoice']['amount_confirmed'],'not-confirmed')
+    call(mobile,'post',detail_path+'/confirm',409,headers=headers,json=values)
+    dispatch_path=f'/api/mobile/dispatch/{period}'
+    state=call(mobile,'get',dispatch_path,headers=headers).json
+    rows=state['rows']+[{'id':None,'date':'2026-06-02','from_location':'测试起点','to_location':'测试终点',
+        'contact':'合成联系人','km_total':'20','toll_fee':'5','parking_fee':'2','product_line':refs['product_lines'][0]['name']}]
+    saved=call(mobile,'put',dispatch_path,headers=headers,json={'snapshot':state['snapshot'],'rows':rows}).json
+    require(len(saved['rows'])==2,'vehicle-save-missing')
+    call(mobile,'put',dispatch_path,409,headers=headers,json={'snapshot':state['snapshot'],'rows':[]})
+    dashboard=call(mobile,'get',f'/api/mobile/dashboard/{period}',headers=headers).json
+    site=call(web,'get',f'/tools/reimbursement/api/summary/{period}').json
+    require(float(dashboard['total_amount'])==site['summary']['total_amount'],'dashboard-summary-mismatch')
+    require(float(dashboard['km_total'])==30,'actual-mileage-changed')
+    exported=call(web,'get',f'/tools/reimbursement/api/export/details/{period}')
+    import xlrd
+    book=xlrd.open_workbook(file_contents=exported.data)
+    require(any('测试起点' in str(sheet.cell_value(r,c)) for sheet in book.sheets()
+        for r in range(sheet.nrows) for c in range(sheet.ncols)),'dispatch-not-in-excel')
+    call(other,'get',detail_path,404,headers=other_headers)
+    call(other,'get',dispatch_path,404,headers=other_headers)
+    call(other,'get',f'/api/mobile/dashboard/{period}',404,headers=other_headers)
+    print('MOBILE_ENTRY_SMOKE_OK: draft, cache, confirm, stale-write, dispatch, dashboard, Excel, isolation')
     identity=call(web,'get','/auth/mobile/bindings').json['bindings'][0]['id']
     call(web,'delete',f'/auth/mobile/bindings/{identity}',json={'password':password})
     call(mobile,'get','/api/mobile/bootstrap',401,headers=headers)
