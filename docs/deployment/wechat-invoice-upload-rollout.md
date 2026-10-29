@@ -57,6 +57,10 @@ sudo -u postgres psql -X --set=ON_ERROR_STOP=1 --host=/var/run/postgresql --port
 
 ### 正式发布边界
 
+操作者已反馈MOBILE_MIGRATION_REHEARSAL_OK。接续用 `scripts/ops/mobile_invoice_staging_smoke.py` 对同一f5恢复库执行真实API/原件/网站同步验收：候选归档不能含.env，进程无监听、不导入生产app/config；只有微信换身份步骤被合成身份替代，不连接微信、不使用真实密钥。向恢复库新增随机测试用户及其工具授权，验证绑定、上传/原键重试只计一次、费用/公里数不变、跨期留存、普通票待确认、原件完整、Cookie/Bearer隔离、跨用户和解绑撤销。旧用户/票据/含BLOB原件行指纹必须不变。成功标记MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK。不能把此验收称为真机或真实微信登录完成。
+
+从批准候选用git archive展开到全新的postgres专用0700目录（不复制生产.env），借用主站虚拟环境解释器、sudo -u postgres通过stdin运行该脚本，形式与网站的恢复库业务验收相同。固定候选SHA和精确命令由协作在评审/CI通过后提供；不切换生产工作树或重启服务。失败先诊断，不绕过固定库/f5版本保护重跑迁移SQL。
+
 发布提交确定后由协作提供固定SHA命令；流程与网站相同：保留本地Caddy修改/备份，独立审查、CI、隔离恢复库迁移与业务验收，集成到develop再release PR到main。主站更新使用现有systemd，不让手机PR直接覆盖生产。
 
 f5迁移从e4增加身份/挑战/会话/审计及上传幂等表、附件可空摘要和owner摘要唯一约束。历史NULL重复原件保留。生产先开关关闭、备份、正常Alembic upgrade到f5a6b7c8d9e0、重启并验证网站，再在服务器本机受限配置编辑器添加：

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from flask import Flask
 from sqlalchemy import event
 from extensions import csrf, db, limiter, login_manager
-from models import ReimbursementAttachment, ReimbursementInvoice, UsageLog, User, utcnow
+from models import ReimbursementAttachment, ReimbursementInvoice, UsageLog, User, utcnow, Tool, UserToolGrant
 from auth.mobile_models import BindingChallenge, ExternalIdentity, MobileSession
 from auth.mobile_routes import binding_bp, mobile_bp
 from tools.reimbursement import tool_bp
@@ -32,10 +32,14 @@ class MobileInvoiceTests(unittest.TestCase):
         self.app.register_blueprint(tool_bp, url_prefix='/tools/reimbursement')
         with self.app.app_context():
             db.create_all()
+            db.session.add(Tool(id='reimbursement',name='报销助手',route='/tools/reimbursement',blueprint_module='tools.reimbursement',required_plan='private'))
+            db.session.flush()
             for index in range(2):
                 user = User(email=f'mobile{index}@example.test')
                 user.set_password('test-password')
                 db.session.add(user)
+                db.session.flush()
+                db.session.add(UserToolGrant(user_id=user.id,tool_id='reimbursement'))
             db.session.commit()
         self.web = self.app.test_client()
         with self.web.session_transaction() as session:
@@ -50,6 +54,17 @@ class MobileInvoiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json['qr_image'].startswith('data:image/png;base64,'))
         return response.json['binding_code']
+
+    def test_revoked_tool_grant_blocks_mobile_data_but_allows_logout(self):
+        headers=self.login()
+        invoice=self.upload(headers).json['invoice']
+        with self.app.app_context():
+            db.session.delete(db.session.get(UserToolGrant,{'user_id':1,'tool_id':'reimbursement'}));db.session.commit()
+        self.assertEqual(self.mobile.get('/api/mobile/bootstrap',headers=headers).status_code,403)
+        self.assertEqual(self.mobile.get(invoice['file_endpoint'],headers=headers).status_code,403)
+        self.assertEqual(self.upload(headers,key='revoked-upload-key-0001').status_code,403)
+        self.assertEqual(self.web.post('/auth/mobile/challenge',json={'password':'test-password'}).status_code,403)
+        self.assertEqual(self.mobile.post('/api/mobile/logout',headers=headers).status_code,200)
 
     def login(self, binding=True, subject='subject-a'):
         data={'code':'temporary-code'}

@@ -17,6 +17,10 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def test_operator_business_smoke_against_postgres(self):
+        from scripts.ops.mobile_invoice_staging_smoke import exercise
+        exercise(self.app)
+
     def setUp(self):
         url = make_url(os.environ['MOBILE_TEST_DATABASE_URL'])
         if url.host not in {'127.0.0.1', 'localhost'} or not re.fullmatch(r'(?:mytoolbox_mobile_test_[a-z0-9_]+|mindfulpenpal_ci)', url.database or ''):

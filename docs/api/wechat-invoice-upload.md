@@ -18,6 +18,8 @@
 
 仅 `Authorization: Bearer <access_token>`，拒绝任何Cookie；不接受owner_id；不颁发网站Cookie。只该蓝图豁免CSRF；全部响应private/no-store。未开启/配置不完整404，失效凭据401。登录限10次/分钟；上传20次/分钟且受网站报销用量限制。
 
+手机业务API与网站报销助手共用private工具授权：管理员或明确UserToolGrant方可读写，否则403；上传等用户行锁后再次检查。网站生成绑定码也需此授权。授权撤销后不能借已有手机会话访问原件或上传；账户登录/退出、查看绑定/解绑仍可用，便于清理会话。绑定本身不授予工具权限。
+
 | 方法/路径 | 请求 | 响应 |
 | --- | --- | --- |
 | POST `/session` | `{code,binding_code?}`；code为wx.login临时code | `{success,access_token,expires_at,display_name}`；未绑定428，绑定冲突409，微信换码异常503 |

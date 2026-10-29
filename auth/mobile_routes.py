@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from extensions import csrf, db, limiter, login_manager
 from models import ReimbursementAttachment, ReimbursementInvoice, ReimbursementPeriod, User, utcnow
 from auth.decorators import commit_usage, remaining_for
+from auth.tool_access import can_access_private_tool
 from . import mobile_service as service
 from .mobile_models import ExternalIdentity
 
@@ -41,6 +42,8 @@ def mobile_guard():
         return jsonify(error="文件大小不能超过 20MB"), 413
     if request.endpoint != "mobile_api.mobile_login" and (not current_user.is_authenticated or not hasattr(g, "mobile_session")):
         return jsonify(error="登录已失效，请重新登录"), 401
+    if request.endpoint not in {"mobile_api.mobile_login", "mobile_api.mobile_logout"} and not can_access_private_tool("reimbursement"):
+        return jsonify(error="你的账号尚未获得报销助手的使用权限，请在网站联系管理员授权。"), 403
 
 
 @binding_bp.before_request
@@ -92,6 +95,8 @@ def require_password():
 @binding_bp.post("/challenge")
 @limiter.limit("5/minute")
 def binding_challenge():
+    if not can_access_private_tool("reimbursement"):
+        raise service.MobileError("你的账号尚未获得报销助手的使用权限", 403)
     require_password()
     token = service.create_challenge(current_user.id)
     import base64
@@ -205,6 +210,8 @@ def mobile_upload():
     User.query.filter_by(id=user_id).with_for_update().one()
     # Authentication and quota must be rechecked after waiting for the user lock.
     db.session.expire_all()
+    if not can_access_private_tool("reimbursement"):
+        raise service.MobileError("报销助手使用权限已撤销", 403)
     if not service.authenticate(request.headers.get("Authorization", "")[7:]):
         raise service.MobileError("登录已失效，请重新登录", 401)
     receipt = UploadReceipt.query.filter_by(user_id=user_id, idempotency_key=key).first()
