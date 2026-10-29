@@ -1,0 +1,7 @@
+{
+  "appid": "wxe79848a64a839db8",
+  "projectname": "invoice-assistant",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "setting": {"es6": true, "enhance": true, "minified": true, "urlCheck": true}
+}

@@ -4,6 +4,7 @@
 
 ## 平台部署标准
 
+- [微信票据助手开发者工具、真机与上线手册](wechat-invoice-upload-rollout.md)
 - [管理日志中国标准时间校准发布手册](log-timestamp-timezone-fix.md)
 - [产品线 79 更名与发票 OCR 提速发布手册](reimbursement-ocr-rename-rollout.md)
 - [报销客户关联与曜石主题更新发布手册](reimbursement-customer-link-rollout.md)

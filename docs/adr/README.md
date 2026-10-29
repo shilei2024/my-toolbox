@@ -48,3 +48,4 @@
 | [0031](0031-customer-project-saved-views.md) | 客户项目个人与组织筛选视图边界 |
 
 - [ADR-0040：票据留存、打印与费用口径分离](0040-invoice-retention-and-accounting.md)。
+- [ADR-0041：微信轻量录入复用平台身份及报销事务](0041-wechat-mobile-invoice-upload.md)。

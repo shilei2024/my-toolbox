@@ -380,59 +380,31 @@ def index():
 @require_usage("reimbursement")
 def upload():
     """Persist an invoice attachment and return original plus preview URLs."""
-    f = request.files.get("file")
-    if not f or f.filename == "":
-        return jsonify(error="请选择文件"), 400
-
-    ext = Path(f.filename).suffix.lower()
-    allowed = {".jpg", ".jpeg", ".png", ".pdf"}
-    if ext not in allowed:
-        return jsonify(error=f"不支持的文件格式：{ext}"), 400
-
-    max_file_size = 20 * 1024 * 1024
-    f.stream.seek(0, os.SEEK_END)
-    file_size = f.stream.tell()
-    f.stream.seek(0)
-    if file_size > max_file_size:
-        return jsonify(error="文件大小不能超过 20MB"), 413
-
-    # 保存到 uploads 目录
+    from sqlalchemy.exc import IntegrityError
+    from .attachments import read_original, persist_original
+    try:
+        original = read_original(request.files.get("file"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 413 if "20MB" in str(exc) else 400
+    owner_type, owner_id = _rb_owner()
+    try:
+        attachment, created = persist_original(original, owner_type, owner_id)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify(error="文件正在保存，请重试"), 409
+    safe_name = attachment.stored_name
+    file_id, ext = Path(safe_name).stem, Path(safe_name).suffix
+    if not created:
+        url = f"/tools/reimbursement/preview/{safe_name}"
+        return jsonify(success=True, duplicate=True, file_id=file_id, filename=safe_name,
+            original_url=url, full_url=url, preview_url=url, original_name=attachment.original_name,
+            size=attachment.file_size)
     upload_dir = Path(current_app.config["UPLOAD_DIR"]) / "reimbursement"
     upload_dir.mkdir(parents=True, exist_ok=True)
-
-    file_id = uuid.uuid4().hex[:12]
-    safe_name = f"{file_id}{ext}"
     filepath = upload_dir / safe_name
-    # 一次读取即落盘 + 落库：避免先 save() 再 read_bytes() 多读一遍磁盘。
-    raw_bytes = f.stream.read()
-    valid_signature = (
-        ext == ".pdf" and raw_bytes.startswith(b"%PDF-")
-        or ext == ".png" and raw_bytes.startswith(b"\x89PNG\r\n\x1a\n")
-        or ext in {".jpg", ".jpeg"} and raw_bytes.startswith(b"\xff\xd8\xff")
-    )
-    if not valid_signature:
-        return jsonify(error="文件内容与格式不匹配，请选择有效的 PDF、PNG 或 JPG 原件"), 400
-    owner_type, owner_id = _rb_owner()
-    duplicate = ReimbursementAttachment.query.filter_by(owner_type=owner_type, owner_id=owner_id,
-        file_size=len(raw_bytes), content=raw_bytes).first()
-    if duplicate:
-        url = f"/tools/reimbursement/preview/{duplicate.stored_name}"
-        return jsonify(success=True, duplicate=True, file_id=duplicate.stored_name.split(".")[0], filename=duplicate.stored_name,
-            original_url=url, full_url=url, preview_url=url, original_name=duplicate.original_name,
-            size=duplicate.file_size)
-    filepath.write_bytes(raw_bytes)
-    owner_type, owner_id = _rb_owner()
-    attachment = ReimbursementAttachment(
-        owner_type=owner_type,
-        owner_id=owner_id,
-        stored_name=safe_name,
-        original_name=Path(f.filename).name,
-        mime_type=f.mimetype or "application/octet-stream",
-        file_size=len(raw_bytes),
-        content=raw_bytes,
-    )
-    db.session.add(attachment)
-    db.session.commit()
+    filepath.write_bytes(original.data)
+    raw_bytes = original.data
 
     # PDF 只渲染一次 200px 缩略图供列表使用。此前还会额外渲染 1600px 预览图
     # 并写盘，但前端一律用原件 iframe 展示，那份渲染是纯耗时（扫描版 PDF 尤甚）。
@@ -480,7 +452,7 @@ def upload():
         success=True,
         file_id=file_id,
         filename=safe_name,
-        original_name=f.filename,
+        original_name=original.name,
         original_url=f"/tools/reimbursement/preview/{safe_name}",
         preview_url=f"/tools/reimbursement/preview/{preview_filename}",
         full_url=f"/tools/reimbursement/preview/{full_preview_filename}",

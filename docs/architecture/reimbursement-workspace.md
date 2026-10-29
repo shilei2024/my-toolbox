@@ -75,4 +75,8 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 
 仪表盘、周期卡片、费用统计、封面和分类表共用明确口径。print_selected 仅控制打印，不删除电子件。留存票据不生成应酬/出差关联明细。提取页金额为人工确认，报销弹窗保留原有 OCR；没有新增批量 OCR 成本。上传复用同 owner 同内容原件，删除共享引用时保留附件。
 
-原件仍本地 + 数据库 BLOB，尚未迁移 COS。大量手机上传前需要测量存储增长和恢复时长。详见[契约](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)、[发布手册](../deployment/invoice-retention-rollout.md)。小程序尚未实现，不能把网站会话接口直接开放给微信身份。
+原件仍本地 + 数据库 BLOB，尚未迁移 COS。大量手机上传前需要测量存储增长和恢复时长。详见[契约](../api/invoice-retention.md)、[ADR-0040](../adr/0040-invoice-retention-and-accounting.md)、[发布手册](../deployment/invoice-retention-rollout.md)。小程序通过下述独立鉴权边界接入，不把网站会话接口直接开放给微信身份。
+
+## 微信轻量录入边界（候选）
+
+新增原生客户端 `apps/invoice-miniprogram` 通过Bearer专用 `/api/mobile` 调用现有报销业务。同一网站User/owner和原件BLOB，不直接写DB；网站资料页经密码/CSRF建立绑定，auth域管理外部身份、挑战、可撤销会话和审计。手机上传的原件、票据、幂等凭证、用量原子提交。手机不识别金额、不改变公里数；桌面继续确认口径、ZIP、分摊、Excel和打印。f5迁移兼容e4数据，开关默认关闭；[ADR-0041](../adr/0041-wechat-mobile-invoice-upload.md)和[API](../api/wechat-invoice-upload.md)为契约来源，真机/审核完成前不声称上线。

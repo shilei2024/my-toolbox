@@ -1,6 +1,6 @@
 # 微信轻量录入入口：前置准备和完整 Codex 提示词
 
-状态：待开发，不包含在本次网站端留存功能交付中。不要把文档或界面设计当作已可登录的小程序。
+状态：本提示词的原生MVP已在独立分支实现，未混入网站留存发布；最新事实见[实施计划](wechat-invoice-upload-plan.md)、[API](../api/wechat-invoice-upload.md)、[上线手册](../deployment/wechat-invoice-upload-rollout.md)。真实微信登录、真机、审核及发布仍待验证，不将代码完成视为小程序上线。
 
 ## 运营者先准备
 

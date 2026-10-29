@@ -433,6 +433,7 @@ class ReimbursementAttachment(db.Model):
     __table_args__ = (
         Index("ix_rb_attachment_owner", "owner_type", "owner_id"),
         UniqueConstraint("stored_name", name="uq_rb_attachment_stored_name"),
+        UniqueConstraint("owner_type", "owner_id", "content_sha256", name="uq_rb_attachment_content"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -443,6 +444,7 @@ class ReimbursementAttachment(db.Model):
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False, default="application/octet-stream")
     file_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
