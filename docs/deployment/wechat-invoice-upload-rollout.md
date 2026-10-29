@@ -63,6 +63,10 @@ sudo -u postgres psql -X --set=ON_ERROR_STOP=1 --host=/var/run/postgresql --port
 
 发布提交确定后由协作提供固定SHA命令；流程与网站相同：保留本地Caddy修改/备份，独立审查、CI、隔离恢复库迁移与业务验收，集成到develop再release PR到main。主站更新使用现有systemd，不让手机PR直接覆盖生产。
 
+2026-10-29操作者已反馈恢复库MOBILE_API_SMOKE_OK/MOBILE_HISTORY_OK/MOBILE_STAGING_SMOKE_OK，开发工具首页显示正常、后台隐私指引已保存。后端0.9.48发布工件为mobile_invoice_release.py，连同invoice_release.py、invoice_backup.py从同一批准SHA提取到root专用0700目录，以主站venv解释器执行。只支持已知生产6239408/e4，后续Git目标为已评审main且业务与ba06c23一致。仅Git子进程022，父进程077；使用同一发布互斥锁，停写最终备份后快进、核对.env/Caddy未变，逐项sudo切换服务用户验证新代码可读，再正常Alembic升级f5。升级前后旧用户、所有票据字段及原件BLOB指纹保持一致，不把留存票重置为expense。
+
+脚本要求运行service环境、本机.env、执行环境三处手机开关均关闭；不创建真实绑定、不调用微信、不改密钥。完成后验证主站本机/公网health200及手机bootstrap明确404“手机录入暂未开放”、no-store且无Set-Cookie。成功MOBILE_DEPLOY_OK，输出SHA/f5/受限备份位置；失败MOBILE_DEPLOY_FAILED及root私有日志，保持停写，不重跑或上传原日志。备份失败且旧SHA/工作树/配置仍一致才尝试启动旧服务；新代码失败不reset/downgrade。当前发布授权来自既有用户指令，实际执行由操作者完成，不重复索取批准。最新CI、独立复核和固定SHA通过后再提供实际命令。
+
 f5迁移从e4增加身份/挑战/会话/审计及上传幂等表、附件可空摘要和owner摘要唯一约束。历史NULL重复原件保留。生产先开关关闭、备份、正常Alembic upgrade到f5a6b7c8d9e0、重启并验证网站，再在服务器本机受限配置编辑器添加：
 
 ```dotenv
@@ -71,7 +75,7 @@ WECHAT_MINI_APP_ID=wxe79848a64a839db8
 WECHAT_MINI_APP_SECRET=
 ```
 
-`WECHAT_MINI_APP_SECRET`值仅在服务器本机填入，禁止复制到聊天/仓库/开发者工具。保留原有.env内容和权限0600，确认systemd实际加载来源；不要用shell命令参数传密钥、不要输出env或配置全文。后台和服务器准备好后改开关true，重启mytoolbox。成功：healthz正常、网站个人资料出现绑定入口；无凭据请求/api/mobile/bootstrap返回401，未开启时404，两者均无Cookie。缺密钥仍404，应查配置来源而非放宽鉴权。若401响应带网站会话Cookie，停止开放并排查代理/应用钩子。
+`WECHAT_MINI_APP_SECRET`值仅在服务器本机填入，禁止复制到聊天/仓库/开发者工具。保留原有.env所有者及内容，限制其他用户读取，并在重启前用sudo -u服务用户test -r确认应用仍可读取（不要误把www-data需要读的文件改成root独占0600）。确认systemd实际加载来源；不要用shell命令参数传密钥、不要输出env或配置全文。后台和服务器准备好后改开关true，重启mytoolbox。成功：healthz正常、网站个人资料出现绑定入口；无凭据请求/api/mobile/bootstrap返回401，未开启时404，两者均无Cookie。缺密钥仍404，应查配置来源而非放宽鉴权。若401响应带网站会话Cookie，停止开放并排查代理/应用钩子。
 
 ## 体验版与真机验收
 

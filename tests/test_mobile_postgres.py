@@ -161,6 +161,13 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
             with target_engine.connect() as conn:
                 self.assertEqual(conn.exec_driver_sql('SELECT version_num FROM public.alembic_version').scalar(),'f5a6b7c8d9e0')
                 self.assertEqual(conn.exec_driver_sql('SELECT inclusion_policy,occurrence_month,total_amount,print_selected FROM public.reimbursement_invoices').one(),('retain','2026-08',__import__('decimal').Decimal('88.12'),False))
+            # Exercise the exact production upgrade function, keeping retain
+            # policy and BLOBs, instead of relying only on the SQL rehearsal.
+            with target_engine.begin() as conn:
+                revision.op=Operations(MigrationContext.configure(conn));revision.downgrade()
+                conn.exec_driver_sql("UPDATE public.alembic_version SET version_num='e4f5a6b7c8d9'")
+            from scripts.ops.mobile_invoice_release import migrate
+            migrate(root,target)
         finally:
             if target_engine is not None:
                 target_engine.dispose()
