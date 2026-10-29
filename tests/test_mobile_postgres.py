@@ -217,6 +217,15 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 conn.exec_driver_sql("UPDATE public.alembic_version SET version_num='e4f5a6b7c8d9'")
             from scripts.ops.mobile_invoice_release import migrate
             migrate(root,target)
+            # The incremental release must only read f5 and detect a modified
+            # historical invoice; run the exact fingerprint against real PG.
+            from scripts.ops.mobile_entry_release import database_state
+            release_url=target.render_as_string(hide_password=False)
+            before=database_state(release_url)
+            self.assertEqual(database_state(release_url),before)
+            with target_engine.begin() as conn:
+                conn.exec_driver_sql("UPDATE public.reimbursement_invoices SET remarks='synthetic release check'")
+            self.assertNotEqual(database_state(release_url),before)
         finally:
             if target_engine is not None:
                 target_engine.dispose()
