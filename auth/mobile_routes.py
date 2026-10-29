@@ -141,15 +141,41 @@ def mobile_logout():
 
 @mobile_bp.get("/bootstrap")
 def mobile_bootstrap():
-    from tools.reimbursement.manager import _seed_offices,_seed_categories,_seed_product_lines
+    from tools.reimbursement.manager import (_seed_offices, _seed_categories, _seed_product_lines,
+        _category_dict, _product_line_dict, _customer_directory, _customer_dict,
+        _customer_creation_membership, CUSTOMER_LEVELS)
     owner_id = str(current_user.id)
     offices = _seed_offices("user", owner_id)
     periods = ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id).order_by(ReimbursementPeriod.start_year.desc(), ReimbursementPeriod.start_month.desc()).all()
     return jsonify(display_name=current_user.nickname or "网站账号",
         periods=[{"id":p.id, "name":p.name, "is_active":p.is_active} for p in periods],
         offices=[{"id":o.id, "name":o.name} for o in offices],
-        categories=[{'id':c.id,'name':c.name} for c in _seed_categories('user',owner_id)],
-        product_lines=[{'id':p.id,'name':p.name} for p in _seed_product_lines('user',owner_id)])
+        categories=[_category_dict(c) for c in _seed_categories('user',owner_id)],
+        product_lines=[_product_line_dict(p) for p in _seed_product_lines('user',owner_id)],
+        customers=[_customer_dict(c) for c in _customer_directory()],
+        customer_levels=list(CUSTOMER_LEVELS),
+        customer_creation_enabled=_customer_creation_membership() is not None)
+
+
+@mobile_bp.post('/customers')
+@limiter.limit('10/minute')
+def mobile_customer_create():
+    from tools.reimbursement.manager import _customer_creation_membership, _customer_dict
+    from tools.reimbursement.mobile_recognition import reauthorize
+    from customer_projects.services.projects import create_customer, DomainError
+    data=request.get_json(silent=True)
+    if not isinstance(data,dict) or set(data)-{'name','short_name','grade'}:
+        raise service.MobileError('客户参数无效')
+    User.query.filter_by(id=current_user.id).with_for_update().one()
+    db.session.expire_all(); reauthorize()
+    membership=_customer_creation_membership()
+    if membership is None: raise service.MobileError('当前账号无权录入客户，请联系组织管理员',403)
+    try:
+        customer=create_customer(data,membership)
+        db.session.commit()
+    except DomainError as exc:
+        raise service.MobileError(exc.message) from None
+    return jsonify(success=True,customer=_customer_dict(customer)),201
 
 
 @mobile_bp.get('/invoices/<int:invoice_id>')
