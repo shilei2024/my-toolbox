@@ -86,3 +86,7 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 ## 手机识别确认与派车单（新候选）
 
 共享`recognize_original`提取既有OCR链，网站旧接口与手机均复用；`mobile_recognition`负责原件摘要草稿缓存、并发抑制、用量、明确确认及乐观快照，草稿不写发票。`mobile_dispatch`只修改现有vehicle明细，保留隐藏来源/ID并保护已分摊里程链；仪表盘仍读同一_summary。四个原生tab的context仅共享本人当期选择与未保存状态，登录仍属auth域。无新增表或迁移；新字段/约束、生产影响、成本与恢复边界见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)和[发布手册](../deployment/mobile-reimbursement-entry-rollout.md)。
+
+## 2026-10-30 移动录入字段补齐（候选）
+
+手机目录及客户创建复用网站组织客户服务和权限，确认表单支持客户、等级及完整关联明细，产品代码只读。无迁移；新字段兼容旧请求，显式关联明细仍受快照保护。详见[字段对齐](../product/mobile-form-parity.md)及[API](../api/wechat-invoice-upload.md)。

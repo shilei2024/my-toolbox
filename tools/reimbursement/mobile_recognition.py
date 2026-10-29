@@ -19,6 +19,10 @@ from .models import ReimbursementAudit
 from .retention import money
 
 FIELDS = {
+    "customer_id",
+    "customer_level",
+    "linked_detail",
+    "amount_confirmed",
     "period_id",
     "office_id",
     "category_id",
@@ -222,7 +226,7 @@ def confirm(invoice_id, payload):
     values = {
         **before,
         **{k: v for k, v in payload.items() if k in FIELDS},
-        "amount_confirmed": True,
+        "amount_confirmed": payload.get("amount_confirmed", True),
     }
     try:
         for key in ("period_id", "office_id", "category_id", "product_line_id"):
@@ -250,11 +254,10 @@ def confirm(invoice_id, payload):
         ]:
             if not isinstance(values.get(key), str) or len(values[key]) > limit:
                 raise ValueError("文本字段长度或格式无效")
-        if not values["invoice_number"].strip() or not values["vendor"].strip():
-            raise ValueError("请补齐发票号码及商家")
-        date.fromisoformat(str(values.get("invoice_date") or ""))
+        if values.get("invoice_date"):
+            date.fromisoformat(str(values["invoice_date"]))
         amounts = [
-            money(values.get(k)) for k in ("amount", "tax_amount", "total_amount")
+            money(values.get(k) or 0) for k in ("amount", "tax_amount", "total_amount")
         ]
         if amounts[0] + amounts[1] != amounts[2]:
             raise ValueError("未税金额加税额必须等于价税合计")
@@ -265,9 +268,8 @@ def confirm(invoice_id, payload):
         error = save_invoice(row, values)
         if error:
             raise ValueError(error)
-        # The mobile form does not edit customer assignments. In particular,
-        # an inaccessible historical customer must not be silently cleared.
-        row.customer_id, row.customer_level = retained_customer
+        if "customer_id" not in payload and "customer_level" not in payload:
+            row.customer_id, row.customer_level = retained_customer
     except (ValueError, TypeError) as exc:
         raise service.MobileError(
             str(exc)
@@ -277,9 +279,56 @@ def confirm(invoice_id, payload):
         ) from None
     linked = dict(before.get("linked_detail") or {})
     category = _owned_category(row.category_id, row.owner_type, row.owner_id)
-    if linked:
+    explicit_linked = "linked_detail" in payload
+    if explicit_linked:
+        incoming = payload["linked_detail"]
+        allowed = {
+            "date",
+            "category",
+            "place",
+            "participants",
+            "amount",
+            "purpose",
+            "approval",
+            "location",
+            "expense_type",
+            "customer",
+            "customer_id",
+        }
+        if incoming is not None and (
+            not isinstance(incoming, dict) or set(incoming) - allowed
+        ):
+            raise service.MobileError("关联明细字段无效")
+        linked = dict(incoming or {})
+        for key, value in linked.items():
+            if key in {"customer", "customer_id"}:
+                continue
+            if (
+                not isinstance(value, (str, int, float))
+                or isinstance(value, bool)
+                or len(str(value)) > 4000
+            ):
+                raise service.MobileError("关联明细格式或长度无效")
+            if key == "date" and value:
+                try:
+                    date.fromisoformat(str(value))
+                except ValueError:
+                    raise service.MobileError("关联明细日期无效") from None
+            if key == "amount" and value not in (None, ""):
+                try:
+                    money(value)
+                except ValueError:
+                    raise service.MobileError("关联明细金额无效") from None
+        from .manager import _owned_customer
+
+        customer = _owned_customer(row.customer_id)
+        linked["customer_id"] = customer.id if customer else None
+        linked["customer"] = customer.short_name or customer.name if customer else ""
+    if linked and not explicit_linked:
         amount_changed = money(before["total_amount"]) != money(row.total_amount)
-        date_changed = before["invoice_date"] != row.invoice_date.isoformat()
+        date_changed = before["invoice_date"] != (
+            row.invoice_date.isoformat() if row.invoice_date else ""
+        )
         if amount_changed:
             if money(linked.get("amount") or 0) != money(before["total_amount"]):
                 raise service.MobileError(
@@ -291,7 +340,7 @@ def confirm(invoice_id, payload):
                 raise service.MobileError(
                     "关联明细日期曾单独调整，请到网站核对后修改", 409
                 )
-            linked["date"] = row.invoice_date.isoformat()
+            linked["date"] = row.invoice_date.isoformat() if row.invoice_date else ""
         if linked.get("place") == before["vendor"]:
             linked["place"] = row.vendor
         if linked.get("purpose") == before["product_line"]:
@@ -301,7 +350,28 @@ def confirm(invoice_id, payload):
         ).get("name"):
             linked["expense_type"] = category.name
     _sync_invoice_aux(row, category, linked)
-    if linked:
+    from .manager import _owned_customer
+
+    if (
+        retained_customer[0]
+        and "customer_id" not in payload
+        and "customer_level" not in payload
+        and _owned_customer(retained_customer[0]) is None
+        and before.get("linked_detail")
+    ):
+        # A retired/out-of-scope customer cannot be selected in the new form.
+        # Editing unrelated fields must still preserve its historical export.
+        historical = before["linked_detail"]
+        for detail in ReimbursementAuxDetail.query.filter_by(
+            owner_type=row.owner_type, owner_id=row.owner_id, period_id=row.period_id
+        ).all():
+            value = json.loads(detail.data_json)
+            if value.get("invoice_id") == row.id:
+                for key in ("customer_id", "customer", "customer_level"):
+                    if key in historical:
+                        value[key] = historical[key]
+                detail.data_json = json.dumps(value, ensure_ascii=False)
+    if linked and not explicit_linked:
         # Shared desktop defaults fill empty dates/amounts. Preserve explicitly
         # adjusted detail values on mobile when that invoice field is unchanged.
         for detail in ReimbursementAuxDetail.query.filter_by(

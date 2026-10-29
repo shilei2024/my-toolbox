@@ -17,7 +17,17 @@
  <picker mode="date" fields="month" value="{{invoice.occurrence_month}}" data-key="occurrence_month" bindchange="input" disabled="{{busy}}"><view class="field">发生月：{{invoice.occurrence_month}} ›</view></picker>
  <picker mode="date" fields="month" value="{{invoice.settlement_month}}" data-key="settlement_month" bindchange="input" disabled="{{busy}}"><view class="field">结算月（可选）：{{invoice.settlement_month || '未填写'}} ›</view></picker>
  <view class="field">选中打印<switch checked="{{invoice.print_selected}}" data-key="print_selected" bindchange="toggle" disabled="{{busy}}"/></view>
- <view class="hint">加油票、零散过路费与账单不能直接计入费用。应酬/出差专属明细请在网站补齐。</view>
+ <view class="field">产品线代码：{{productCode || '未选择'}}</view>
+ <view class="field">网站状态：{{invoice.status_label}}</view>
+ <picker range="{{customers}}" range-key="display_name" value="{{customer_idIndex}}" data-key="customer_id" data-list="customers" bindchange="pick" disabled="{{busy}}"><view class="field">关联客户：{{customers[customer_idIndex].display_name}} ›</view></picker>
+ <picker range="{{levels}}" range-key="name" value="{{customer_levelIndex}}" data-key="customer_level" data-list="levels" bindchange="pick" disabled="{{busy || invoice.customer_id}}"><view class="field">客户等级：{{levels[customer_levelIndex].name}}{{invoice.customer_id?'（来自客户资料）':''}} ›</view></picker>
+ <button wx:if="{{customer_creation_enabled}}" bindtap="openCustomer" disabled="{{busy}}">新增客户</button>
+ <view wx:if="{{newCustomer}}"><input class="input" placeholder="客户名称（必填）" value="{{newCustomer.name}}" data-key="name" bindinput="customerInput" maxlength="255"/><input class="input" placeholder="客户简称" value="{{newCustomer.short_name}}" data-key="short_name" bindinput="customerInput" maxlength="120"/><picker range="{{levels}}" range-key="name" value="{{newGradeIndex}}" bindchange="customerGrade"><view class="field">等级：{{levels[newGradeIndex].name}} ›</view></picker><button bindtap="createCustomer" disabled="{{busy}}">保存客户并选中</button><button bindtap="cancelCustomer" disabled="{{busy}}">取消新增客户</button></view>
+ <view class="field">已核对票面/账单金额<switch checked="{{invoice.amount_confirmed}}" data-key="amount_confirmed" bindchange="toggle" disabled="{{busy}}"/></view>
+ <button size="mini" data-key="occurrence_month" bindtap="clearMonth" disabled="{{busy}}">清空发生月</button><button size="mini" data-key="settlement_month" bindtap="clearMonth" disabled="{{busy}}">清空结算月</button>
+ <view wx:if="{{linkedKind}}" class="card"><view class="section-title">{{linkedKind==='entertainment'?'关联应酬费明细':'关联出差明细'}}</view><view class="field">客户简称：{{invoice.linked_detail.customer || '未关联客户'}}</view>
+ <view wx:for="{{linkedFields}}" wx:key="key" class="edit-field"><text>{{item.name}}</text><picker wx:if="{{item.type==='date'}}" mode="date" value="{{invoice.linked_detail[item.key]}}" data-key="{{item.key}}" bindchange="linkedInput" disabled="{{busy}}"><view>{{invoice.linked_detail[item.key] || '请选择日期'}} ›</view></picker><input wx:else type="{{item.type}}" value="{{invoice.linked_detail[item.key]}}" data-key="{{item.key}}" bindinput="linkedInput" disabled="{{busy}}" maxlength="4000"/></view></view>
+ <view class="hint">客户和等级与网站共用同一客户资料。加油票、零散过路费与账单仅留存。</view>
  <view class="field">我已核对原件、金额和归属<switch checked="{{confirmed}}" bindchange="agree" disabled="{{busy}}"/></view>
  <button class="primary" bindtap="save" disabled="{{busy || !confirmed}}" loading="{{busy}}">确认并录入网站</button>
  </view></block>

@@ -29,6 +29,14 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
     def test_allocated_vehicle_preservation_on_postgres(self):
         self._dispatch_case('test_allocated_rows_keep_ids_metadata_and_reject_changes')
 
+    def test_customer_form_parity_on_postgres(self):
+        from tests.test_mobile_form_parity import FormParityTests
+        from tests.test_mobile_recognition import RecognitionTests
+        self.prepare=lambda kind='invoice':RecognitionTests.prepare(self,kind)
+        self.values=lambda headers,id,policy='review':RecognitionTests.values(self,headers,id,policy)
+        self.customer_setup=lambda:FormParityTests.customer_setup(self)
+        FormParityTests.test_customer_directory_create_permissions_and_explicit_linked_details_match_site(self)
+
     def _recognition_case(self,name):
         from tests.test_mobile_recognition import RecognitionTests
         self.prepare=lambda kind='invoice':RecognitionTests.prepare(self,kind)
