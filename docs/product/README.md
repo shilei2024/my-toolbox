@@ -4,6 +4,7 @@
 
 ## 当前文档
 
+- [发票助手小程序视觉统一](mobile-ui-design.md)：五页面排版、原生控件、间距及视觉验证边界。
 - [移动完整录入实施计划](mobile-invoice-recognition-plan.md)：首页、发票识别核对、派车单与我的四个标签，基础上传之后的待发布能力。
 
 - [微信票据录入实施计划](wechat-invoice-upload-plan.md)：原生MVP已实现，待实际微信/服务器验收。
