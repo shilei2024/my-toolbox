@@ -17,6 +17,15 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def test_customer_upload_intent_and_legacy_retry_on_postgres(self):
+        from tests.test_mobile_form_parity import FormParityTests
+        self.customer_setup=lambda:FormParityTests.customer_setup(self)
+        FormParityTests.test_new_upload_key_must_not_silently_ignore_changed_customer(self)
+
+    def test_legacy_retry_on_postgres(self):
+        from tests.test_mobile_form_parity import FormParityTests
+        FormParityTests.test_legacy_receipt_retries_without_customer_fields_still_work(self)
+
     def _dispatch_case(self, name):
         from tests.test_mobile_dispatch import DispatchTests
         self.setup_dispatch = lambda: DispatchTests.setup_dispatch(self)
@@ -225,6 +234,15 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 conn.exec_driver_sql("UPDATE public.alembic_version SET version_num='e4f5a6b7c8d9'")
             from scripts.ops.mobile_invoice_release import migrate
             migrate(root,target)
+            # The incremental release must only read f5 and detect a modified
+            # historical invoice; run the exact fingerprint against real PG.
+            from scripts.ops.mobile_entry_release import database_state
+            release_url=target.render_as_string(hide_password=False)
+            before=database_state(release_url)
+            self.assertEqual(database_state(release_url),before)
+            with target_engine.begin() as conn:
+                conn.exec_driver_sql("UPDATE public.reimbursement_invoices SET remarks='synthetic release check'")
+            self.assertNotEqual(database_state(release_url),before)
         finally:
             if target_engine is not None:
                 target_engine.dispose()

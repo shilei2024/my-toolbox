@@ -222,9 +222,13 @@ def mobile_confirm(invoice_id):
 
 
 def invoice_data(invoice):
+    from tools.reimbursement.manager import _owned_customer, _invoice_customer_level
+    customer = _owned_customer(invoice.customer_id)
     return {"id":invoice.id, "period_id":invoice.period_id, "file_name":invoice.file_name,
         "document_kind":invoice.document_kind, "inclusion_policy":invoice.inclusion_policy,
         "amount_confirmed":invoice.amount_confirmed, "occurrence_month":invoice.occurrence_month,
+        "customer":(customer.short_name or customer.name) if customer else "",
+        "customer_level":_invoice_customer_level(invoice),
         "uploaded_at":invoice.upload_date.isoformat()+"Z",
         "file_endpoint":f"/api/mobile/invoices/{invoice.id}/file" if invoice.file_url else None}
 
@@ -261,7 +265,7 @@ def mobile_upload():
     from tools.reimbursement.mobile_models import UploadReceipt
     from tools.reimbursement.retention import KINDS, month
     fields = request.form
-    if set(fields) - {"period_id", "office_id", "document_kind", "occurrence_month", "idempotency_key", "file_name"}:
+    if set(fields) - {"period_id", "office_id", "document_kind", "occurrence_month", "customer_id", "customer_level", "idempotency_key", "file_name"}:
         raise service.MobileError("上传参数无效")
     key = fields.get("idempotency_key", "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", key):
@@ -272,11 +276,15 @@ def mobile_upload():
         if kind not in KINDS:
             raise ValueError("请选择票据用途")
         occurrence = month(fields.get("occurrence_month", ""))
+        customer_id = fields.get("customer_id", "").strip()
+        customer_level = fields.get("customer_level", "").strip()
+        if len(customer_id) > 64 or len(customer_level) > 8:
+            raise ValueError("客户信息无效")
         original = read_original(request.files.get("file"), fields.get("file_name"))
     except (ValueError, TypeError) as exc:
         message = str(exc) if isinstance(exc, ValueError) and str(exc) and not str(exc).startswith("invalid literal") else "请填写有效的归属周期与办事处"
         raise service.MobileError(message, 413 if "20MB" in message else 400) from None
-    fingerprint = hashlib.sha256(json.dumps([period_id, office_id, kind, occurrence, original.sha256]).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps([period_id, office_id, kind, occurrence, customer_id, customer_level, original.sha256]).encode()).hexdigest()
     user_id = current_user.id
     User.query.filter_by(id=user_id).with_for_update().one()
     # Authentication and quota must be rechecked after waiting for the user lock.
@@ -287,7 +295,10 @@ def mobile_upload():
         raise service.MobileError("登录已失效，请重新登录", 401)
     receipt = UploadReceipt.query.filter_by(user_id=user_id, idempotency_key=key).first()
     if receipt:
-        if receipt.fingerprint != fingerprint:
+        # Pre-customer clients keep their original five-field intent on retry.
+        legacy = hashlib.sha256(json.dumps([period_id, office_id, kind, occurrence, original.sha256]).encode()).hexdigest()
+        compatible_legacy = not ({'customer_id','customer_level'} & set(fields)) and receipt.fingerprint == legacy
+        if receipt.fingerprint != fingerprint and not compatible_legacy:
             raise service.MobileError("同一上传凭证的文件或用途已改变，请重新选择文件", 409)
         invoice = db.session.get(ReimbursementInvoice, receipt.invoice_id) if receipt.invoice_id else None
         if not invoice or invoice.owner_type != "user" or invoice.owner_id != str(user_id):
@@ -299,7 +310,8 @@ def mobile_upload():
         attachment, _created = persist_original(original, "user", str(user_id))
         invoice, created = create_invoice_record({"period_id":period_id, "office_id":office_id,
             "document_kind":kind, "inclusion_policy":"review" if kind=="invoice" else "retain",
-            "occurrence_month":occurrence, "amount_confirmed":False,
+            "occurrence_month":occurrence, "customer_id":customer_id, "customer_level":customer_level,
+            "amount_confirmed":False,
             "print_selected":kind in {"invoice", "fuel"}, "file_url":"/tools/reimbursement/preview/"+attachment.stored_name,
             "file_name":original.name, "file_size":len(original.data)}, "user", str(user_id), deduplicate_file=True)
     except InvoiceConflictError as exc:
