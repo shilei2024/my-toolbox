@@ -1,4 +1,4 @@
-"""Pinned, no-migration release from the enabled 0.9.48 mobile backend.
+"""Pinned, no-migration release from the observed 0.10.0 main backend.
 
 Copy this file, invoice_release.py and invoice_backup.py from the same approved
 main SHA into a private operator directory. Run as root in /opt/mytoolbox.
@@ -23,7 +23,7 @@ except ImportError:
     import invoice_release as common
     import invoice_backup as backup
 
-SOURCE = "be56a7aca204fdff804d8ec126223180447ff7bf"
+SOURCE = "8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1"
 CANDIDATE = "87084ab003431f7b5b8a86956a323915019d9c59"
 REVISION = "f5a6b7c8d9e0"
 require = common.require
