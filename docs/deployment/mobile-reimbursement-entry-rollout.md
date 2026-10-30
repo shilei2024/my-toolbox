@@ -1,12 +1,12 @@
 # 手机完整录入与四标签工作台发布
 
-本轮为0.9.48之后的增量，基础绑定、上传、网站同步已由操作者实测。新功能仍待发布；不把合成OCR测试当实际识别效果。产品/风险见[计划](../product/mobile-invoice-recognition-plan.md)，契约见[API](../api/wechat-invoice-upload.md)，决策见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)。
+本轮为0.9.48之后的增量，基础绑定、上传、网站同步已由操作者实测。新功能仍待发布；不把合成OCR测试当实际识别效果。当前进展见[上线状态与门禁](mobile-invoice-launch-status-2026-10-30.md)；产品/风险见[计划](../product/mobile-invoice-recognition-plan.md)，契约见[API](../api/wechat-invoice-upload.md)，决策见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)。
 
 ## 发布边界及前置清单
 
-- 生产当前be56a7aca204fdff804d8ec126223180447ff7bf、f5a6b7c8d9e0、手机开关已启用。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
+- 上次经操作者确认的生产基线为be56a7aca204fdff804d8ec126223180447ff7bf、f5a6b7c8d9e0、手机开关已启用；执行本轮发布前必须重新核实实际SHA及服务状态。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
 - 检查main工作树，保留已知Caddy本机修改、.env、上传、备份，禁止reset/clean或重跑旧invoice_release/mobile_invoice_release一次性迁移工具。
-- PR到develop、独立审查、Python/PG16及全仓CI通过，再对固定候选进行恢复库验收；发布PR到main后才能部署。用户已授权部署，服务器操作仍由用户执行。
+- 当前实现已在develop；独立审查、Python/PG16及全仓CI通过后，对固定候选进行恢复库验收；发布PR到main后才能部署。用户已授权推进，服务器操作仍由操作者执行。
 - 确认当前域名/DNS/TLS与health、systemd服务身份/代码可读、PG16/f5/容量、备份恢复、监控。Redis/COS/Generation/Gallery不新增或改配置，只确认现有服务健康；本模块仍原有BLOB+磁盘。
 - 隐私指引已保存，三类合法域名已配置；个人主体备案及微信正式审核仍未完成。保留合法域名校验，AppSecret只在服务器。
 
@@ -14,13 +14,13 @@
 
 目的：在此前固定恢复库上验证新API与网站/Excel一致，保持原历史行指纹。只新建合成账号和票据，不向真实微信或OCR发送资料，无服务监听、不加载生产.env。
 
-批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。
+批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。`scripts/ops/mobile_entry_release.py` 尚不存在；恢复库验收成功也不自动授权运行旧的 `mobile_invoice_release.py`（该工具仅覆盖0.9.48固定基线）。0.10及后续生产更新须先核实当前生产SHA、工作树与配置，针对该基线另行审查固定SHA发布步骤。
 
 ```bash
 (
 set -euo pipefail
 cd /opt/mytoolbox
-git fetch origin codex/mobile-invoice-recognition
+git fetch origin develop
 candidate=CANDIDATE_SHA
 git cat-file -e "${candidate}^{commit}"
 stage_dir=$(mktemp -d /var/tmp/mytoolbox-entry-stage-XXXXXX)
