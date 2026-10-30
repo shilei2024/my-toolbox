@@ -4,7 +4,7 @@
 
 ## 发布边界及前置清单
 
-- 操作者最新只读反馈生产代码为8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1、`main`、`mytoolbox` active；运行数据库版本和本地改动仍待核实。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
+- 操作者最新只读反馈生产代码为8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1、`main`、`mytoolbox` active；运行数据库为PostgreSQL 16.14、Alembic f5a6b7c8d9e0，已跟踪改动仅既有Caddyfile。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
 - 检查main工作树，保留已知Caddy本机修改、.env、上传、备份，禁止reset/clean或重跑旧invoice_release/mobile_invoice_release一次性迁移工具。
 - 当前实现已在develop；独立审查、Python/PG16及全仓CI通过后，对固定候选进行恢复库验收；发布PR到main后才能部署。用户已授权推进，服务器操作仍由操作者执行。
 - 确认当前域名/DNS/TLS与health、systemd服务身份/代码可读、PG16/f5/容量、备份恢复、监控。Redis/COS/Generation/Gallery不新增或改配置，只确认现有服务健康；本模块仍原有BLOB+磁盘。
