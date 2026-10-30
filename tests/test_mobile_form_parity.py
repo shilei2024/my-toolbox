@@ -110,7 +110,9 @@ class FormParityTests(unittest.TestCase):
             db.session.commit()
         refreshed = self.mobile.get(f"/api/mobile/invoices/{id}", headers=headers).json
         mobile_detail = refreshed["invoice"]
-        website_detail = self.web.get("/tools/reimbursement/api/invoices").json["invoices"][0]
+        website_detail = self.web.get("/tools/reimbursement/api/invoices").json[
+            "invoices"
+        ][0]
         for detail in (mobile_detail, website_detail):
             self.assertEqual(detail["customer_level"], "AAA")
             self.assertEqual(detail["linked_detail"]["customer"], "更新简称")
@@ -172,7 +174,9 @@ class FormParityTests(unittest.TestCase):
         row = self.web.get("/tools/reimbursement/api/invoices").json["invoices"][0]
         self.assertEqual(row["customer_id"], customer)
         self.assertEqual(row["customer_level"], "AA")
-        self.assertEqual(upload("valid-customer-00001", customer, "AAA").status_code, 200)
+        self.assertEqual(
+            upload("valid-customer-00001", customer, "AAA").status_code, 200
+        )
         self.assertEqual(upload("valid-customer-00001", "", "A").status_code, 409)
 
     def test_travel_fields_and_invalid_detail_rollback(self):
@@ -285,3 +289,57 @@ class FormParityTests(unittest.TestCase):
         }
         self.assertTrue(website)
         self.assertFalse(website - FIELDS - derived)
+
+    def test_new_upload_key_must_not_silently_ignore_changed_customer(self):
+        customer, _ = self.customer_setup()
+        headers = self.login()
+
+        def upload(key, selected):
+            return self.mobile.post(
+                "/api/mobile/invoices",
+                headers=headers,
+                data={
+                    "file": (io.BytesIO(PNG), "a.png"),
+                    "period_id": str(self.period),
+                    "office_id": str(self.office),
+                    "document_kind": "fuel",
+                    "occurrence_month": "2026-06",
+                    "idempotency_key": key,
+                    "customer_id": selected,
+                },
+            )
+
+        first = upload("customer-original-key-001", customer)
+        self.assertEqual(first.status_code, 201, first.json)
+        self.assertEqual(upload("customer-same-new-key-01", customer).status_code, 200)
+        self.assertEqual(upload("customer-change-new-key01", "").status_code, 409)
+        with self.app.app_context():
+            from models import ReimbursementInvoice
+
+            self.assertEqual(ReimbursementInvoice.query.one().customer_id, customer)
+
+    def test_legacy_receipt_retries_without_customer_fields_still_work(self):
+        import hashlib
+        from tools.reimbursement.mobile_models import UploadReceipt
+
+        headers = self.login()
+        key = "legacy-upload-key-00001"
+        first = self.upload(headers, key=key)
+        self.assertEqual(first.status_code, 201)
+        with self.app.app_context():
+            receipt = UploadReceipt.query.one()
+            receipt.fingerprint = hashlib.sha256(
+                json.dumps(
+                    [
+                        self.period,
+                        self.office,
+                        "fuel",
+                        "2026-06",
+                        hashlib.sha256(PNG).hexdigest(),
+                    ]
+                ).encode()
+            ).hexdigest()
+            db.session.commit()
+        result = self.upload(headers, key=key)
+        self.assertEqual(result.status_code, 200, result.json)
+        self.assertEqual(result.json["invoice"]["id"], first.json["invoice"]["id"])

@@ -4,6 +4,7 @@ No app/config import, listener or actual WeChat call. The provider exchange is
 replaced by synthetic identities ONLY in this isolated test-client process.
 """
 import io
+import json
 import os
 from pathlib import Path
 import secrets
@@ -96,6 +97,17 @@ def exercise(app):
     retry=upload(original,key)
     require(retry.status_code==200 and retry.json['invoice']['id']==invoice['id'],'retry-not-idempotent')
     require(upload(original,key,'toll').status_code==409,'changed-intent-accepted')
+    # A pre-customer client retains its original receipt format after upgrade.
+    import hashlib
+    from tools.reimbursement.mobile_models import UploadReceipt
+    with app.app_context():
+        legacy=UploadReceipt.query.filter_by(user_id=user_id,idempotency_key=key).one()
+        legacy.fingerprint=hashlib.sha256(json.dumps([period,office,'fuel','2026-08',hashlib.sha256(original).hexdigest()]).encode()).hexdigest()
+        db.session.commit()
+    legacy_retry=mobile.post('/api/mobile/invoices',headers=headers,data={
+        'file':(io.BytesIO(original),'legacy.png'),'period_id':str(period),'office_id':str(office),
+        'document_kind':'fuel','occurrence_month':'2026-08','idempotency_key':key})
+    require(legacy_retry.status_code==200 and legacy_retry.json['invoice']['id']==invoice['id'],'legacy-retry-broken')
     ordinary=upload(image(),secrets.token_hex(16),'invoice')
     require(ordinary.status_code==201 and ordinary.json['invoice']['inclusion_policy']=='review','ordinary-invoice-not-review')
     after=call(web,'get',f'/tools/reimbursement/api/summary/{period}').json
@@ -154,6 +166,8 @@ def exercise(app):
         selected_retry.json['invoice']['id']==selected_invoice['id'],'customer-upload-retry-failed')
     require(upload(selected_image,selected_key,'invoice','', 'A').status_code==409,
         'customer-upload-changed-intent-accepted')
+    require(upload(selected_image,secrets.token_hex(16),'invoice','','').status_code==409,
+        'new-key-customer-intent-ignored')
     website_invoices=call(web,'get','/tools/reimbursement/api/invoices').json['invoices']
     require(any(row['id']==selected_invoice['id'] and row['customer_id']==customer['id']
         and row['customer_level']=='AA' for row in website_invoices),

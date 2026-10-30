@@ -17,6 +17,15 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def test_customer_upload_intent_and_legacy_retry_on_postgres(self):
+        from tests.test_mobile_form_parity import FormParityTests
+        self.customer_setup=lambda:FormParityTests.customer_setup(self)
+        FormParityTests.test_new_upload_key_must_not_silently_ignore_changed_customer(self)
+
+    def test_legacy_retry_on_postgres(self):
+        from tests.test_mobile_form_parity import FormParityTests
+        FormParityTests.test_legacy_receipt_retries_without_customer_fields_still_work(self)
+
     def _dispatch_case(self, name):
         from tests.test_mobile_dispatch import DispatchTests
         self.setup_dispatch = lambda: DispatchTests.setup_dispatch(self)

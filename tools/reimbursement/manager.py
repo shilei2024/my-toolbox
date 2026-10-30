@@ -1520,6 +1520,10 @@ def create_invoice_record(data: dict[str, Any], owner_type: str, owner_id: str, 
         if existing:
             if (existing.document_kind, existing.occurrence_month, existing.office) != (invoice.document_kind, invoice.occurrence_month, invoice.office):
                 raise InvoiceConflictError("该原件已在本期保存，但用途、发生月或办事处不同，请先到网站核对并修改")
+            if ({'customer_id','customer_level'} & set(data)) and (
+                existing.customer_id or None, _invoice_customer_level(existing)
+            ) != (invoice.customer_id or None, _invoice_customer_level(invoice)):
+                raise InvoiceConflictError("该原件已在本期保存，但客户或等级不同，请先核对已有票据")
             return existing, False
     db.session.add(invoice)
     db.session.flush()

@@ -295,7 +295,10 @@ def mobile_upload():
         raise service.MobileError("登录已失效，请重新登录", 401)
     receipt = UploadReceipt.query.filter_by(user_id=user_id, idempotency_key=key).first()
     if receipt:
-        if receipt.fingerprint != fingerprint:
+        # Pre-customer clients keep their original five-field intent on retry.
+        legacy = hashlib.sha256(json.dumps([period_id, office_id, kind, occurrence, original.sha256]).encode()).hexdigest()
+        compatible_legacy = not ({'customer_id','customer_level'} & set(fields)) and receipt.fingerprint == legacy
+        if receipt.fingerprint != fingerprint and not compatible_legacy:
             raise service.MobileError("同一上传凭证的文件或用途已改变，请重新选择文件", 409)
         invoice = db.session.get(ReimbursementInvoice, receipt.invoice_id) if receipt.invoice_id else None
         if not invoice or invoice.owner_type != "user" or invoice.owner_id != str(user_id):
