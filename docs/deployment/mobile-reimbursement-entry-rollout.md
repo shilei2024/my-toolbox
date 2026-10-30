@@ -102,3 +102,14 @@ curl --retry 8 --retry-connrefused --retry-delay 2 --fail --silent --show-error 
 6. Android/iOS分别验证隐私、选图/PDF及原件预览；网络中断重试不重复上传/OCR；退出后旧下载不能弹出原件。
 
 失败先反馈现象/固定错误，不发送真实发票、绑定码或令牌。全部完成后上传体验版、设置体验成员，再按微信后台完成备案/审核及发布；未获得后台通过状态不声称正式上线。
+
+
+## 0.10.1 字段补齐发布准备（2026-10-30）
+
+操作者已确认当前生产8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1、service active。本节为新的发布起点，前文be56→0.10.0过程仅保留历史说明，不能重跑其旧工件。字段补齐候选0a70d9f2694deaccc410ad29afcd7ab8d3a1e0fa已完成独立审查/PR113全CI及PG16；PR113已合入develop，新增服务器FORM_PARITY验收尚待操作者反馈，不得提前标为通过。
+
+Golden Rule：仍有短维护生产影响；复用原发布工具/私有备份/锁/022，不新增框架；无迁移/依赖/资源，最低成本；沿用固定SHA人工命令易维护；单体和同一客户事实源不变。只更新mobile_entry_release的SOURCE为8cd、CANDIDATE为0a70，并把客户表加入只读历史指纹，不改已审查业务。测试旧起点拒绝、失败停止、配置保留及真实PG指纹。恢复库FORM_PARITY通过、发布PR CI及独立复核后才给main固定SHA正式命令。
+
+沿用前文受限runner提取命令，但必须用本次release main完整SHA。成功仍为MOBILE_ENTRY_DEPLOY_OK和f5 unchanged；手机保持启用。恢复库应有新增MOBILE_FORM_PARITY_OK并保留ENTRY/API/HISTORY/STAGING全部成功。部署后真机验证客户下拉与网站一致、等级自动带出、同角色新增、已有应酬/出差二次编辑及手填金额保留；不以合成测试代替真机。
+
+本次应用回退基线为8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1。若需回退，诊断并核对HEAD与失败release SHA、私有备份和配置后，用前文停写/git switch --detach/022/服务用户可读/启动健康步骤，旧SHA替换为8cd。保留f5与全部正常新客户/明细，禁止downgrade或恢复旧数据库覆盖新数据。实际回退时将给出固定失败SHA命令；不把本节当需立刻执行的回退指令。

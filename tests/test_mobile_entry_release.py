@@ -11,6 +11,11 @@ from scripts.ops import mobile_entry_release as release
 
 
 class MobileEntryReleaseTests(unittest.TestCase):
+    def test_incremental_release_is_pinned_to_verified_server_and_reviewed_parity(self):
+        self.assertEqual(release.SOURCE, "8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1")
+        self.assertEqual(release.CANDIDATE, "0a70d9f2694deaccc410ad29afcd7ab8d3a1e0fa")
+        self.assertEqual(release.REVISION, "f5a6b7c8d9e0")
+
     @unittest.skipUnless(
         shutil.which("git"), "Git is required for code rollback verification"
     )
