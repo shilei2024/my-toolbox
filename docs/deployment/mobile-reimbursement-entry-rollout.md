@@ -14,7 +14,7 @@
 
 目的：在此前固定恢复库上验证新API与网站/Excel一致，保持原历史行指纹。只新建合成账号和票据，不向真实微信或OCR发送资料，无服务监听、不加载生产.env。
 
-批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。`scripts/ops/mobile_entry_release.py` 尚不存在；恢复库验收成功也不自动授权运行旧的 `mobile_invoice_release.py`（该工具仅覆盖0.9.48固定基线）。0.10及后续生产更新须先核实当前生产SHA、工作树与配置，针对该基线另行审查固定SHA发布步骤。
+批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。`mobile_entry_release.py` 已在0.10.0的main分支，但只允许已验收的`1502ee0`业务祖先及文档/运维差异；本轮客户字段新增后不能直接沿用。恢复库验收新候选后，须更新并审查发布工件的业务候选保护，且重新核实当前生产SHA、工作树与配置。旧的`mobile_invoice_release.py`仅覆盖0.9.48固定基线。
 
 ```bash
 (
@@ -38,11 +38,57 @@ printf 'stage_dir=%s\n' "$stage_dir"
 
 ## 生产更新与回滚准备
 
+2026-10-29：操作者已确认候选1502ee0764eab772af0463682dd046b6365b0857在服务器恢复库出现全部四项成功标记，历史用户、发票及原件行指纹保持不变。独立审查、PR110全仓CI及PG16通过，功能已合入develop。准备0.10.0发布，尚未执行生产更新或新OCR/四标签真机验收。
+
+发布工具实施门：生产受短维护影响；复用invoice_backup、发布互斥锁及Git子进程022；无迁移/依赖/资源，现有systemd即可维护；用固定旧SHA/f5及业务候选差异保护确保符合单体架构。新增mobile_entry_release.py与顺序/故障恢复测试，不改业务候选。预计一个小型运维工件及发布PR，回滚保留同一f5数据。先验证用量/配置/所有权边界，再备份和快进，运行代码用户可读、原行指纹与版本不变后启动；主站200、手机旧/新入口401。禁止执行旧一次性迁移工具。
+
 恢复库成功后，协作核对发布PR/完整main SHA及业务差异，再给固定SHA的停写备份、代码快进、代码可读、服务启动和HTTPS+mobile401检查命令。此阶段尚未执行，不给出可误用的旧迁移脚本。
+
+发布使用本轮`mobile_entry_release.py`，必须连同`invoice_release.py`、`invoice_backup.py`从同一批准main SHA提取到root新建0700目录。脚本限旧be56/f5与已验收1502业务祖先，拒绝数据库/依赖/Caddy或其他未经核对的业务差异；不会重新执行迁移。操作者使用下列形式（精确SHA在release CI与审查后提供）：
+
+```bash
+(
+set -euo pipefail
+umask 077
+cd /opt/mytoolbox
+git fetch origin main
+release=APPROVED_MAIN_SHA
+test "$(git rev-parse origin/main)" = "$release"
+runner=$(mktemp -d /root/mytoolbox-entry-release-XXXXXX)
+for helper in mobile_entry_release.py invoice_release.py invoice_backup.py; do
+  git show "${release}:scripts/ops/${helper}" > "$runner/$helper"
+done
+/opt/mytoolbox/.venv/bin/python "$runner/mobile_entry_release.py" "$release"
+)
+```
+
+成功标记MOBILE_ENTRY_DEPLOY_OK，f5保持不变，active/HTTPS/mobile-enabled/new-routes-authenticated。失败标记MOBILE_ENTRY_DEPLOY_FAILED及受限日志路径，只反馈固定标记和阶段，不贴私有日志；停止后续操作。
 
 停写前核对原SHA/.env/Caddy摘要与服务状态；用现有备份工具从运行服务同一配置取PG连接，私有目录保存最终数据库、配置、Git改动及原件。核对f5，不执行upgrade/downgrade；仅Git检出子进程umask022，备份/日志仍077。启动前使用实际服务用户逐项test -r新代码；本机/公网health均200，未带凭据的/api/mobile/bootstrap为401、no-store、无Set-Cookie。只反馈固定标记，不能贴.env/日志/真实发票。
 
 失败保留备份/私有日志并反馈阶段。若代码未变、配置摘要一致可恢复旧服务；新代码失败保持停写，明确检查后才回旧已发布应用。0.9.48可读同一f5及新保存记录，回滚不删审计/派车/原件，不用旧数据库覆盖正常新录入。客户端也退到0.9.48上传版，避免旧后端新客户端404。真实金额差错通过审计人工核对，独立修正，不擅自恢复全库。
+
+应用回退演练：本轮真实临时Git测试验证`git switch --detach <旧SHA>`保留本机Caddy修改、未跟踪配置及备份。只有确认故障需回旧版本、记录当前release SHA/备份、核对.env/Caddy未变且无其他本机修改后，才运行以下代码回退；服务保持同一f5，不还原数据库。脚本失败输出并不自动授权忽略诊断直接回退。
+
+```bash
+(
+set -euo pipefail
+cd /opt/mytoolbox
+test "$(git rev-parse HEAD)" = APPROVED_FAILED_MAIN_SHA
+test -z "$(git diff --cached --name-only)"
+systemctl stop mytoolbox
+umask 022
+git switch --detach be56a7aca204fdff804d8ec126223180447ff7bf
+sudo -u www-data test -r app.py
+sudo -u www-data test -r auth/mobile_routes.py
+systemctl start mytoolbox
+systemctl is-active mytoolbox
+curl --retry 8 --retry-connrefused --retry-delay 2 --fail --silent --show-error \
+  --connect-timeout 2 --max-time 8 https://mindfulpenpal.com/healthz
+)
+```
+
+确认health200与手机bootstrap401、no-store、无Set-Cookie，并检查网站历史数据。回退后服务器为detached HEAD，保留main的发布历史供诊断；后续先设计前滚修复，不运行要求main/SOURCE的旧发布脚本，不强制reset分支。不能以健康恢复代表业务差错已修正。
 
 ## 开发者工具与真机验收
 
