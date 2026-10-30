@@ -41,3 +41,9 @@
 操作者已反馈固定业务候选8e8ca491f29135c3f90178f66008cb56d0f0fdeb的MOBILE_ENTRY_SMOKE_OK、MOBILE_FORM_PARITY_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK全部通过；历史用户/发票/原件BLOB保持不变。此记录更新上一节“尚未取得”的历史状态。独立审查批准该代码，当前发布差异仅文档/运维固定候选；新候选PR114的7项CI（run41144306445）通过，本机311项测试成功（31环境skip）、另行PG30项成功、原生WXML/WXSS/JS编译检查通过。
 
 准备合入main并由操作者执行停写最终备份及精确SHA部署；尚未实际生产执行，不把恢复库或合并当部署完成。新功能真机、微信备案/审核及正式发布仍待后端成功后逐项验收。生产起点8cd9d31/f5及本地Caddy保护保持不变，失败只反馈固定阶段和私有日志路径，不能贴日志内容或配置。
+
+## 2026-10-31 生产后端部署完成
+
+操作者反馈MOBILE_ENTRY_DEPLOY_OK：正式SHA为1c1f192fa0dc748d7ae02584487abe0f2d5fd5c4，f5a6b7c8d9e0保持不变，最终备份位于受限mobile-entry-final-0ct6kudx目录，service active、HTTPS OK、mobile enabled及新路由鉴权通过。发布tag v0.10.1指向同一SHA。独立公网复查healthz 200、bootstrap/dashboard无凭据401、no-store且无Set-Cookie通过。
+
+本节更新前文所有“尚未生产执行”的历史状态。仅后端部署已确认，生产实际发票/客户/派车业务验收及Android/iOS真机尚待执行。当前本机微信开发者工具CLI检测login=false；须开发者本人扫码登录后生成预览/上传体验版，不索取AppSecret。备案、微信审核及正式小程序发布尚未确认，不标为已上线。
