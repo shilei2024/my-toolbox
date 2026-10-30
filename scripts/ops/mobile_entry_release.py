@@ -24,7 +24,7 @@ except ImportError:
     import invoice_backup as backup
 
 SOURCE = "8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1"
-CANDIDATE = "87084ab003431f7b5b8a86956a323915019d9c59"
+CANDIDATE = "8e8ca491f29135c3f90178f66008cb56d0f0fdeb"
 REVISION = "f5a6b7c8d9e0"
 require = common.require
 

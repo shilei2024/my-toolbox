@@ -23,7 +23,7 @@ cd /opt/mytoolbox
 git fetch origin codex/invoice-miniprogram-launch
 candidate=CANDIDATE_SHA
 git cat-file -e "${candidate}^{commit}"
-test "$(git rev-parse FETCH_HEAD)" = "$candidate"
+git merge-base --is-ancestor "$candidate" FETCH_HEAD
 stage_dir=$(mktemp -d /var/tmp/mytoolbox-entry-stage-XXXXXX)
 git archive "$candidate" | tar -x -C "$stage_dir"
 test ! -e "$stage_dir/.env"
@@ -103,3 +103,7 @@ curl --retry 8 --retry-connrefused --retry-delay 2 --fail --silent --show-error 
 6. Android/iOS分别验证隐私、选图/PDF及原件预览；网络中断重试不重复上传/OCR；退出后旧下载不能弹出原件。
 
 失败先反馈现象/固定错误，不发送真实发票、绑定码或令牌。全部完成后上传体验版、设置体验成员，再按微信后台完成备案/审核及发布；未获得后台通过状态不声称正式上线。
+
+## 当前有效发布门禁（2026-10-31）
+
+PR114复核后业务修复候选更新为`8e8ca491f29135c3f90178f66008cb56d0f0fdeb`，发布工具已固定此祖先。前文87084ab恢复库通过仅为历史，当前必须重新取得ENTRY/FORM_PARITY/API/HISTORY/STAGING五项成功；新候选不得沿用旧验收结果。按前文git archive固定SHA方式执行即可；fetch分支可能含后续仅发布脚本/文档提交，不应要求FETCH_HEAD等于业务候选，而应`git merge-base --is-ancestor "$candidate" FETCH_HEAD`验证可达后归档精确候选。所有生产备份、权限、配置保护和回滚条件不变。
