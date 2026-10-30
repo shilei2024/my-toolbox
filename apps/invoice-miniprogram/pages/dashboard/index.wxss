@@ -1,15 +1,3 @@
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18rpx;
-}
-.dashboard-grid .card {
-  margin: 0;
-  padding: 24rpx;
-}
-.kpi {
-  font-size: 40rpx;
-  font-weight: 600;
-  margin-top: 12rpx;
-  word-break: break-all;
-}
+.period-select { display:flex; align-items:center; justify-content:space-between; gap:24rpx; min-height:80rpx; }
+.period-name { font-size:30rpx; font-weight:600; }
+.distance-card { grid-column:1 / -1; }

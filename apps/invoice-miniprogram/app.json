@@ -8,32 +8,40 @@
   ],
   "window": {
     "navigationBarTitleText": "票据助手",
-    "navigationBarBackgroundColor": "#f5f8f6",
+    "navigationBarBackgroundColor": "#f3f5f4",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f5f8f6"
+    "backgroundColor": "#f3f5f4"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json",
   "tabBar": {
-    "color": "#71877c",
-    "selectedColor": "#188563",
+    "color": "#738278",
+    "selectedColor": "#176b50",
     "backgroundColor": "#ffffff",
     "list": [
       {
         "pagePath": "pages/dashboard/index",
-        "text": "首页"
+        "text": "首页",
+        "iconPath": "assets/tabs/dashboard-normal.png",
+        "selectedIconPath": "assets/tabs/dashboard-active.png"
       },
       {
         "pagePath": "pages/home/index",
-        "text": "发票录入"
+        "text": "发票录入",
+        "iconPath": "assets/tabs/home-normal.png",
+        "selectedIconPath": "assets/tabs/home-active.png"
       },
       {
         "pagePath": "pages/dispatch/index",
-        "text": "派车单"
+        "text": "派车单",
+        "iconPath": "assets/tabs/dispatch-normal.png",
+        "selectedIconPath": "assets/tabs/dispatch-active.png"
       },
       {
         "pagePath": "pages/mine/index",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "assets/tabs/mine-normal.png",
+        "selectedIconPath": "assets/tabs/mine-active.png"
       }
     ]
   }

@@ -1,12 +1,12 @@
 # 手机完整录入与四标签工作台发布
 
-本轮为0.9.48之后的增量，基础绑定、上传、网站同步已由操作者实测。新功能仍待发布；不把合成OCR测试当实际识别效果。产品/风险见[计划](../product/mobile-invoice-recognition-plan.md)，契约见[API](../api/wechat-invoice-upload.md)，决策见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)。
+本轮为0.9.48之后的增量，基础绑定、上传、网站同步已由操作者实测。新功能仍待发布；不把合成OCR测试当实际识别效果。当前进展见[上线状态与门禁](mobile-invoice-launch-status-2026-10-30.md)；产品/风险见[计划](../product/mobile-invoice-recognition-plan.md)，契约见[API](../api/wechat-invoice-upload.md)，决策见[ADR-0042](../adr/0042-mobile-reimbursement-entry.md)。
 
 ## 发布边界及前置清单
 
-- 生产当前be56a7aca204fdff804d8ec126223180447ff7bf、f5a6b7c8d9e0、手机开关已启用。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
+- 操作者最新只读反馈生产代码为8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1、`main`、`mytoolbox` active；运行数据库为PostgreSQL 16.14、Alembic f5a6b7c8d9e0，已跟踪改动仅既有Caddyfile。新功能无迁移、依赖或新环境变量。旧手机上传接口保持兼容，先后端再客户端。
 - 检查main工作树，保留已知Caddy本机修改、.env、上传、备份，禁止reset/clean或重跑旧invoice_release/mobile_invoice_release一次性迁移工具。
-- PR到develop、独立审查、Python/PG16及全仓CI通过，再对固定候选进行恢复库验收；发布PR到main后才能部署。用户已授权部署，服务器操作仍由用户执行。
+- 当前实现已在develop；独立审查、Python/PG16及全仓CI通过后，对固定候选进行恢复库验收；发布PR到main后才能部署。用户已授权推进，服务器操作仍由操作者执行。
 - 确认当前域名/DNS/TLS与health、systemd服务身份/代码可读、PG16/f5/容量、备份恢复、监控。Redis/COS/Generation/Gallery不新增或改配置，只确认现有服务健康；本模块仍原有BLOB+磁盘。
 - 隐私指引已保存，三类合法域名已配置；个人主体备案及微信正式审核仍未完成。保留合法域名校验，AppSecret只在服务器。
 
@@ -14,15 +14,16 @@
 
 目的：在此前固定恢复库上验证新API与网站/Excel一致，保持原历史行指纹。只新建合成账号和票据，不向真实微信或OCR发送资料，无服务监听、不加载生产.env。
 
-批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。
+本轮固定业务候选是`87084ab003431f7b5b8a86956a323915019d9c59`，不能用浮动分支当验收身份。操作者已反馈该候选在隔离恢复库通过五项验收。`mobile_entry_release.py`原先只允许`1502ee0`业务祖先及文档/运维差异；现已固定为新验收候选，仍须独立审查、全套CI和生产基线复核。旧的`mobile_invoice_release.py`仅覆盖0.9.48固定基线。
 
 ```bash
 (
 set -euo pipefail
 cd /opt/mytoolbox
-git fetch origin codex/mobile-invoice-recognition
+git fetch origin codex/invoice-miniprogram-launch
 candidate=CANDIDATE_SHA
 git cat-file -e "${candidate}^{commit}"
+git merge-base --is-ancestor "$candidate" FETCH_HEAD
 stage_dir=$(mktemp -d /var/tmp/mytoolbox-entry-stage-XXXXXX)
 git archive "$candidate" | tar -x -C "$stage_dir"
 test ! -e "$stage_dir/.env"
@@ -34,17 +35,17 @@ printf 'stage_dir=%s\n' "$stage_dir"
 )
 ```
 
-预期：MOBILE_ENTRY_SMOKE_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK。新增检查OCR草稿/缓存不改费用、明确确认/旧写409、派车保存及网站仪表盘/实际XLS、跨用户隔离；保留原绑定/上传/重试/原件/撤销验收。此脚本只允许postgres系统用户、固定Unix socket库mytoolbox_invoice_verify_20261028_111850及f5版本；失败停止，禁止改保护条件或在生产运行。候选目录保留供核对，不递归清理未知路径。
+预期：MOBILE_ENTRY_SMOKE_OK、MOBILE_FORM_PARITY_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK。新增检查OCR草稿/缓存不改费用、明确确认/旧写409、客户选择上传与网站回显/重试、派车保存及网站仪表盘/实际XLS、跨用户隔离；保留原绑定/上传/原件/撤销验收。此脚本只允许postgres系统用户、固定Unix socket库mytoolbox_invoice_verify_20261028_111850及f5版本；失败停止，禁止改保护条件或在生产运行。先核实该隔离库确由生产备份恢复且状态可信；如已被其他测试修改或生产有新数据，重新设计全新受保护恢复库演练，不能把旧测试库视为当前生产快照。候选目录保留供核对，不递归清理未知路径。
 
 ## 生产更新与回滚准备
 
-2026-10-29：操作者已确认候选1502ee0764eab772af0463682dd046b6365b0857在服务器恢复库出现全部四项成功标记，历史用户、发票及原件行指纹保持不变。独立审查、PR110全仓CI及PG16通过，功能已合入develop。准备0.10.0发布，尚未执行生产更新或新OCR/四标签真机验收。
+2026-10-30：操作者反馈候选87084ab003431f7b5b8a86956a323915019d9c59在隔离恢复库出现MOBILE_ENTRY_SMOKE_OK、MOBILE_FORM_PARITY_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK；历史用户、发票及原件BLOB行指纹保持不变。该SHA的7项CI通过。本轮新增客户上传及五页视觉仍待生产更新与真机验证。
 
-发布工具实施门：生产受短维护影响；复用invoice_backup、发布互斥锁及Git子进程022；无迁移/依赖/资源，现有systemd即可维护；用固定旧SHA/f5及业务候选差异保护确保符合单体架构。新增mobile_entry_release.py与顺序/故障恢复测试，不改业务候选。预计一个小型运维工件及发布PR，回滚保留同一f5数据。先验证用量/配置/所有权边界，再备份和快进，运行代码用户可读、原行指纹与版本不变后启动；主站200、手机旧/新入口401。禁止执行旧一次性迁移工具。
+发布工具实施门：生产受短维护影响；复用invoice_backup、发布互斥锁及Git子进程022；无迁移/依赖/资源，现有systemd即可维护；用实际观测的固定8cd9d31代码基线、f5版本及87084ab业务候选差异保护确保符合单体架构。发布工具顺序/故障恢复测试不改业务候选。回滚保留同一f5数据。先验证用量/配置/所有权边界，再备份和快进，运行代码用户可读、原行指纹与版本不变后启动；主站200、手机旧/新入口401。禁止执行旧一次性迁移工具。
 
 恢复库成功后，协作核对发布PR/完整main SHA及业务差异，再给固定SHA的停写备份、代码快进、代码可读、服务启动和HTTPS+mobile401检查命令。此阶段尚未执行，不给出可误用的旧迁移脚本。
 
-发布使用本轮`mobile_entry_release.py`，必须连同`invoice_release.py`、`invoice_backup.py`从同一批准main SHA提取到root新建0700目录。脚本限旧be56/f5与已验收1502业务祖先，拒绝数据库/依赖/Caddy或其他未经核对的业务差异；不会重新执行迁移。操作者使用下列形式（精确SHA在release CI与审查后提供）：
+发布使用本轮`mobile_entry_release.py`，必须连同`invoice_release.py`、`invoice_backup.py`从同一批准main SHA提取到root新建0700目录。脚本限当前8cd9d31/f5与已验收87084ab业务祖先，拒绝数据库/依赖/Caddy或其他未经核对的业务差异；不会重新执行迁移。合并PR须保留87084ab祖先（普通merge commit或快进）；squash/rebase会使固定候选校验失败，必须重新评审发布方案。操作者使用下列形式（精确main发布SHA在release CI与审查后提供）：
 
 ```bash
 (
@@ -66,7 +67,7 @@ done
 
 停写前核对原SHA/.env/Caddy摘要与服务状态；用现有备份工具从运行服务同一配置取PG连接，私有目录保存最终数据库、配置、Git改动及原件。核对f5，不执行upgrade/downgrade；仅Git检出子进程umask022，备份/日志仍077。启动前使用实际服务用户逐项test -r新代码；本机/公网health均200，未带凭据的/api/mobile/bootstrap为401、no-store、无Set-Cookie。只反馈固定标记，不能贴.env/日志/真实发票。
 
-失败保留备份/私有日志并反馈阶段。若代码未变、配置摘要一致可恢复旧服务；新代码失败保持停写，明确检查后才回旧已发布应用。0.9.48可读同一f5及新保存记录，回滚不删审计/派车/原件，不用旧数据库覆盖正常新录入。客户端也退到0.9.48上传版，避免旧后端新客户端404。真实金额差错通过审计人工核对，独立修正，不擅自恢复全库。
+失败保留备份/私有日志并反馈阶段。若代码未变、配置摘要一致可恢复旧服务；新代码失败保持停写，明确检查后才回旧已发布应用。当前8cd9d31基线使用同一f5结构；回滚不删审计/派车/原件，不用旧数据库覆盖正常新录入。小程序客户端回退到与该基线兼容的已发布版本，避免新客户端调用旧后端缺失接口。真实金额差错通过审计人工核对，独立修正，不擅自恢复全库。
 
 应用回退演练：本轮真实临时Git测试验证`git switch --detach <旧SHA>`保留本机Caddy修改、未跟踪配置及备份。只有确认故障需回旧版本、记录当前release SHA/备份、核对.env/Caddy未变且无其他本机修改后，才运行以下代码回退；服务保持同一f5，不还原数据库。脚本失败输出并不自动授权忽略诊断直接回退。
 
@@ -78,7 +79,7 @@ test "$(git rev-parse HEAD)" = APPROVED_FAILED_MAIN_SHA
 test -z "$(git diff --cached --name-only)"
 systemctl stop mytoolbox
 umask 022
-git switch --detach be56a7aca204fdff804d8ec126223180447ff7bf
+git switch --detach 8cd9d31d3ee3ac9429c4ffe0da2a646042098cb1
 sudo -u www-data test -r app.py
 sudo -u www-data test -r auth/mobile_routes.py
 systemctl start mytoolbox
@@ -102,3 +103,11 @@ curl --retry 8 --retry-connrefused --retry-delay 2 --fail --silent --show-error 
 6. Android/iOS分别验证隐私、选图/PDF及原件预览；网络中断重试不重复上传/OCR；退出后旧下载不能弹出原件。
 
 失败先反馈现象/固定错误，不发送真实发票、绑定码或令牌。全部完成后上传体验版、设置体验成员，再按微信后台完成备案/审核及发布；未获得后台通过状态不声称正式上线。
+
+## 当前有效发布门禁（2026-10-31）
+
+PR114复核后业务修复候选更新为`8e8ca491f29135c3f90178f66008cb56d0f0fdeb`，发布工具已固定此祖先。前文87084ab恢复库通过仅为历史，当前必须重新取得ENTRY/FORM_PARITY/API/HISTORY/STAGING五项成功；新候选不得沿用旧验收结果。按前文git archive固定SHA方式执行即可；fetch分支可能含后续仅发布脚本/文档提交，不应要求FETCH_HEAD等于业务候选，而应`git merge-base --is-ancestor "$candidate" FETCH_HEAD`验证可达后归档精确候选。所有生产备份、权限、配置保护和回滚条件不变。
+
+### 新候选恢复库证据已取得（2026-10-31）
+
+操作者已确认8e8ca491f29135c3f90178f66008cb56d0f0fdeb的五项服务器验收全部通过及历史行不变，更新前文“必须重新取得/尚未取得”的历史状态。仅余正式发布头CI、main固定SHA和最终停写备份/更新、后续真实业务与真机验收。不得重复迁移f5；发布只从已观测8cd基线到main精确SHA，手机保持开启。

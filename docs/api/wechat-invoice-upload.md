@@ -47,9 +47,9 @@ multipart：`file`（20MB以内PDF/PNG/JPG）；`file_name`可选，微信临时
 | POST `/invoices/:id/recognize` | `{retry?:boolean}` | `{success,draft,snapshot,cached}`；10次/分钟，草稿不写财务字段 |
 | POST `/invoices/:id/confirm` | `{snapshot,confirmed:true,...编辑字段}` | `{success,invoice,snapshot}`；20次/分钟 |
 
-确认白名单：period_id、office_id、category_id、product_line_id、invoice_number、invoice_date、vendor、description、amount、tax_amount、total_amount、document_kind、inclusion_policy、occurrence_month、settlement_month、print_selected、remarks。未提供字段沿用原记录；类别/产品线可null，费用口径则必须补齐二者。日期ISO YYYY-MM-DD，非负金额最多2位小数且未税+税额=合计。号码/商家必填，号码64、商家255、摘要500、备注4000字以内。其余计入口径与月份规则沿用网站，不接受owner、原件URL或客户归属修改。
+确认白名单：period_id、office_id、category_id、product_line_id、invoice_number、invoice_date、vendor、description、amount、tax_amount、total_amount、document_kind、inclusion_policy、occurrence_month、settlement_month、print_selected、remarks、customer_id、customer_level、amount_confirmed、linked_detail。未提供字段沿用原记录；类别/产品线可null，费用口径则必须补齐二者。日期ISO YYYY-MM-DD，非负金额最多2位小数且未税+税额=合计。号码/商家必填，号码64、商家255、摘要500、备注4000字以内。其余计入口径与月份规则沿用网站，不接受owner或原件URL；客户归属按当前组织目录校验。
 
-识别复用既有百度→腾讯→Paddle链；失败不扣识别用量，成功一次扣报销用量（上传另按原有规则扣一次）。草稿存领域审计invoice.ocr，以owner+invoice_id+原件SHA复用，跨周期移动仍复用；成功缓存即使retry也不重付费，失败缓存须retry才重试。PG事务咨询锁遇同票并发返回409。识别缺字段留空，需人工补齐；success并不保证每个字段正确。确认前不改变发票和费用；确认锁后复查会话/授权与快照，过期409。已分摊账单409。关联应酬/出差明细的票面金额/日期随修改同步，单独调整过则冲突要求网站核对；仅改备注不重置手工金额/日期。客户、参与人等手机未编辑数据保留，专属明细仍在网站维护。
+识别复用既有百度→腾讯→Paddle链；失败不扣识别用量，成功一次扣报销用量（上传另按原有规则扣一次）。草稿存领域审计invoice.ocr，以owner+invoice_id+原件SHA复用，跨周期移动仍复用；成功缓存即使retry也不重付费，失败缓存须retry才重试。PG事务咨询锁遇同票并发返回409。识别缺字段留空，需人工补齐；success并不保证每个字段正确。确认前不改变发票和费用；确认锁后复查会话/授权与快照，过期409。已分摊账单409。关联应酬/出差明细的票面金额/日期随修改同步，单独调整过则冲突要求网站核对；仅改备注不重置手工金额/日期。客户、参与人等手机未编辑数据保留，旧客户端不提供关联明细时保留原逻辑；新表单可显式核对编辑全部应酬/出差明细。
 
 ## 首页与派车单（新增）
 
@@ -62,3 +62,11 @@ multipart：`file`（20MB以内PDF/PNG/JPG）；`file_name`可选，微信临时
 vehicle可编辑date、from_location、to_location、contact、km_start、km_total、toll_fee、parking_fee、product_line；返回id、自动km_end、allocated。新行id=null，已有id必须属于本周期且唯一；省略原行表示删除。真实日期、km_total必填，数字非负最多2位小数，文本≤255，产品线必须属本人目录（历史原值可保留）。服务端稳定按日期排序并承接里程，不信客户端km_end/allocated，不接收toll_statement_id等来源字段。snapshot为网站全aux快照，防覆盖其他页面改动；仅写vehicle，不重建应酬/出差。已有行ID及服务端隐藏元数据保留，已分摊行删除/修改或间接受里程链影响返回409，需先在网站撤销分摊。审计vehicle.mobile.save记录前后，失败事务回滚。
 
 仪表盘费用取网站_summary同口径；invoice_count包括全部用途，pending_count仅金额未确认，公里/过桥/停车为派车已保存合计。金额以十进制字符串返回。四个原生tab共享进程内所选周期，清单校验所属；不自动修改网站active周期。退出/换登录清空页面缓存，上传识别中不允许退出/换期，派车未保存必须保存或明确放弃。
+
+## 录入字段补齐（2026-10-30候选）
+
+bootstrap新增customers（网站同一_customer_directory/_customer_dict）、customer_levels和customer_creation_enabled；categories补export_key，product_lines补code，均复用网站序列化。POST /customers接受{name,short_name,grade}，同工具Bearer授权、User锁后复查及网站_customer_creation_membership/create_customer权限与审计，201返回{success,customer}；无权403，参数无效400，10次/分钟。客户端不传组织/owner。
+
+确认新增customer_id（可null）、customer_level（未关联客户可空/0-1/A/AA/AAA）、amount_confirmed（布尔）、linked_detail（可null或明细对象）。客户必须在当前组织有效目录中，所选客户等级由客户资料带出，客户端伪造等级无效。明细白名单为date/category/place/participants/amount/purpose/approval/location/expense_type/customer/customer_id；客户字段由服务端规范，金额非负两位小数、日期ISO或空、文本最多4000字，拒绝其他字段。按费用类别生成应酬/出差明细，显式明细依赖原票完整快照防旧覆盖；未提供新字段兼容旧客户端。新表单对齐网站可留空的发票号码/商家/日期，填日期仍校验，不改变费用计入前明确核对要求。
+
+全部字段清单及范围见[对齐计划](../product/mobile-form-parity.md)。保留独立确认提交、旧写冲突、分摊保护、仅留存口径。移动端默认明细仅跟随原默认值，修改商家/客户不重置用户单独填写的明细金额/日期/事由。网站既有force默认联动可能覆盖手工明细，本轮不复制此缺陷，网站修复另跟踪。

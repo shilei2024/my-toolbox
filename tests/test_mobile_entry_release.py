@@ -214,6 +214,40 @@ class MobileEntryReleaseTests(unittest.TestCase):
                     release.preflight(root, target)
                 healthy.assert_not_called()
 
+    def test_preflight_accepts_only_release_artifacts_after_restored_candidate(self):
+        root = Path("synthetic-root")
+        target = "a" * 40
+
+        def git(_root, *args):
+            if args == ("branch", "--show-current"):
+                return "main"
+            if args == ("rev-parse", "HEAD"):
+                return release.SOURCE
+            if args == ("rev-parse", "origin/main"):
+                return target
+            if args[:4] == ("diff", "--name-only", release.CANDIDATE, target):
+                return "\n".join(
+                    ("scripts/ops/mobile_entry_release.py",
+                     "tests/test_mobile_entry_release.py",
+                     "docs/deployment/mobile-reimbursement-entry-rollout.md")
+                )
+            return ""
+
+        with (
+            patch.object(release.common, "git", side_effect=git),
+            patch.object(
+                release.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0),
+            ),
+            patch.object(release, "healthy_enabled", return_value=True),
+            patch.object(release.common, "file_digest", return_value="protected"),
+        ):
+            self.assertEqual(
+                release.preflight(root, target),
+                {".env": "protected", release.common.CADDY: "protected"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

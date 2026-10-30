@@ -1,1 +1,3 @@
-/* Shared page and privacy styling lives in app.wxss. */
+.account-emblem { width:88rpx; height:88rpx; border-radius:24rpx; background:#edf5ef; color:#176b50; font-size:40rpx; line-height:88rpx; text-align:center; margin-bottom:28rpx; }
+.account-status { font-size:24rpx; color:#5a7b66; margin-bottom:12rpx; }
+.login-divider { text-align:center; color:#7e8d83; font-size:24rpx; margin:32rpx 0 24rpx; }

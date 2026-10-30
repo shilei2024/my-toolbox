@@ -14,8 +14,12 @@ Page({
     message: "",
     periods: [],
     offices: [],
+    customers: [{ id: null, display_name: "未关联客户" }],
+    levels: [{ value: "", name: "未分类" }],
     periodIndex: 0,
     officeIndex: 0,
+    customerIndex: 0,
+    levelIndex: 0,
     kindIndex: 0,
     kinds: KINDS,
     month: "",
@@ -58,12 +62,22 @@ Page({
     const epoch = context.state().authEpoch;
     if (this._epoch !== epoch) {
       this._epoch = epoch;
-      this.setData({ invoices: [], queue: [], periods: [], loggedIn: false });
+      this.setData({
+        invoices: [], queue: [], periods: [], loggedIn: false,
+        customers: [{ id: null, display_name: "未关联客户" }],
+        levels: [{ value: "", name: "未分类" }],
+        customerIndex: 0, levelIndex: 0,
+      });
     }
     if (wx.onNeedPrivacyAuthorization)
       wx.onNeedPrivacyAuthorization(this.privacyHandler);
     if (!api.session()) {
-      this.setData({ loggedIn: false, invoices: [], queue: [], periods: [] });
+      this.setData({
+        loggedIn: false, invoices: [], queue: [], periods: [],
+        customers: [{ id: null, display_name: "未关联客户" }],
+        levels: [{ value: "", name: "未分类" }],
+        customerIndex: 0, levelIndex: 0,
+      });
       return;
     }
     if (!this.data.busy) this.bootstrap().catch((e) => this.showError(e));
@@ -83,12 +97,33 @@ Page({
   async bootstrap() {
     const d = await api.request("/api/mobile/bootstrap");
     const index = context.choose(d.periods);
+    const customers = [
+      { id: null, display_name: "未关联客户" },
+      ...(d.customers || []),
+    ];
+    const levels = [
+      { value: "", name: "未分类" },
+      ...(d.customer_levels || []).map((value) => ({ value, name: value })),
+    ];
+    const selectedCustomer = this.data.customers[this.data.customerIndex];
+    const customerIndex = Math.max(
+      0,
+      customers.findIndex((item) => item.id === selectedCustomer?.id),
+    );
+    const selectedLevel = this.data.levels[this.data.levelIndex]?.value;
+    const levelIndex = customers[customerIndex].id
+      ? Math.max(0, levels.findIndex((item) => item.value === customers[customerIndex].grade))
+      : Math.max(0, levels.findIndex((item) => item.value === selectedLevel));
     this.setData({
       loggedIn: true,
       periods: d.periods,
       offices: d.offices,
+      customers,
+      levels,
       periodIndex: index,
       officeIndex: 0,
+      customerIndex,
+      levelIndex,
       message: d.periods.length ? "" : "请先在网站创建报销周期，再下拉刷新",
     });
     await this.loadInvoices();
@@ -155,15 +190,34 @@ Page({
   onMonth(e) {
     this.setData({ month: e.detail.value });
   },
+  onCustomer(e) {
+    const customerIndex = Number(e.detail.value);
+    const customer = this.data.customers[customerIndex];
+    if (!customer) return;
+    this.setData({
+      customerIndex,
+      levelIndex: customer.id
+        ? Math.max(0, this.data.levels.findIndex((item) => item.value === customer.grade))
+        : 0,
+    });
+  },
+  onLevel(e) {
+    if (this.data.customers[this.data.customerIndex]?.id) return;
+    this.setData({ levelIndex: Number(e.detail.value) });
+  },
   intent() {
     const p = this.data.periods[this.data.periodIndex],
-      o = this.data.offices[this.data.officeIndex];
+      o = this.data.offices[this.data.officeIndex],
+      customer = this.data.customers[this.data.customerIndex],
+      level = this.data.levels[this.data.levelIndex];
     if (!p || !o) throw new Error("请先选择网站报销周期及办事处");
     return {
       period_id: String(p.id),
       office_id: String(o.id),
       document_kind: KINDS[this.data.kindIndex].value,
       occurrence_month: this.data.month,
+      customer_id: customer?.id || "",
+      customer_level: customer?.id ? customer.grade || "" : level?.value || "",
     };
   },
   async chooseImage() {

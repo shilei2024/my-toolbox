@@ -4,6 +4,7 @@ No app/config import, listener or actual WeChat call. The provider exchange is
 replaced by synthetic identities ONLY in this isolated test-client process.
 """
 import io
+import json
 import os
 from pathlib import Path
 import secrets
@@ -81,10 +82,11 @@ def exercise(app):
         Image.new('RGB',(12,12),'white').save(stream,'PNG',pnginfo=metadata)
         return stream.getvalue()
 
-    def upload(content,key,kind='fuel'):
+    def upload(content,key,kind='fuel',customer_id='',customer_level=''):
         return mobile.post('/api/mobile/invoices',headers=headers,data={
             'file':(io.BytesIO(content),'stage-receipt.png'),'period_id':str(period),'office_id':str(office),
-            'document_kind':kind,'occurrence_month':'2026-08','idempotency_key':key})
+            'document_kind':kind,'occurrence_month':'2026-08','idempotency_key':key,
+            'customer_id':str(customer_id),'customer_level':customer_level})
 
     original=image();key=secrets.token_hex(16)
     first=upload(original,key)
@@ -95,6 +97,17 @@ def exercise(app):
     retry=upload(original,key)
     require(retry.status_code==200 and retry.json['invoice']['id']==invoice['id'],'retry-not-idempotent')
     require(upload(original,key,'toll').status_code==409,'changed-intent-accepted')
+    # A pre-customer client retains its original receipt format after upgrade.
+    import hashlib
+    from tools.reimbursement.mobile_models import UploadReceipt
+    with app.app_context():
+        legacy=UploadReceipt.query.filter_by(user_id=user_id,idempotency_key=key).one()
+        legacy.fingerprint=hashlib.sha256(json.dumps([period,office,'fuel','2026-08',hashlib.sha256(original).hexdigest()]).encode()).hexdigest()
+        db.session.commit()
+    legacy_retry=mobile.post('/api/mobile/invoices',headers=headers,data={
+        'file':(io.BytesIO(original),'legacy.png'),'period_id':str(period),'office_id':str(office),
+        'document_kind':'fuel','occurrence_month':'2026-08','idempotency_key':key})
+    require(legacy_retry.status_code==200 and legacy_retry.json['invoice']['id']==invoice['id'],'legacy-retry-broken')
     ordinary=upload(image(),secrets.token_hex(16),'invoice')
     require(ordinary.status_code==201 and ordinary.json['invoice']['inclusion_policy']=='review','ordinary-invoice-not-review')
     after=call(web,'get',f'/tools/reimbursement/api/summary/{period}').json
@@ -127,12 +140,51 @@ def exercise(app):
         require(provider.call_count==1,'duplicate-ocr-call')
     require(call(web,'get',f'/tools/reimbursement/api/summary/{period}').json['summary']==after['summary'],'draft-changed-summary')
     refs=call(mobile,'get','/api/mobile/bootstrap',headers=headers).json
+    # Same organization directory and customer service as the website; all
+    # records belong to this run's newly created synthetic account.
+    from shared.models import Organization, OrganizationMembership
+    app.config['CUSTOMER_PROJECTS_ENABLED']=True
+    with app.app_context():
+        organization=Organization(name='合成录入验收-'+secrets.token_hex(8))
+        db.session.add(organization);db.session.flush()
+        db.session.add(OrganizationMembership(organization_id=organization.id,user_id=user_id,roles_json='["sales"]'))
+        db.session.commit()
+    customer=call(mobile,'post','/api/mobile/customers',201,headers=headers,
+        json={'name':'合成验收客户-'+secrets.token_hex(8),'short_name':'验收客户简称','grade':'AA'}).json['customer']
+    parity_refs=call(mobile,'get','/api/mobile/bootstrap',headers=headers).json
+    site_refs=call(web,'get','/tools/reimbursement/api/bootstrap').json
+    require(parity_refs['customers']==site_refs['customers'],'customer-directory-mismatch')
+    selected_key=secrets.token_hex(16)
+    selected_image=image()
+    selected=upload(selected_image,selected_key,'invoice',customer['id'],'AAA')
+    require(selected.status_code==201,'customer-upload-not-created')
+    selected_invoice=selected.json['invoice']
+    require(selected_invoice['customer']=='验收客户简称' and
+        selected_invoice['customer_level']=='AA','customer-upload-not-canonical')
+    selected_retry=upload(selected_image,selected_key,'invoice',customer['id'],'AAA')
+    require(selected_retry.status_code==200 and
+        selected_retry.json['invoice']['id']==selected_invoice['id'],'customer-upload-retry-failed')
+    require(upload(selected_image,selected_key,'invoice','', 'A').status_code==409,
+        'customer-upload-changed-intent-accepted')
+    require(upload(selected_image,secrets.token_hex(16),'invoice','','').status_code==409,
+        'new-key-customer-intent-ignored')
+    website_invoices=call(web,'get','/tools/reimbursement/api/invoices').json['invoices']
+    require(any(row['id']==selected_invoice['id'] and row['customer_id']==customer['id']
+        and row['customer_level']=='AA' for row in website_invoices),
+        'customer-upload-website-mismatch')
     values={**draft['draft'],'confirmed':True,'snapshot':detail['snapshot'],'inclusion_policy':'expense',
+        'customer_id':customer['id'],'customer_level':'AAA',
         'category_id':next(c['id'] for c in refs['categories'] if c['name']=='办公费'),
         'product_line_id':refs['product_lines'][0]['id']}
     confirmed=call(mobile,'post',detail_path+'/confirm',headers=headers,json=values).json
     require(confirmed['invoice']['amount_confirmed'],'not-confirmed')
+    require(confirmed['invoice']['customer_level']=='AA','customer-grade-not-canonical')
     call(mobile,'post',detail_path+'/confirm',409,headers=headers,json=values)
+    values.update(snapshot=confirmed['snapshot'],category_id=refs['categories'][0]['id'],
+        linked_detail={'date':'2026-06-02','category':'礼品','place':'验收地点','participants':'验收参与人',
+            'amount':'50','purpose':'验收事由','approval':'验收审批'})
+    linked=call(mobile,'post',detail_path+'/confirm',headers=headers,json=values).json['invoice']['linked_detail']
+    require(linked['participants']=='验收参与人' and linked['customer']=='验收客户简称','linked-detail-not-shared')
     dispatch_path=f'/api/mobile/dispatch/{period}'
     state=call(mobile,'get',dispatch_path,headers=headers).json
     rows=state['rows']+[{'id':None,'date':'2026-06-02','from_location':'测试起点','to_location':'测试终点',
@@ -149,10 +201,13 @@ def exercise(app):
     book=xlrd.open_workbook(file_contents=exported.data)
     require(any('测试起点' in str(sheet.cell_value(r,c)) for sheet in book.sheets()
         for r in range(sheet.nrows) for c in range(sheet.ncols)),'dispatch-not-in-excel')
+    require(any('验收参与人' in str(sheet.cell_value(r,c)) for sheet in book.sheets()
+        for r in range(sheet.nrows) for c in range(sheet.ncols)),'linked-detail-not-in-excel')
     call(other,'get',detail_path,404,headers=other_headers)
     call(other,'get',dispatch_path,404,headers=other_headers)
     call(other,'get',f'/api/mobile/dashboard/{period}',404,headers=other_headers)
     print('MOBILE_ENTRY_SMOKE_OK: draft, cache, confirm, stale-write, dispatch, dashboard, Excel, isolation')
+    print('MOBILE_FORM_PARITY_OK: customer-directory, upload, retry, grade, linked-details, website, Excel')
     identity=call(web,'get','/auth/mobile/bindings').json['bindings'][0]['id']
     call(web,'delete',f'/auth/mobile/bindings/{identity}',json={'password':password})
     call(mobile,'get','/api/mobile/bootstrap',401,headers=headers)
