@@ -735,6 +735,10 @@ def _invoice_aux_data(invoice: ReimbursementInvoice) -> dict[str, Any] | None:
     for row in rows:
         value = json.loads(row.data_json or "{}")
         if value.get("invoice_id") == invoice.id:
+            customer = _owned_customer(value.get("customer_id"))
+            if customer:
+                value["customer"] = customer.short_name or customer.name
+                value["customer_level"] = customer.grade or ""
             value["kind"] = row.kind
             return value
     return None

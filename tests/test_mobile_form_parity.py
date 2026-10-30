@@ -1,6 +1,8 @@
+import io
 import json
 import unittest
 from tests import test_mobile_recognition as fixtures
+from tests.test_mobile_invoice_upload import PNG
 from extensions import db
 from shared.models import Organization, OrganizationMembership
 from customer_projects.models import Customer
@@ -101,6 +103,18 @@ class FormParityTests(unittest.TestCase):
         )
         site = self.web.get(f"/tools/reimbursement/api/summary/{self.period}").json
         self.assertEqual(site["aux"]["entertainment"][0]["approval"], "已审批")
+        with self.app.app_context():
+            row = db.session.get(Customer, customer)
+            row.short_name = "更新简称"
+            row.grade = "AAA"
+            db.session.commit()
+        refreshed = self.mobile.get(f"/api/mobile/invoices/{id}", headers=headers).json
+        mobile_detail = refreshed["invoice"]
+        website_detail = self.web.get("/tools/reimbursement/api/invoices").json["invoices"][0]
+        for detail in (mobile_detail, website_detail):
+            self.assertEqual(detail["customer_level"], "AAA")
+            self.assertEqual(detail["linked_detail"]["customer"], "更新简称")
+            self.assertEqual(detail["linked_detail"]["customer_level"], "AAA")
         created = self.mobile.post(
             "/api/mobile/customers",
             headers=headers,
@@ -118,7 +132,7 @@ class FormParityTests(unittest.TestCase):
             403,
         )
         body.update(
-            snapshot=saved.json["snapshot"],
+            snapshot=refreshed["snapshot"],
             customer_id=None,
             customer_level="A",
             linked_detail=None,
@@ -129,6 +143,37 @@ class FormParityTests(unittest.TestCase):
         self.assertEqual(cleared.status_code, 200, cleared.json)
         self.assertIsNone(cleared.json["invoice"]["customer_id"])
         self.assertEqual(cleared.json["invoice"]["customer_level"], "A")
+
+    def test_upload_customer_and_level_are_visible_on_website_before_confirmation(self):
+        customer, foreign = self.customer_setup()
+        headers = self.login()
+
+        def upload(key, customer_id="", customer_level=""):
+            return self.mobile.post(
+                "/api/mobile/invoices",
+                headers=headers,
+                data={
+                    "file": (io.BytesIO(PNG), "票据.png"),
+                    "period_id": str(self.period),
+                    "office_id": str(self.office),
+                    "document_kind": "invoice",
+                    "occurrence_month": "2026-06",
+                    "customer_id": customer_id,
+                    "customer_level": customer_level,
+                    "idempotency_key": key,
+                },
+            )
+
+        self.assertEqual(upload("invalid-customer-0001", foreign, "A").status_code, 400)
+        created = upload("valid-customer-00001", customer, "AAA")
+        self.assertEqual(created.status_code, 201, created.json)
+        self.assertEqual(created.json["invoice"]["customer"], "客户简称")
+        self.assertEqual(created.json["invoice"]["customer_level"], "AA")
+        row = self.web.get("/tools/reimbursement/api/invoices").json["invoices"][0]
+        self.assertEqual(row["customer_id"], customer)
+        self.assertEqual(row["customer_level"], "AA")
+        self.assertEqual(upload("valid-customer-00001", customer, "AAA").status_code, 200)
+        self.assertEqual(upload("valid-customer-00001", "", "A").status_code, 409)
 
     def test_travel_fields_and_invalid_detail_rollback(self):
         headers, id = self.prepare()
