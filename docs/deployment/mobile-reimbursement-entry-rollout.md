@@ -14,7 +14,7 @@
 
 目的：在此前固定恢复库上验证新API与网站/Excel一致，保持原历史行指纹。只新建合成账号和票据，不向真实微信或OCR发送资料，无服务监听、不加载生产.env。
 
-批准候选SHA由协作在评审/CI通过后给出；把下列CANDIDATE_SHA替换为提供的完整40位SHA，不能用浮动分支当验收身份。`mobile_entry_release.py` 已在0.10.0的main分支，但只允许已验收的`1502ee0`业务祖先及文档/运维差异；本轮客户字段新增后不能直接沿用。恢复库验收新候选后，须更新并审查发布工件的业务候选保护，且重新核实当前生产SHA、工作树与配置。旧的`mobile_invoice_release.py`仅覆盖0.9.48固定基线。
+本轮固定业务候选是`87084ab003431f7b5b8a86956a323915019d9c59`，不能用浮动分支当验收身份。操作者已反馈该候选在隔离恢复库通过五项验收。`mobile_entry_release.py`原先只允许`1502ee0`业务祖先及文档/运维差异；现已固定为新验收候选，仍须独立审查、全套CI和生产基线复核。旧的`mobile_invoice_release.py`仅覆盖0.9.48固定基线。
 
 ```bash
 (
@@ -39,13 +39,13 @@ printf 'stage_dir=%s\n' "$stage_dir"
 
 ## 生产更新与回滚准备
 
-2026-10-29：操作者已确认候选1502ee0764eab772af0463682dd046b6365b0857在服务器恢复库出现全部四项成功标记，历史用户、发票及原件行指纹保持不变。独立审查、PR110全仓CI及PG16通过，功能已合入develop。准备0.10.0发布，尚未执行生产更新或新OCR/四标签真机验收。
+2026-10-30：操作者反馈候选87084ab003431f7b5b8a86956a323915019d9c59在隔离恢复库出现MOBILE_ENTRY_SMOKE_OK、MOBILE_FORM_PARITY_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK；历史用户、发票及原件BLOB行指纹保持不变。该SHA的7项CI通过。本轮新增客户上传及五页视觉仍待生产更新与真机验证。
 
 发布工具实施门：生产受短维护影响；复用invoice_backup、发布互斥锁及Git子进程022；无迁移/依赖/资源，现有systemd即可维护；用固定旧SHA/f5及业务候选差异保护确保符合单体架构。新增mobile_entry_release.py与顺序/故障恢复测试，不改业务候选。预计一个小型运维工件及发布PR，回滚保留同一f5数据。先验证用量/配置/所有权边界，再备份和快进，运行代码用户可读、原行指纹与版本不变后启动；主站200、手机旧/新入口401。禁止执行旧一次性迁移工具。
 
 恢复库成功后，协作核对发布PR/完整main SHA及业务差异，再给固定SHA的停写备份、代码快进、代码可读、服务启动和HTTPS+mobile401检查命令。此阶段尚未执行，不给出可误用的旧迁移脚本。
 
-发布使用本轮`mobile_entry_release.py`，必须连同`invoice_release.py`、`invoice_backup.py`从同一批准main SHA提取到root新建0700目录。脚本限旧be56/f5与已验收1502业务祖先，拒绝数据库/依赖/Caddy或其他未经核对的业务差异；不会重新执行迁移。操作者使用下列形式（精确SHA在release CI与审查后提供）：
+发布使用本轮`mobile_entry_release.py`，必须连同`invoice_release.py`、`invoice_backup.py`从同一批准main SHA提取到root新建0700目录。脚本限旧be56/f5与已验收87084ab业务祖先，拒绝数据库/依赖/Caddy或其他未经核对的业务差异；不会重新执行迁移。操作者使用下列形式（精确main发布SHA在release CI与审查后提供）：
 
 ```bash
 (

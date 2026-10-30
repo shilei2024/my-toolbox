@@ -24,7 +24,7 @@ except ImportError:
     import invoice_backup as backup
 
 SOURCE = "be56a7aca204fdff804d8ec126223180447ff7bf"
-CANDIDATE = "1502ee0764eab772af0463682dd046b6365b0857"
+CANDIDATE = "87084ab003431f7b5b8a86956a323915019d9c59"
 REVISION = "f5a6b7c8d9e0"
 require = common.require
 
@@ -255,7 +255,7 @@ def execute(root, target, log, base=Path("/var/backups/mytoolbox")):
             purpose="mobile entry final; main service stopped; no migration",
             target_commit=target,
             business_candidate=CANDIDATE,
-            staging_evidence="operator MOBILE_ENTRY_SMOKE_OK, MOBILE_HISTORY_OK and MOBILE_STAGING_SMOKE_OK",
+            staging_evidence="operator MOBILE_ENTRY_SMOKE_OK, MOBILE_FORM_PARITY_OK, MOBILE_API_SMOKE_OK, MOBILE_HISTORY_OK and MOBILE_STAGING_SMOKE_OK",
         )
         backup.private_manifest(directory, metadata)
         require(
