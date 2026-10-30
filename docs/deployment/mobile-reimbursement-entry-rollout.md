@@ -107,3 +107,7 @@ curl --retry 8 --retry-connrefused --retry-delay 2 --fail --silent --show-error 
 ## 当前有效发布门禁（2026-10-31）
 
 PR114复核后业务修复候选更新为`8e8ca491f29135c3f90178f66008cb56d0f0fdeb`，发布工具已固定此祖先。前文87084ab恢复库通过仅为历史，当前必须重新取得ENTRY/FORM_PARITY/API/HISTORY/STAGING五项成功；新候选不得沿用旧验收结果。按前文git archive固定SHA方式执行即可；fetch分支可能含后续仅发布脚本/文档提交，不应要求FETCH_HEAD等于业务候选，而应`git merge-base --is-ancestor "$candidate" FETCH_HEAD`验证可达后归档精确候选。所有生产备份、权限、配置保护和回滚条件不变。
+
+### 新候选恢复库证据已取得（2026-10-31）
+
+操作者已确认8e8ca491f29135c3f90178f66008cb56d0f0fdeb的五项服务器验收全部通过及历史行不变，更新前文“必须重新取得/尚未取得”的历史状态。仅余正式发布头CI、main固定SHA和最终停写备份/更新、后续真实业务与真机验收。不得重复迁移f5；发布只从已观测8cd基线到main精确SHA，手机保持开启。
