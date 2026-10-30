@@ -20,9 +20,10 @@
 (
 set -euo pipefail
 cd /opt/mytoolbox
-git fetch origin develop
+git fetch origin codex/invoice-miniprogram-launch
 candidate=CANDIDATE_SHA
 git cat-file -e "${candidate}^{commit}"
+test "$(git rev-parse FETCH_HEAD)" = "$candidate"
 stage_dir=$(mktemp -d /var/tmp/mytoolbox-entry-stage-XXXXXX)
 git archive "$candidate" | tar -x -C "$stage_dir"
 test ! -e "$stage_dir/.env"
@@ -34,7 +35,7 @@ printf 'stage_dir=%s\n' "$stage_dir"
 )
 ```
 
-预期：MOBILE_ENTRY_SMOKE_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK。新增检查OCR草稿/缓存不改费用、明确确认/旧写409、派车保存及网站仪表盘/实际XLS、跨用户隔离；保留原绑定/上传/重试/原件/撤销验收。此脚本只允许postgres系统用户、固定Unix socket库mytoolbox_invoice_verify_20261028_111850及f5版本；失败停止，禁止改保护条件或在生产运行。候选目录保留供核对，不递归清理未知路径。
+预期：MOBILE_ENTRY_SMOKE_OK、MOBILE_FORM_PARITY_OK、MOBILE_API_SMOKE_OK、MOBILE_HISTORY_OK、MOBILE_STAGING_SMOKE_OK。新增检查OCR草稿/缓存不改费用、明确确认/旧写409、客户选择上传与网站回显/重试、派车保存及网站仪表盘/实际XLS、跨用户隔离；保留原绑定/上传/原件/撤销验收。此脚本只允许postgres系统用户、固定Unix socket库mytoolbox_invoice_verify_20261028_111850及f5版本；失败停止，禁止改保护条件或在生产运行。先核实该隔离库确由生产备份恢复且状态可信；如已被其他测试修改或生产有新数据，重新设计全新受保护恢复库演练，不能把旧测试库视为当前生产快照。候选目录保留供核对，不递归清理未知路径。
 
 ## 生产更新与回滚准备
 

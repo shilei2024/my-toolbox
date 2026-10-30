@@ -81,10 +81,11 @@ def exercise(app):
         Image.new('RGB',(12,12),'white').save(stream,'PNG',pnginfo=metadata)
         return stream.getvalue()
 
-    def upload(content,key,kind='fuel'):
+    def upload(content,key,kind='fuel',customer_id='',customer_level=''):
         return mobile.post('/api/mobile/invoices',headers=headers,data={
             'file':(io.BytesIO(content),'stage-receipt.png'),'period_id':str(period),'office_id':str(office),
-            'document_kind':kind,'occurrence_month':'2026-08','idempotency_key':key})
+            'document_kind':kind,'occurrence_month':'2026-08','idempotency_key':key,
+            'customer_id':str(customer_id),'customer_level':customer_level})
 
     original=image();key=secrets.token_hex(16)
     first=upload(original,key)
@@ -141,6 +142,22 @@ def exercise(app):
     parity_refs=call(mobile,'get','/api/mobile/bootstrap',headers=headers).json
     site_refs=call(web,'get','/tools/reimbursement/api/bootstrap').json
     require(parity_refs['customers']==site_refs['customers'],'customer-directory-mismatch')
+    selected_key=secrets.token_hex(16)
+    selected_image=image()
+    selected=upload(selected_image,selected_key,'invoice',customer['id'],'AAA')
+    require(selected.status_code==201,'customer-upload-not-created')
+    selected_invoice=selected.json['invoice']
+    require(selected_invoice['customer']=='验收客户简称' and
+        selected_invoice['customer_level']=='AA','customer-upload-not-canonical')
+    selected_retry=upload(selected_image,selected_key,'invoice',customer['id'],'AAA')
+    require(selected_retry.status_code==200 and
+        selected_retry.json['invoice']['id']==selected_invoice['id'],'customer-upload-retry-failed')
+    require(upload(selected_image,selected_key,'invoice','', 'A').status_code==409,
+        'customer-upload-changed-intent-accepted')
+    website_invoices=call(web,'get','/tools/reimbursement/api/invoices').json['invoices']
+    require(any(row['id']==selected_invoice['id'] and row['customer_id']==customer['id']
+        and row['customer_level']=='AA' for row in website_invoices),
+        'customer-upload-website-mismatch')
     values={**draft['draft'],'confirmed':True,'snapshot':detail['snapshot'],'inclusion_policy':'expense',
         'customer_id':customer['id'],'customer_level':'AAA',
         'category_id':next(c['id'] for c in refs['categories'] if c['name']=='办公费'),
@@ -176,7 +193,7 @@ def exercise(app):
     call(other,'get',dispatch_path,404,headers=other_headers)
     call(other,'get',f'/api/mobile/dashboard/{period}',404,headers=other_headers)
     print('MOBILE_ENTRY_SMOKE_OK: draft, cache, confirm, stale-write, dispatch, dashboard, Excel, isolation')
-    print('MOBILE_FORM_PARITY_OK: customer-directory, create, grade, linked-details, website, Excel')
+    print('MOBILE_FORM_PARITY_OK: customer-directory, upload, retry, grade, linked-details, website, Excel')
     identity=call(web,'get','/auth/mobile/bindings').json['bindings'][0]['id']
     call(web,'delete',f'/auth/mobile/bindings/{identity}',json={'password':password})
     call(mobile,'get','/api/mobile/bootstrap',401,headers=headers)
