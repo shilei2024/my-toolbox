@@ -93,18 +93,14 @@ const api=require('./apps/invoice-miniprogram/lib/api');
  wx.setStorageSync('invoice_session_v1',{access_token:token,expires_at:'2099-01-01T00:00:00Z'});
  let page;global.Page=definition=>{page=definition};
  require('./apps/invoice-miniprogram/pages/home/index');
- page.data=JSON.parse(JSON.stringify(page.data));page.data.periods=[{id:1,name:'六月七月'}];page.data.offices=[{id:2,name:'测试办'}];page.data.month='2026-06';page.data.kindIndex=2;
+ page.data=JSON.parse(JSON.stringify(page.data));page.data.periods=[{id:1,name:'六月七月'}];page.data.offices=[{id:2,name:'测试办'}];const context=require('./apps/invoice-miniprogram/lib/context');context.state().periodId=1;page.data.periodIndex=0;
  page.setData=updates=>{for(const [key,value] of Object.entries(updates)){const parts=key.replace(/\[(\d+)\]/g,'.$1').split('.');let target=page.data;for(const field of parts.slice(0,-1))target=target[field]??(target[field]={});target[parts.at(-1)]=value;}};
- page.data.customers=[{id:null,display_name:'未关联客户'},{id:'customer-1',display_name:'简称',grade:'AA'}];
- page.data.levels=[{value:'',name:'未分类'},{value:'A',name:'A'},{value:'AA',name:'AA'}];
- page.onCustomer({detail:{value:1}});assert.equal(page.data.levelIndex,2);
  let runs=0;page.runQueue=()=>{runs++};page.enqueue([{path:'file.pdf',name:'票据.pdf',size:100}]);
  assert.equal(runs,1);const savedKey=page.data.queue[0].key;
- assert.equal(page.data.queue[0].intent.customer_id,'customer-1');assert.equal(page.data.queue[0].intent.customer_level,'AA');
- page.data.month='2026-07';page.data.kindIndex=1;
- page.onCustomer({detail:{value:0}});page.onLevel({detail:{value:1}});
- assert.equal(page.data.queue[0].intent.occurrence_month,'2026-06');assert.equal(page.data.queue[0].intent.document_kind,'fuel');
- assert.equal(page.data.queue[0].intent.customer_id,'customer-1');assert.equal(page.intent().customer_level,'A');
+ assert.equal(page.data.queue[0].intent.customer_id,'');assert.equal(page.data.queue[0].intent.customer_level,'');
+ assert.equal(page.data.queue[0].intent.occurrence_month,'');assert.equal(page.data.queue[0].intent.document_kind,'invoice');
+ page.data.periods=[{id:2,name:'另一周期'}];context.state().periodId=2;
+ assert.equal(page.data.queue[0].intent.period_id,'1');assert.equal(page.intent().period_id,'2');
  page.data.queue[0].state='failed';page.retry({currentTarget:{dataset:{index:0}}});
  assert.equal(page.data.queue[0].key,savedKey);assert.equal(runs,2);
  wx.requirePrivacyAuthorize=opt=>opt.success();
@@ -171,4 +167,36 @@ api.request=async()=>({success:true,snapshot:'snapshot',draft:{amount:'590.48',t
 (async()=>{await page.recognize();assert.equal(page.data.invoice.amount,'590.48');assert.equal(page.data.amountNote,'税额暂记0，请核对');assert.equal(page.data.confirmed,false);})().catch(e=>{console.error(e);process.exitCode=1;});
 """
         result=subprocess.run([shutil.which('node'), '-e', source], cwd=Path(__file__).parents[1], capture_output=True,encoding='utf-8',timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is required for client checks')
+    def test_password_login_clears_input_never_persists_password_and_guards_late_logins(self):
+        source=r"""
+const assert=require('node:assert/strict');let request,store=new Map();
+global.wx={getStorageSync:k=>store.get(k),setStorageSync:(k,v)=>store.set(k,v),removeStorageSync:k=>store.delete(k),request:o=>{request=o;}};
+const api=require('./apps/invoice-miniprogram/lib/api');
+const context=require('./apps/invoice-miniprogram/lib/context');
+const signed=letter=>({statusCode:200,data:{access_token:letter.repeat(43),expires_at:'2099-01-01T00:00:00Z',display_name:'demo'}});
+(async()=>{
+ let pending=api.passwordLogin('demo@example.test','private-demo-password');
+ assert.equal(request.url,'https://mindfulpenpal.com/api/mobile/session/password');assert(!request.header.Authorization);assert(!request.header.Cookie);
+ request.success(signed('a'));await pending;assert.equal(api.session().auth_method,'password');assert(!JSON.stringify([...store.values()]).includes('private-demo-password'));
+ const late=api.passwordLogin('old@example.test','old-password');const old=request;
+ const newer=api.passwordLogin('new@example.test','new-password');request.success(signed('b'));await newer;
+ old.success(signed('c'));await assert.rejects(late,e=>e.status===409);assert.equal(api.session().access_token,'b'.repeat(43));
+ const rejected=api.passwordLogin('old@example.test','wrong');const failed=request;
+ store.set('invoice_session_v1',{access_token:'d'.repeat(43),expires_at:'2099-01-01T00:00:00Z'});
+ failed.success({statusCode:401,data:{error:'invalid'}});await assert.rejects(rejected,e=>e.status===401);assert.equal(api.session().access_token,'d'.repeat(43));
+ const cleared=api.passwordLogin('old@example.test','old-password');const afterLogout=request;api.clearSession();afterLogout.success(signed('e'));
+ await assert.rejects(cleared,e=>e.status===409);assert.equal(api.session(),null);
+ let page;global.Page=p=>{page=p;};require('./apps/invoice-miniprogram/pages/mine/index');
+ page.data=structuredClone(page.data);page.setData=u=>Object.assign(page.data,u);
+ page.data.email='demo@example.test';page.data.password='clear-this-password';let resolve;
+ api.passwordLogin=()=>new Promise(r=>{resolve=r;});api.request=async()=>({periods:[{id:1,is_active:true}]});wx.switchTab=()=>{};
+ const logging=page.signInPassword();assert.equal(page.data.password,'');assert.equal(page.data.busy,true);
+ resolve({display_name:'demo'});await logging;assert.equal(page.data.password,'');assert.equal(page.data.loginMethod,'password');assert.equal(page.data.busy,false);
+ page.data.password='typed';page.onHide();assert.equal(page.data.password,'');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+        result=subprocess.run([shutil.which('node'),'-e',source],cwd=Path(__file__).parents[1],capture_output=True,encoding='utf-8',timeout=20)
         self.assertEqual(result.returncode,0,result.stderr)

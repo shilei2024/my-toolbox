@@ -1,0 +1,63 @@
+# 网站密码登录、审核账号与精简录入发布
+
+生产起点c74de7ee7ae3c39ed246448e9622c51613e6bfed，f5a6b7c8d9e0、mobile enabled；高铁票原记录真机确认/网站金额两项已由操作者反馈OK。新增能力尚待本轮PR/CI/隔离恢复库/最终备份验证，不把旧验收当作本轮通过。
+
+## 门禁与恢复库
+
+无新迁移、依赖或环境要求。继续人工systemd部署、既有PostgreSQL、Caddy/HTTPS与存储；核实域名/TLS、进程、DB及现有Redis/COS/生成链健康、容量/备份恢复/监控，保护服务器.env/Caddy本地改动。独立审查、所有CI（含PG16）、固定恢复库候选七项标记通过后才能合并发布。
+
+恢复库仍使用[工作台受保护步骤](mobile-reimbursement-entry-rollout.md)，精确候选由协作者给出，不复制.env，不连接生产、不开监听。新增MOBILE_PASSWORD_SMOKE_OK检查正常密码登录、隔离合成审核账号、原件、未知发生月、改密失效和退出；保留高铁票与旧五项。所有新数据属于本次合成账号，旧users/invoices/BLOB指纹不变。PG18本机测试不能替代PG16 CI或服务器恢复库。候选业务改变须重做。
+
+## 生产后端
+
+核对生产实际SHA仍是c74de7ee7ae3c39ed246448e9622c51613e6bfed（0.10.2 高铁票修复版）。本轮发布提交固定为APPROVED_MAIN_SHA，脚本内SOURCE=c74de7e、CANDIDATE=e8e9d9b882d5df878fa1a0232a7c7f85d3c7d25a（含PR120代理项/NUL修复）；复用相同互斥锁、停写备份、配置摘要、f5/历史指纹、022 Git子进程和服务用户可读检查，无迁移。旧版本一次性工具不能代用。
+
+```bash
+(
+set -euo pipefail
+umask 077
+cd /opt/mytoolbox
+git fetch origin main
+release=APPROVED_MAIN_SHA
+test "$(git rev-parse origin/main)" = "$release"
+runner=$(mktemp -d /root/mytoolbox-password-release-XXXXXX)
+for helper in mobile_password_release.py mobile_entry_release.py invoice_release.py invoice_backup.py; do
+  git show "${release}:scripts/ops/${helper}" > "$runner/$helper"
+done
+/opt/mytoolbox/.venv/bin/python "$runner/mobile_password_release.py" "$release"
+)
+```
+
+成功标记MOBILE_PASSWORD_DEPLOY_OK。随后只读核对（不发送真实凭据）：
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+  -d '{"email":"probe@example.invalid","password":"probe"}' \
+  https://mindfulpenpal.com/api/mobile/session/password
+```
+
+预期401、响应为通用错误、`Cache-Control: no-store`、无`Set-Cookie`；`/healthz`仍200；`/api/mobile/bootstrap`仍401。
+
+协作者在所有门禁通过后给准确命令与SHA。失败仅反馈MOBILE_PASSWORD_DEPLOY_FAILED的阶段/私有日志路径，不贴连接详情。若代码尚未改变且配置一致会恢复旧服务；已换代码但健康失败保持停写。保持备份，不自动还原数据库。
+
+## 创建可用审核账号
+
+后端成功后，用生产venv在/opt/mytoolbox执行`scripts/ops/mobile_review_account.py`（具体命令在发布成功后提供）。该脚本不初始化全站、不执行create_all/迁移，只新增普通free用户+报销grant及独立合成组织/客户、当月周期、明确标记的演示PDF和派车记录，额度40/天。不会修改既有账号、真实组织/客户/发票。演示票据不是实际发票，OCR可能需要手动补全，同正常功能。
+
+成功输出REVIEW_ACCOUNT_OK、user_id和credential_file路径，不输出密码。固定root私有目录/文件，重跑保持同一账号，pending提交后异常可恢复。密码在现有网站被修改/账号被禁用/移入其他组织时，重跑拒绝自动重置，反馈existing-account-needs-manual-review；由管理员正常核对。失败固定安全代码，不贴私有文件。
+
+凭据只在你自己的SSH终端打开私有文件，私下复制email/password到微信审核的“登录账号/登录密码”，不要发聊天、截图、Git或版本描述。审核说明：进入“我的”→账号密码登录→首页选择演示周期→发票录入上传原件→核对确认→派车单查看/编辑→首页金额核对。这个入口所有已授权用户都可使用，无专用审核通用码。
+
+客户选择来自演示独立组织，可完整核对；新增客户仍取决于现有CUSTOMER_PROJECTS_ENABLED及pilot配置，脚本不扩大试点或开启全站功能。网站普通用户管理可以禁用/撤权/改密，其他业务与费用规则相同。
+
+## 新客户端与后台材料
+
+后端通过后编译上传0.11.0，保持合法域名/TLS校验。账号密码登录无需微信绑定；微信方式继续可用。网站邮箱/口令只用于服务端验证，小程序只存token/expiry/auth_method，退出/隐藏页面清空密码输入。请将网站邮箱登录用途补充到实际微信隐私指引，口令不明文存储；平台选项与运营者/联系方式以后台实际情况填写，不使用示例凭据。
+
+真机验收：网站邮箱密码正确/错误、微信登录并存、退出及改密后重登；首页选择后上传页无重复整卡，未选期引导首页；图片/PDF上传后在核对页选择办事处/用途/客户与等级/发生月，确认同步网站；派车和首页同周期；错误网络重试不跨账户/周期。审核账号单独登录，不能访问真实用户资料，网站/Excel字段一致。开发版本上传不等于体验版设置、审核通过或正式发布。
+
+## 故障与回滚
+
+401：检查正常账号是否启用、工具grant、正确密码及是否改密；不要关鉴权。429：等待后重试，现有memory限流按worker生效，不承诺全局或重启持久化。与既有绑定登录同为每IP 5/min；若生产经Caddy转发，PROXY_FIX_COUNT须与实际代理跳数一致，否则所有用户共享同一IP配额（既有策略，本功能不新增该风险）。400月份：新客户端需已更新后端，发生月可空，非空必须YYYY-MM。无期数：在首页选择本人周期，或网站创建后刷新；上传页不再自动另选一个周期。
+
+代码回退到c74de7e、客户端回0.10.2，f5保持，新创建普通用户和资料保留，旧代码拒绝password token。需暂停手机入口时沿用现有开关流程，不恢复旧数据库覆盖新资料、不删除审核账号或真实数据。回滚步骤沿用[高铁票手册](mobile-ticket-amount-rollout.md)，确认配置摘要、工作树、服务用户代码可读后启动，并验证health/手机401；随后正常网站或兼容客户端操作。

@@ -23,7 +23,7 @@ Page({
         loggedIn: false,
         summary: null,
         periods: [],
-        message: "请先到“我的”登录并绑定网站账号。",
+        message: "请先到“我的”登录网站账号。",
       });
       return;
     }

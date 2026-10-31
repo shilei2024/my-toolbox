@@ -17,6 +17,27 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def _password_case(self, name):
+        from tests.test_mobile_password_login import PasswordLoginTests
+        self.password_sign_in=lambda email="mobile0@example.test",password="test-password":PasswordLoginTests.password_sign_in(self,email,password)
+        getattr(PasswordLoginTests,name)(self)
+
+    def test_password_shared_owner_on_postgres(self):
+        self._password_case("test_normal_website_credentials_issue_short_scoped_session_and_share_owner")
+
+    def test_password_rotation_on_postgres(self):
+        self._password_case("test_password_rotation_invalidates_password_sessions_but_not_wechat")
+
+    def test_password_isolation_on_postgres(self):
+        self._password_case("test_independent_sessions_logout_grant_revocation_and_cross_owner")
+
+    def test_unassigned_occurrence_on_postgres(self):
+        self._password_case("test_blank_occurrence_stages_original_without_inventing_month")
+
+    def test_review_provision_on_postgres(self):
+        from tests.test_mobile_review_account import ReviewAccountTests
+        ReviewAccountTests.test_account_is_ordinary_isolated_and_reruns_do_not_reset_credentials(self)
+
     def _ticket_case(self, name):
         from tests.test_mobile_ticket_amounts import TicketAmountApiTests
         self.prepare=lambda kind="invoice":TicketAmountApiTests.prepare(self,kind)

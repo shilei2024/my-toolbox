@@ -52,3 +52,5 @@
 - [ADR-0042：移动报销工作台、识别确认与派车事实源](0042-mobile-reimbursement-entry.md)。
 
 - [ADR-0043：移动票据缺失金额拆分](0043-mobile-invoice-missing-amounts.md)。
+
+- [ADR-0044：小程序复用网站密码与审核账号](0044-mobile-website-password-login.md)。

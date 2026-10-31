@@ -22,7 +22,7 @@ class MobileInvoiceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.app = Flask(__name__)
         self.app.config.update(TESTING=True, SECRET_KEY='test', SESSION_PROTECTION=None, SQLALCHEMY_DATABASE_URI=getattr(self, 'database_uri', 'sqlite:///:memory:'),
-            WTF_CSRF_ENABLED=False, RATELIMIT_ENABLED=False, UPLOAD_DIR=self.temp.name,
+            WTF_CSRF_ENABLED=False, RATELIMIT_ENABLED=getattr(self, "rate_limits_enabled", False), RATELIMIT_STORAGE_URI="memory://", UPLOAD_DIR=self.temp.name,
             WECHAT_MINI_ENABLED=True, WECHAT_MINI_APP_ID='wxe79848a64a839db8',
             WECHAT_MINI_APP_SECRET='unit-test-only-not-a-real-secret', DAILY_FREE_LIMIT=100, ANON_FREE_LIMIT=10)
         db.init_app(self.app); csrf.init_app(self.app); limiter.init_app(self.app); login_manager.init_app(self.app)

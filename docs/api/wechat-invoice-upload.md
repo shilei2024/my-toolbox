@@ -74,3 +74,9 @@ bootstrap新增customers（网站同一_customer_directory/_customer_dict）、c
 ## 2026-10-31 缺失金额补齐（候选）
 
 识别及缓存响应新增可选amount_note，draft的amount/tax_amount/total_amount补缺失组件（空字符串/null/纯空白，不含显式0）。仅总额已知：amount=total_amount、tax_amount=0.00，amount_note明确暂记0须核对。两个数已知按差额/合计补第三个，不推算税率。confirm同样兼容旧客户端空白组件，在invoice.confirm审计记录amount_note；三个显式数不一致继续400，并保留Bearer登录态。不改变确认、owner、快照、费用口径。详见[规则](../product/mobile-ticket-amount-fix.md)。
+
+## 网站账号密码登录与原件暂存（候选）
+
+POST /api/mobile/session/password接受JSON email/password（最长255/256字符，body最多4096字节），复用网站规范化邮箱/hash、启用状态和reimbursement grant。正确返回access_token、expires_at、display_name、auth_method=password；24h Bearer，不签网站Cookie。错误/未知/禁用/无grant均通用401，结构无效400、过大413、限流429；全部no-store。IP5/min、规范邮箱摘要10/h，存储沿既有Flask-Limiter配置，memory://为每worker。修改网站密码立即使该类旧token失效；微信token不受此次密码摘要更改影响，解绑接口仍只管理微信。退出撤销当前会话，其他会话可并存。禁止客户端owner_id/AppSecret等字段。
+
+上传occurrence_month现在可空（未确认的原件没有实际发生月），非空仍需YYYY-MM；不从当天或报销周期猜发生月。原生新上传用首页当前期、默认办事处、invoice/review与空客户/月，核对页继续完整确认。旧带月/客户/用途的客户端契约保留；幂等fingerprint及变更409不变。新客户端需新后端后再上传，否则旧后端会拒绝空月份。
