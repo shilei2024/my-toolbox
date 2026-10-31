@@ -171,7 +171,9 @@ def password_payload():
 def password_account_limit_key():
     data=password_payload()
     email=data.get('email','') if isinstance(data,dict) else ''
-    value=email.strip().lower() if isinstance(email,str) and len(email)<=255 else 'invalid'
+    # Reuse the service normalization: unusable identifiers share one bounded bucket
+    # instead of raising inside the limiter before authentication can return 401.
+    value=service.normalized_email(email) or 'invalid'
     return 'mobile-password-account:'+hashlib.sha256(value.encode()).hexdigest()
 
 
