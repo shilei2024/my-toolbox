@@ -20,6 +20,6 @@
 
 ## 已完成的本机验证与待办
 
-业务候选94f79f48d19c6724cc4baa99372ea0ed567fdd88：独立只读Reviewer批准，另行16项相关API/原生/恢复库逻辑测试通过。本机真实PG18临时集群33项成功并停止；额外PG16 CI仍待GitHub。原生WXML/WXSS实际编译、JS语法、diff空白检查通过。后续发布工具13项顺序/备份失败重启旧版/新健康失败保持停写测试通过。全套CI、服务器隔离PG16恢复库及生产尚待完成，不标为已上线。
+业务候选94f79f48d19c6724cc4baa99372ea0ed567fdd88：独立只读Reviewer批准，另行16项相关API/原生/恢复库逻辑测试通过。本机真实PG18临时集群33项成功并停止；额外PG16 CI仍待GitHub。原生WXML/WXSS实际编译、JS语法、diff空白检查通过。后续发布工具13项顺序/备份失败重启旧版/新健康失败保持停写测试通过。PR116七项CI及操作者隔离PG16恢复库六标记已全部通过；业务与工件已获独立批准。生产尚待主线CI完成后由操作者执行，不标为已上线。
 
 生产执行时从批准main精确SHA提取mobile_ticket_release.py、mobile_entry_release.py、invoice_release.py、invoice_backup.py四文件到root新建0700目录；用生产venv执行mobile_ticket_release.py SHA。成功应为MOBILE_TICKET_DEPLOY_OK、相同f5、active及HTTPS/mobile enabled。旧入口保持旧保护，不要直接运行它。
