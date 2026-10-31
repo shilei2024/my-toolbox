@@ -61,7 +61,12 @@ def _owner() -> tuple[str, str]:
 
 
 def _customer_directory() -> list[Any]:
-    """Return the current organization customer directory once per request."""
+    """Return only the customers this account may pick, once per request.
+
+    The organization still owns the rows, but each account keeps its own list:
+    customers created or owned by the caller, plus legacy rows that have no
+    creator at all. Office/product-line seeds stay shared defaults.
+    """
     if hasattr(g, "_reimbursement_customers"):
         return g._reimbursement_customers
     if not has_request_context():
@@ -73,6 +78,13 @@ def _customer_directory() -> list[Any]:
     if membership is None:
         g._reimbursement_customers = []
         return g._reimbursement_customers
+    from flask_login import current_user
+
+    own = or_(
+        Customer.created_by_user_id == current_user.id,
+        Customer.primary_owner_user_id == current_user.id,
+        Customer.created_by_user_id.is_(None),
+    )
     g._reimbursement_customers = list(
         db.session.scalars(
             select(Customer)
@@ -80,11 +92,35 @@ def _customer_directory() -> list[Any]:
                 Customer.organization_id == membership.organization_id,
                 Customer.deleted_at.is_(None),
                 Customer.status == "active",
+                own,
             )
             .order_by(func.coalesce(Customer.short_name, Customer.name), Customer.name)
         )
     )
     return g._reimbursement_customers
+
+
+def _org_customer(customer_id: Any) -> Any | None:
+    """Resolve any customer in the caller's organization, for display or history.
+
+    Invoices keep only a customer id; a colleague's older rows must still render a
+    name after the per-account directory change, even though nobody else may pick
+    that customer for a new entry.
+    """
+    value = str(customer_id or "").strip()
+    if not value or not has_request_context():
+        return None
+    from customer_projects.permissions import current_membership
+
+    membership = current_membership()
+    if membership is None:
+        return None
+    return db.session.scalar(
+        select(Customer).where(
+            Customer.id == value,
+            Customer.organization_id == membership.organization_id,
+        )
+    )
 
 
 def _customer_dict(customer: Any) -> dict[str, Any]:
@@ -121,7 +157,7 @@ def _owned_customer(customer_id: Any) -> Any | None:
 
 
 def _invoice_customer_level(invoice: ReimbursementInvoice) -> str:
-    customer = _owned_customer(invoice.customer_id)
+    customer = _org_customer(invoice.customer_id)
     return str(customer.grade or "") if customer else invoice.customer_level
 
 
@@ -278,7 +314,7 @@ def _invoice_dict(invoice: ReimbursementInvoice, category: ReimbursementCategory
         owner_id=invoice.owner_id,
         name=invoice.office,
     ).first()
-    customer = _owned_customer(invoice.customer_id)
+    customer = _org_customer(invoice.customer_id)
     return {
         "id": invoice.id,
         "period_id": invoice.period_id,
@@ -688,7 +724,7 @@ def _render_aux_values(values: list[dict[str, Any]]) -> dict[str, list[dict[str,
     vehicle_rows = []
     for row in sorted(values, key=lambda item: (item["kind"], item["sort_order"], item["id"])):
         value = dict(row["data"])
-        customer = _owned_customer(value.get("customer_id"))
+        customer = _org_customer(value.get("customer_id"))
         if customer:
             value["customer"] = customer.short_name or customer.name
             value["customer_level"] = customer.grade or ""
@@ -735,7 +771,7 @@ def _invoice_aux_data(invoice: ReimbursementInvoice) -> dict[str, Any] | None:
     for row in rows:
         value = json.loads(row.data_json or "{}")
         if value.get("invoice_id") == invoice.id:
-            customer = _owned_customer(value.get("customer_id"))
+            customer = _org_customer(value.get("customer_id"))
             if customer:
                 value["customer"] = customer.short_name or customer.name
                 value["customer_level"] = customer.grade or ""
@@ -776,7 +812,7 @@ def _sync_invoice_aux(
         return
 
     detail = dict(linked_detail or {})
-    customer = _owned_customer(invoice.customer_id)
+    customer = _org_customer(invoice.customer_id)
     customer_name = customer.short_name or customer.name if customer else str(detail.get("customer") or "")
     customer_id = customer.id if customer else None
     customer_level = customer.grade or "" if customer else invoice.customer_level
@@ -1479,7 +1515,12 @@ def save_invoice(invoice: ReimbursementInvoice, data: dict[str, Any]) -> str | N
     customer_id = str(data.get("customer_id") or "").strip()
     customer = _owned_customer(customer_id)
     if customer_id and customer is None:
-        return "请选择当前组织中的有效客户"
+        # An unchanged reference to a retired or colleague-owned customer must
+        # survive edits (remarks, amounts); only a new choice is restricted.
+        if customer_id == str(invoice.customer_id or ""):
+            customer = _org_customer(customer_id)
+        if customer is None:
+            return "请选择当前组织中的有效客户"
     customer_level = str(data.get("customer_level") or "").strip().upper()
     if customer_level and customer_level not in CUSTOMER_LEVELS:
         return "客户等级仅支持 0-1、A、AA、AAA"
