@@ -10,7 +10,33 @@
 
 ## 生产后端
 
-核对生产实际SHA仍是c74de7e。使用本轮专用mobile_password_release.py，连同mobile_entry_release.py、invoice_release.py、invoice_backup.py从批准main精确SHA提取到root新建0700目录。它复用相同互斥锁、停写备份、配置摘要、f5/历史指纹、022 Git子进程和服务用户可读检查，无迁移。新登录路由还须空参数返回通用401、no-store且无Cookie。旧版本一次性工具不能代用。
+核对生产实际SHA仍是c74de7ee7ae3c39ed246448e9622c51613e6bfed（0.10.2 高铁票修复版）。本轮发布提交固定为APPROVED_MAIN_SHA，脚本内SOURCE=c74de7e、CANDIDATE=e8e9d9b882d5df878fa1a0232a7c7f85d3c7d25a（含PR120代理项/NUL修复）；复用相同互斥锁、停写备份、配置摘要、f5/历史指纹、022 Git子进程和服务用户可读检查，无迁移。旧版本一次性工具不能代用。
+
+```bash
+(
+set -euo pipefail
+umask 077
+cd /opt/mytoolbox
+git fetch origin main
+release=APPROVED_MAIN_SHA
+test "$(git rev-parse origin/main)" = "$release"
+runner=$(mktemp -d /root/mytoolbox-password-release-XXXXXX)
+for helper in mobile_password_release.py mobile_entry_release.py invoice_release.py invoice_backup.py; do
+  git show "${release}:scripts/ops/${helper}" > "$runner/$helper"
+done
+/opt/mytoolbox/.venv/bin/python "$runner/mobile_password_release.py" "$release"
+)
+```
+
+成功标记MOBILE_PASSWORD_DEPLOY_OK。随后只读核对（不发送真实凭据）：
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+  -d '{"email":"probe@example.invalid","password":"probe"}' \
+  https://mindfulpenpal.com/api/mobile/session/password
+```
+
+预期401、响应为通用错误、`Cache-Control: no-store`、无`Set-Cookie`；`/healthz`仍200；`/api/mobile/bootstrap`仍401。
 
 协作者在所有门禁通过后给准确命令与SHA。失败仅反馈MOBILE_PASSWORD_DEPLOY_FAILED的阶段/私有日志路径，不贴连接详情。若代码尚未改变且配置一致会恢复旧服务；已换代码但健康失败保持停写。保持备份，不自动还原数据库。
 
@@ -32,6 +58,6 @@
 
 ## 故障与回滚
 
-401：检查正常账号是否启用、工具grant、正确密码及是否改密；不要关鉴权。429：等待后重试，现有memory限流按worker生效，不承诺全局或重启持久化。400月份：新客户端需已更新后端，发生月可空，非空必须YYYY-MM。无期数：在首页选择本人周期，或网站创建后刷新；上传页不再自动另选一个周期。
+401：检查正常账号是否启用、工具grant、正确密码及是否改密；不要关鉴权。429：等待后重试，现有memory限流按worker生效，不承诺全局或重启持久化。与既有绑定登录同为每IP 5/min；若生产经Caddy转发，PROXY_FIX_COUNT须与实际代理跳数一致，否则所有用户共享同一IP配额（既有策略，本功能不新增该风险）。400月份：新客户端需已更新后端，发生月可空，非空必须YYYY-MM。无期数：在首页选择本人周期，或网站创建后刷新；上传页不再自动另选一个周期。
 
 代码回退到c74de7e、客户端回0.10.2，f5保持，新创建普通用户和资料保留，旧代码拒绝password token。需暂停手机入口时沿用现有开关流程，不恢复旧数据库覆盖新资料、不删除审核账号或真实数据。回滚步骤沿用[高铁票手册](mobile-ticket-amount-rollout.md)，确认配置摘要、工作树、服务用户代码可读后启动，并验证health/手机401；随后正常网站或兼容客户端操作。
