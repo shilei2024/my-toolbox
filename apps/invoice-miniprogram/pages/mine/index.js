@@ -8,7 +8,9 @@ Page({
     bindingCode: "",
     displayName: "",
     showPrivacy: false,
-    email: '', password: '', loginMethod: '',
+    email: "",
+    password: "",
+    loginMethod: "",
   },
   onLoad() {
     this.privacyHandler = (resolve) => {
@@ -51,7 +53,7 @@ Page({
       this.setData({
         loggedIn: true,
         displayName: d.display_name,
-        loginMethod:api.session()?.auth_method||'wechat',
+        loginMethod: api.session()?.auth_method || "wechat",
         message: "",
       });
     } catch (e) {
@@ -71,7 +73,7 @@ Page({
         loggedIn: true,
         displayName: login.display_name,
         bindingCode: "",
-        loginMethod:'wechat',
+        loginMethod: "wechat",
       });
       const d = await api.request("/api/mobile/bootstrap");
       context.choose(d.periods);
@@ -99,18 +101,38 @@ Page({
       fail: () => this.setData({ message: "扫码未完成，也可粘贴一次性绑定码" }),
     });
   },
-  credentialInput(e){const key=e.currentTarget.dataset.key;if(['email','password'].includes(key))this.setData({[key]:e.detail.value});},
-  async signInPassword(){
-    if(this.data.busy||context.state().uploading)return;
-    const email=this.data.email.trim(), password=this.data.password;
-    if(!email||!password){this.setData({message:'请输入网站邮箱和密码'});return;}
-    this.setData({busy:true,message:'',password:''});
-    try{
-      const login=await api.passwordLogin(email,password);context.clear();
-      this.setData({loggedIn:true,displayName:login.display_name,loginMethod:'password',bindingCode:''});
-      const refs=await api.request('/api/mobile/bootstrap');context.choose(refs.periods);
-      this.setData({message:'已登录网站账号'});wx.switchTab({url:'/pages/dashboard/index'});
-    }catch(e){this.setData({message:e.message});}finally{this.setData({busy:false,password:''});}
+  credentialInput(e) {
+    const key = e.currentTarget.dataset.key;
+    if (["email", "password"].includes(key))
+      this.setData({ [key]: e.detail.value });
+  },
+  async signInPassword() {
+    if (this.data.busy || context.state().uploading) return;
+    const email = this.data.email.trim(),
+      password = this.data.password;
+    if (!email || !password) {
+      this.setData({ message: "请输入网站邮箱和密码" });
+      return;
+    }
+    this.setData({ busy: true, message: "", password: "" });
+    try {
+      const login = await api.passwordLogin(email, password);
+      context.clear();
+      this.setData({
+        loggedIn: true,
+        displayName: login.display_name,
+        loginMethod: "password",
+        bindingCode: "",
+      });
+      const refs = await api.request("/api/mobile/bootstrap");
+      context.choose(refs.periods);
+      this.setData({ message: "已登录网站账号" });
+      wx.switchTab({ url: "/pages/dashboard/index" });
+    } catch (e) {
+      this.setData({ message: e.message });
+    } finally {
+      this.setData({ busy: false, password: "" });
+    }
   },
   async logout() {
     if (this.data.busy) return;
@@ -141,7 +163,9 @@ Page({
         loggedIn: false,
         displayName: "",
         bindingCode: "",
-        email:'',password:'',loginMethod:'',
+        email: "",
+        password: "",
+        loginMethod: "",
         message: "已退出登录；已保存的资料仍保留",
       });
     }

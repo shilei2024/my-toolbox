@@ -321,7 +321,8 @@ def mobile_upload():
         kind = fields.get("document_kind", "")
         if kind not in KINDS:
             raise ValueError("请选择票据用途")
-        occurrence = month(fields.get("occurrence_month", ""))
+        occurrence = fields.get("occurrence_month", "")
+        occurrence = month(occurrence) if occurrence else ""
         customer_id = fields.get("customer_id", "").strip()
         customer_level = fields.get("customer_level", "").strip()
         if len(customer_id) > 64 or len(customer_level) > 8:

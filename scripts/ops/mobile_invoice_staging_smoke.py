@@ -241,6 +241,39 @@ def exercise(app):
     call(other,'get',ticket_path,404,headers=other_headers)
     call(ticket_mobile,'get','/api/mobile/bootstrap',headers=ticket_headers)
     print('MOBILE_TICKET_AMOUNTS_OK: total-only, cache, old-client, explicit-mismatch, website, isolation, session')
+    # Normal credentials use the same business flow, not a review-only bypass.
+    from scripts.ops.mobile_review_account import create_synthetic_account
+    review_email='mini-review-'+secrets.token_hex(8)+'@mindfulpenpal.com'
+    review_password=secrets.token_urlsafe(24)
+    with app.app_context():
+        review=create_synthetic_account(review_email,review_password)
+        db.session.commit()
+    review_client=app.test_client(use_cookies=False)
+    signed=call(review_client,'post','/api/mobile/session/password',json={'email':review_email,'password':review_password})
+    require('Set-Cookie' not in signed.headers,'password-login-issued-cookie')
+    review_headers={'Authorization':'Bearer '+signed.json['access_token']}
+    review_refs=call(review_client,'get','/api/mobile/bootstrap',headers=review_headers).json
+    require(len(review_refs['customers'])==1 and review_refs['customers'][0]['name']=='合成演示客户','review-customer-not-isolated')
+    call(review_client,'get',detail_path,404,headers=review_headers)
+    review_original=call(review_client,'get',f"/api/mobile/invoices/{review['invoice_id']}/file",headers=review_headers)
+    require(review_original.data.startswith(b'%PDF-'),'review-original-missing')
+    staged=call(review_client,'post','/api/mobile/invoices',201,headers=review_headers,data={
+        'file':(io.BytesIO(image()),'unassigned.png'),'period_id':str(review['period_id']),
+        'office_id':str(review_refs['offices'][0]['id']),'document_kind':'invoice','occurrence_month':'',
+        'idempotency_key':secrets.token_hex(16)})
+    require(staged.json['invoice']['occurrence_month']=='' and staged.json['invoice']['inclusion_policy']=='review','unassigned-upload-not-staged')
+    call(review_client,'post','/api/mobile/session/password',401,json={'email':review_email,'password':'wrong'})
+    # An ordinary password change invalidates old tokens but leaves saved data.
+    with app.app_context():
+        db.session.get(User,review['user_id']).set_password('rotated-'+review_password);db.session.commit()
+    call(review_client,'get','/api/mobile/bootstrap',401,headers=review_headers)
+    fresh=call(review_client,'post','/api/mobile/session/password',json={'email':review_email,'password':'rotated-'+review_password}).json
+    fresh_headers={'Authorization':'Bearer '+fresh['access_token']}
+    call(review_client,'get',f"/api/mobile/dashboard/{review['period_id']}",headers=fresh_headers)
+    call(review_client,'post','/api/mobile/logout',headers=fresh_headers)
+    call(review_client,'get','/api/mobile/bootstrap',401,headers=fresh_headers)
+    print('MOBILE_PASSWORD_SMOKE_OK: login, review-isolation, original, unknown-month, rotation, logout')
+
 
 
 

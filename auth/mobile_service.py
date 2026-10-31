@@ -142,25 +142,33 @@ def authenticate(raw_token):
 
 def password_login(email, password):
     """Normal website credentials issue only a scoped, short-lived mobile session."""
-    if not isinstance(email,str) or not isinstance(password,str) or not 1<=len(email)<=255 or not 1<=len(password)<=256:
-        raise MobileError('账号或密码不正确，或账号暂不可用',401)
-    user=User.query.filter_by(email=email.strip().lower()).with_for_update().populate_existing().first()
-    valid=check_password_hash(user.password_hash if user else _DUMMY_HASH,password)
+    message = "账号或密码不正确，或账号暂不可用"
+    if (not isinstance(email, str) or not isinstance(password, str)
+            or not 1 <= len(email) <= 255 or not 1 <= len(password) <= 256):
+        raise MobileError(message, 401)
+    user = User.query.filter_by(email=email.strip().lower()).with_for_update().populate_existing().first()
+    try:
+        valid = check_password_hash(user.password_hash if user else _DUMMY_HASH, password)
+    except ValueError:
+        valid = False
     from models import UserToolGrant
-    if not user or not valid or not user.is_active_user or (not user.is_admin and not db.session.get(UserToolGrant,{'user_id':user.id,'tool_id':'reimbursement'})):
-        raise MobileError('账号或密码不正确，或账号暂不可用',401)
-    subject=digest(f'{user.id}:{user.password_hash}')
-    identity=ExternalIdentity.query.filter_by(provider=PASSWORD_PROVIDER,client_id=client_id(),subject=subject).first()
+
+    if (not user or not valid or not user.is_active_user or (not user.is_admin
+            and not db.session.get(UserToolGrant, {"user_id": user.id, "tool_id": "reimbursement"}))):
+        raise MobileError(message, 401)
+    subject = digest(f"{user.id}:{user.password_hash}")
+    identity = ExternalIdentity.query.filter_by(provider=PASSWORD_PROVIDER, client_id=client_id(), subject=subject).first()
     if not identity:
-        identity=ExternalIdentity(provider=PASSWORD_PROVIDER,client_id=client_id(),subject=subject,user_id=user.id,active=True)
-        db.session.add(identity);db.session.flush()
-    if not identity.active or identity.user_id!=user.id:
-        raise MobileError('账号暂不可用，请联系管理员',401)
-    token=secrets.token_urlsafe(32);expires=utcnow()+timedelta(hours=24)
-    db.session.add(MobileSession(identity_id=identity.id,user_id=user.id,token_hash=digest(token),expires_at=expires))
-    audit(user.id,'password_session.created',identity_id=identity.id)
+        identity = ExternalIdentity(provider=PASSWORD_PROVIDER, client_id=client_id(), subject=subject, user_id=user.id, active=True)
+        db.session.add(identity)
+        db.session.flush()
+    if not identity.active or identity.user_id != user.id:
+        raise MobileError(message, 401)
+    token, expires = secrets.token_urlsafe(32), utcnow() + timedelta(hours=24)
+    db.session.add(MobileSession(identity_id=identity.id, user_id=user.id, token_hash=digest(token), expires_at=expires))
+    audit(user.id, "password_session.created", identity_id=identity.id)
     db.session.commit()
-    return {'access_token':token,'expires_at':expires.isoformat()+'Z','display_name':user.nickname or '网站账号','auth_method':'password'}
+    return {"access_token": token, "expires_at": expires.isoformat()+"Z", "display_name": user.nickname or "网站账号", "auth_method": "password"}
 
 
 def unbind(user_id, identity_id):

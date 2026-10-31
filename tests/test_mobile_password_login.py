@@ -91,3 +91,32 @@ class PasswordLoginTests(unittest.TestCase):
         self.assertEqual(response.status_code,413,response.json)
         self.assertEqual(self.mobile.post("/api/mobile/session/password",data="{",content_type="application/json").status_code,400)
         self.assertEqual(self.web.post("/api/mobile/session/password",json={"email":"mobile0@example.test","password":"test-password"}).status_code,401)
+
+    def test_blank_occurrence_stages_original_without_inventing_month(self):
+        signed=self.password_sign_in().json
+        headers={"Authorization":"Bearer "+signed["access_token"]}
+        staged=self.upload(headers,kind="invoice",occurrence="")
+        self.assertEqual(staged.status_code,201,staged.json)
+        self.assertEqual(staged.json["invoice"]["occurrence_month"],"")
+        self.assertEqual(staged.json["invoice"]["inclusion_policy"],"review")
+        self.assertFalse(staged.json["invoice"]["amount_confirmed"])
+        self.assertEqual(self.upload(headers,key="invalid-month-key-00001",kind="invoice",occurrence="2026-99").status_code,400)
+
+
+class PasswordRateLimitTests(unittest.TestCase):
+    setUp=fixtures.MobileInvoiceTests.setUp
+    rate_limits_enabled=True
+
+    def test_real_ip_and_normalized_account_limits_return_sanitized_json(self):
+        from extensions import limiter
+        with self.app.app_context(): limiter.reset()
+        for index in range(6):
+            response=self.mobile.post("/api/mobile/session/password",json={"email":"mobile0@example.test","password":"wrong"})
+            self.assertEqual(response.status_code,401 if index<5 else 429,response.data)
+        for index in range(11):
+            response=self.mobile.post("/api/mobile/session/password",json={"email":" MOBILE1@EXAMPLE.TEST ","password":"wrong"},
+                environ_base={"REMOTE_ADDR":f"198.51.100.{index+1}"})
+            self.assertEqual(response.status_code,401 if index<10 else 429,response.data)
+        self.assertEqual(response.json,{"error":"尝试次数过多，请稍后再试"})
+        self.assertIn("no-store",response.headers["Cache-Control"])
+        self.assertNotIn("Set-Cookie",response.headers)

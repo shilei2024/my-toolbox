@@ -94,3 +94,7 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 ## 2026-10-31 高铁票金额拆分修复（候选）
 
 移动草稿、旧缓存读取和确认通过retention.complete_invoice_amounts补空白，显式0保留；仅合计时返回税额暂记0的核对提示，已有不一致仍拒绝。旧客户端空白兼容，无迁移/额外OCR；[ADR-0043](../adr/0043-mobile-invoice-missing-amounts.md)。
+
+## 正常账号密码登录与上传精简（候选）
+
+复用User/hash、website_password ExternalIdentity和24小时MobileSession，身份摘要含uid与当前pwd_hash，改密后旧会话失效；微信身份互不挤占，普通grant/owner保持。上传页移除本次录入整卡，首页决定当前期，原件review暂存、发生月可空，办事处/用途/客户/月在核对页编辑确认。无新schema，审核账号是隔离普通用户与合成资料。见[ADR0044](../adr/0044-mobile-website-password-login.md)。
