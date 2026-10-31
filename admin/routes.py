@@ -123,7 +123,10 @@ def users():
 
 
 def _render_users(**extra):
-    page = max(int(request.args.get("page", 1)), 1)
+    # Callers (e.g. the reset-code view) may pass the page explicitly; pop it so
+    # render_template never receives the same keyword twice.
+    requested = extra.pop("page", None)
+    page = max(int(requested or request.args.get("page", 1)), 1)
     per_page = 25
     q = db.session.query(User).order_by(User.created_at.desc())
     total = q.count()
