@@ -962,3 +962,7 @@
 发布工件：mobile_account_release.py 固定 SOURCE=e22cfef（0.11.1）、CANDIDATE=db2d55d，沿用停写备份、022 检出与历史指纹校验；合并后按发布说明用固定 main SHA 执行。
 
 操作者已反馈MOBILE_ACCOUNT_DEPLOY_OK：主站dc98efc、f5不变、备份mobile-entry-final-jr83nrkw、service/HTTPS/mobile正常；线上/forgot 200且no-store、登录页有「忘记密码？」、未授权手机接口401。真实重置与真机客户隔离待验收。
+
+### 0.12.1 热修：生成重置码 500
+
+管理后台生成重置码时 page 关键字重复传入导致 500；修复渲染入口并新增回归测试，重置码格式/有效期与客户归属逻辑未变。发布工件 mobile_reset_fix_release.py（SOURCE=dc98efc、CANDIDATE=957d643）。
