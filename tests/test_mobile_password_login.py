@@ -92,6 +92,19 @@ class PasswordLoginTests(unittest.TestCase):
         self.assertEqual(self.mobile.post("/api/mobile/session/password",data="{",content_type="application/json").status_code,400)
         self.assertEqual(self.web.post("/api/mobile/session/password",json={"email":"mobile0@example.test","password":"test-password"}).status_code,401)
 
+    def test_unusable_identifiers_fail_uniformly_instead_of_raising(self):
+        baseline=self.password_sign_in(password="wrong").json
+        for data in ({"email":"\ud800@example.test","password":"x"},
+                     {"email":"mobile0\x00@example.test","password":"x"},
+                     {"email":"mobile0@ example.test","password":"test-password"},
+                     {"email":"mobile0@example.test","password":"\ud800"},
+                     {"email":"mobile0@example.test","password":"line\nbreak"}):
+            with self.subTest(email_type=type(data["email"]).__name__,value=repr(data)[:40]):
+                response=self.mobile.post("/api/mobile/session/password",json=data)
+                self.assertEqual(response.status_code,401,response.json)
+                self.assertEqual(response.json,baseline)
+        with self.app.app_context(): self.assertEqual(MobileSession.query.count(),0)
+
     def test_blank_occurrence_stages_original_without_inventing_month(self):
         signed=self.password_sign_in().json
         headers={"Authorization":"Bearer "+signed["access_token"]}
@@ -120,3 +133,16 @@ class PasswordRateLimitTests(unittest.TestCase):
         self.assertEqual(response.json,{"error":"尝试次数过多，请稍后再试"})
         self.assertIn("no-store",response.headers["Cache-Control"])
         self.assertNotIn("Set-Cookie",response.headers)
+
+    def test_unusable_identifiers_are_limited_not_a_server_error(self):
+        from extensions import limiter
+        with self.app.app_context(): limiter.reset()
+        statuses=[]
+        for index in range(12):
+            email=("\ud800" if index%2 else "probe\x00")+f"{index}@example.test"
+            response=self.mobile.post("/api/mobile/session/password",json={"email":email,"password":"wrong"},
+                environ_base={"REMOTE_ADDR":f"203.0.113.{index+1}"})
+            self.assertNotEqual(response.status_code,500,response.data)
+            statuses.append(response.status_code)
+            if response.status_code==429: break
+        self.assertIn(429,statuses)

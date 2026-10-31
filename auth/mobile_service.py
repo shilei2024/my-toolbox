@@ -140,16 +140,40 @@ def authenticate(raw_token):
     return user, row
 
 
+def normalized_email(value):
+    """Normalize a login identifier, or return None when it cannot be stored safely.
+
+    Lone surrogates and NUL bytes survive json.loads but break UTF-8 encoding or the
+    database driver, so they are rejected before hashing or querying.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        normalized = value.strip().lower()
+        normalized.encode("utf-8")
+    except UnicodeError:
+        return None
+    if not 1 <= len(normalized) <= 255:
+        return None
+    if any(char < " " or char == "\x7f" for char in normalized):
+        return None
+    return normalized
+
+
 def password_login(email, password):
     """Normal website credentials issue only a scoped, short-lived mobile session."""
     message = "账号或密码不正确，或账号暂不可用"
-    if (not isinstance(email, str) or not isinstance(password, str)
-            or not 1 <= len(email) <= 255 or not 1 <= len(password) <= 256):
+    normalized = normalized_email(email)
+    if normalized is None or not isinstance(password, str) or not 1 <= len(password) <= 256:
         raise MobileError(message, 401)
-    user = User.query.filter_by(email=email.strip().lower()).with_for_update().populate_existing().first()
+    try:
+        password.encode("utf-8")
+    except UnicodeError:
+        raise MobileError(message, 401) from None
+    user = User.query.filter_by(email=normalized).with_for_update().populate_existing().first()
     try:
         valid = check_password_hash(user.password_hash if user else _DUMMY_HASH, password)
-    except ValueError:
+    except (ValueError, UnicodeError):
         valid = False
     from models import UserToolGrant
 
