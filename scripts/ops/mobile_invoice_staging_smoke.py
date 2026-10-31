@@ -212,6 +212,36 @@ def exercise(app):
     call(web,'delete',f'/auth/mobile/bindings/{identity}',json={'password':password})
     call(mobile,'get','/api/mobile/bootstrap',401,headers=headers)
     print('MOBILE_API_SMOKE_OK: binding, upload, retry, website, mileage, original, isolation, revoke')
+    # Separate synthetic account: preserve the existing acceptance assertions.
+    _,_,ticket_web,ticket_mobile,ticket_headers,_=account()
+    ticket_period=call(ticket_web,'post','/tools/reimbursement/api/periods',201,
+        json={'start_year':2026,'start_month':6,'end_year':2026,'end_month':7}).json['period']['id']
+    ticket_refs=call(ticket_mobile,'get','/api/mobile/bootstrap',headers=ticket_headers).json
+    ticket=call(ticket_mobile,'post','/api/mobile/invoices',201,headers=ticket_headers,data={
+        'file':(io.BytesIO(image()),'synthetic-ticket.png'),'period_id':str(ticket_period),
+        'office_id':str(ticket_refs['offices'][0]['id']),'document_kind':'invoice',
+        'occurrence_month':'2026-06','idempotency_key':secrets.token_hex(16)}).json['invoice']
+    ticket_path=f"/api/mobile/invoices/{ticket['id']}"
+    with patch('tools.reimbursement.recognize_original',return_value=({
+            'total_amount':'590.48','description':'合成火车票','seller_name':'合成票据'},'synthetic')) as ocr:
+        suggested=call(ticket_mobile,'post',ticket_path+'/recognize',headers=ticket_headers,json={}).json
+        require(suggested['draft']['amount']=='590.48' and suggested['draft']['tax_amount']=='0.00'
+            and suggested['amount_note'],'ticket-components-not-completed')
+        require(call(ticket_mobile,'post',ticket_path+'/recognize',headers=ticket_headers,json={}).json['cached'],'ticket-cache-missing')
+        require(ocr.call_count==1,'ticket-repeated-ocr')
+    detail=call(ticket_mobile,'get',ticket_path,headers=ticket_headers).json
+    body={'snapshot':detail['snapshot'],'confirmed':True,'amount':'','tax_amount':'','total_amount':'590.48',
+        'inclusion_policy':'expense','category_id':next(c['id'] for c in ticket_refs['categories'] if c['name']=='办公费'),
+        'product_line_id':ticket_refs['product_lines'][0]['id']}
+    call(ticket_mobile,'post',ticket_path+'/confirm',400,headers=ticket_headers,json={**body,'amount':'0','tax_amount':'0'})
+    saved=call(ticket_mobile,'post',ticket_path+'/confirm',headers=ticket_headers,json=body).json['invoice']
+    require(saved['amount']==590.48 and saved['tax_amount']==0,'ticket-old-client-failed')
+    ticket_summary=call(ticket_web,'get',f'/tools/reimbursement/api/summary/{ticket_period}').json['summary']
+    require(ticket_summary['total_amount']==590.48 and ticket_summary['tax_amount']==0,'ticket-website-mismatch')
+    call(other,'get',ticket_path,404,headers=other_headers)
+    call(ticket_mobile,'get','/api/mobile/bootstrap',headers=ticket_headers)
+    print('MOBILE_TICKET_AMOUNTS_OK: total-only, cache, old-client, explicit-mismatch, website, isolation, session')
+
 
 
 def main():

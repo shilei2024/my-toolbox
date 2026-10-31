@@ -13,3 +13,5 @@
 - [主站界面规范](main-site-ui.md)：工具首页的信息架构、主题偏好与视觉体验边界。
 
 - [发票留存实施计划](invoice-retention-plan.md)与[微信手机录入准备及 Codex 提示词](wechat-invoice-upload-codex-prompt.md)。
+
+- [手机高铁票缺失金额拆分修复](mobile-ticket-amount-fix.md)。

@@ -29,17 +29,17 @@ REVISION = "f5a6b7c8d9e0"
 require = common.require
 
 
-def preflight(root, target):
+def preflight(root, target, *, source=SOURCE, candidate=CANDIDATE, release_files=()):
     require(re.fullmatch(r"[0-9a-f]{40}", target), "invalid-target")
     require(common.git(root, "branch", "--show-current") == "main", "main-required")
     require(
-        common.git(root, "rev-parse", "HEAD") == SOURCE, "unexpected-production-sha"
+        common.git(root, "rev-parse", "HEAD") == source, "unexpected-production-sha"
     )
     require(
         common.git(root, "rev-parse", "origin/main") == target,
         "target-not-fetched-main",
     )
-    for ancestor in (SOURCE, CANDIDATE):
+    for ancestor in (source, candidate):
         subprocess.run(
             ["git", "merge-base", "--is-ancestor", ancestor, target],
             cwd=root,
@@ -58,7 +58,7 @@ def preflight(root, target):
             root,
             "diff",
             "--name-only",
-            SOURCE,
+            source,
             target,
             "--",
             "requirements.txt",
@@ -73,11 +73,12 @@ def preflight(root, target):
         "tests/test_mobile_entry_release.py",
         "tests/test_mobile_postgres.py",
     }
+    allowed.update(release_files)
     require(
         all(
             p.startswith("docs/") or p in allowed
             for p in common.git(
-                root, "diff", "--name-only", CANDIDATE, target
+                root, "diff", "--name-only", candidate, target
             ).splitlines()
         ),
         "unverified-business-change",
@@ -221,8 +222,11 @@ def healthy_enabled(attempts=20, *, new_routes=False):
     return False
 
 
-def execute(root, target, log, base=Path("/var/backups/mytoolbox")):
-    protected = preflight(root, target)
+def execute(root, target, log, base=Path("/var/backups/mytoolbox"), *,
+            source=SOURCE, candidate=CANDIDATE, preflight_check=None,
+            purpose="mobile entry final; main service stopped; no migration",
+            staging_evidence="operator MOBILE_ENTRY_SMOKE_OK, MOBILE_FORM_PARITY_OK, MOBILE_API_SMOKE_OK, MOBILE_HISTORY_OK and MOBILE_STAGING_SMOKE_OK"):
+    protected = (preflight_check or preflight)(root, target)
     url = backup.service_database_url(root)
     base.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="mobile-entry-final-", dir=base))
@@ -248,18 +252,18 @@ def execute(root, target, log, base=Path("/var/backups/mytoolbox")):
         metadata = backup.backup(root, directory, url)
         require(
             metadata["migration_revisions"] == [REVISION]
-            and metadata["source_commit"] == SOURCE,
+            and metadata["source_commit"] == source,
             "unexpected-backup-source",
         )
         metadata.update(
-            purpose="mobile entry final; main service stopped; no migration",
+            purpose=purpose,
             target_commit=target,
-            business_candidate=CANDIDATE,
-            staging_evidence="operator MOBILE_ENTRY_SMOKE_OK, MOBILE_FORM_PARITY_OK, MOBILE_API_SMOKE_OK, MOBILE_HISTORY_OK and MOBILE_STAGING_SMOKE_OK",
+            business_candidate=candidate,
+            staging_evidence=staging_evidence,
         )
         backup.private_manifest(directory, metadata)
         require(
-            common.git(root, "rev-parse", "HEAD") == SOURCE,
+            common.git(root, "rev-parse", "HEAD") == source,
             "source-changed-during-backup",
         )
         stage = "checkout"
@@ -295,7 +299,7 @@ def execute(root, target, log, base=Path("/var/backups/mytoolbox")):
             safe_old = False
             try:
                 safe_old = (
-                    common.git(root, "rev-parse", "HEAD") == SOURCE
+                    common.git(root, "rev-parse", "HEAD") == source
                     and set(
                         common.git(root, "diff", "--name-only", "HEAD").splitlines()
                     )
