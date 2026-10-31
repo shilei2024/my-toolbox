@@ -1,9 +1,9 @@
 <view class="page">
   <view wx:if="{{showPrivacy}}" class="privacy-mask"><view class="privacy-card"><view class="section-title">票据与隐私</view><view class="muted">选择的票据原件会上传并保存到你登录的网站账号，用于留存、核对和打印。请确认票据属于你，或已获得上传授权。</view><view class="link privacy-link" bindtap="showPrivacy">查看完整隐私保护指引</view><button id="invoice-privacy-agree" class="primary" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePrivacy">同意并继续</button><button class="secondary" bindtap="declinePrivacy">暂不使用</button></view></view>
   <view class="hero"><view class="hero-copy"><view class="eyebrow">CAPTURE & ORGANIZE</view><view class="title">发票录入</view><view class="subtitle">随手收好，让报销更从容。</view></view><image class="logo" src="/assets/logo-v1.png" mode="aspectFill"/></view>
-  <view wx:if="{{message}}" class="message" role="status">{{message}}</view>
-  <view wx:if="{{!loggedIn}}" class="card"><view class="muted">请先到“我的”登录网站账号。</view><button class="primary" bindtap="goMine">去我的登录</button></view>
-  <block wx:else>
+  <view wx:if="{{authReady && message}}" class="message" role="status">{{message}}</view>
+  <view wx:if="{{authReady && !loggedIn}}" class="card"><view class="muted">请先到“我的”登录网站账号。</view><button class="primary" bindtap="goMine">去我的登录</button></view>
+  <block wx:if="{{authReady && loggedIn}}">
     <button wx:if="{{periodIndex < 0}}" class="secondary" bindtap="goDashboard">回首页选择报销周期</button>
     <view class="card upload-card"><view class="section-head"><view class="section-title">收好票据原件</view><text class="step-label">01 / 上传票据</text></view><view class="muted">支持照片与 PDF，上传后继续核对。</view>
       <view class="upload-actions"><button class="primary" bindtap="chooseImage" disabled="{{busy || periodIndex < 0}}">拍照 / 选图片</button><button class="secondary" bindtap="choosePdf" disabled="{{busy || periodIndex < 0}}">微信文件选 PDF</button></view>

@@ -1,7 +1,9 @@
 const api = require("../../lib/api"),
+  auth = require("../../lib/auth"),
   context = require("../../lib/context");
 Page({
   data: {
+    authReady: false,
     loggedIn: false,
     busy: false,
     message: "",
@@ -12,10 +14,12 @@ Page({
     newMonth: "",
   },
   onShow() {
+    auth.sync(this);
+    const loggedIn = this.data.loggedIn;
     const epoch = context.state().authEpoch;
     if (this._epoch !== epoch) {
       this._epoch = epoch;
-      this.setData({ summary: null, periods: [], loggedIn: false });
+      this.setData({ summary: null, periods: [], loggedIn });
     }
     this.refresh();
   },
