@@ -1,18 +1,20 @@
 const { apiOrigin } = require("../config");
 const SESSION_KEY = "invoice_session_v1";
+let loginAttempt = 0;
 
 function session() {
   const stored = wx.getStorageSync(SESSION_KEY);
   return stored && Date.parse(stored.expires_at) > Date.now() ? stored : null;
 }
 function clearSession() {
+  loginAttempt++;
   wx.removeStorageSync(SESSION_KEY);
 }
 function error(message, status) {
   return Object.assign(new Error(message), { status });
 }
-function response(status, data) {
-  if (status === 401) clearSession();
+function response(status, data, clearOn401=true) {
+  if (status === 401 && clearOn401) clearSession();
   if (status < 200 || status >= 300)
     throw error(data.error || "操作失败，请稍后重试", status);
   return data;
@@ -43,7 +45,7 @@ function request(
         try {
           if (authenticated && session()?.access_token !== current.access_token)
             throw error("登录状态已变化，请刷新当前页面", 409);
-          resolve(response(res.statusCode, res.data || {}));
+          resolve(response(res.statusCode, res.data || {}, authenticated));
         } catch (e) {
           reject(e);
         }
@@ -53,6 +55,7 @@ function request(
   );
 }
 function login(bindingCode) {
+  const attempt=++loginAttempt, startingToken=session()?.access_token;
   return new Promise((resolve, reject) =>
     wx.login({
       timeout: 10000,
@@ -67,10 +70,7 @@ function login(bindingCode) {
               ...(bindingCode ? { binding_code: bindingCode } : {}),
             },
           });
-          wx.setStorageSync(SESSION_KEY, {
-            access_token: data.access_token,
-            expires_at: data.expires_at,
-          });
+          saveLogin(data,attempt,startingToken,'wechat');
           resolve(data);
         } catch (e) {
           reject(e);
@@ -79,6 +79,16 @@ function login(bindingCode) {
       fail: () => reject(error("微信登录未完成，请重试")),
     }),
   );
+}
+function saveLogin(data,attempt,startingToken,method){
+  if(attempt!==loginAttempt || session()?.access_token!==startingToken)throw error('登录状态已变化，请重新登录',409);
+  wx.setStorageSync(SESSION_KEY,{access_token:data.access_token,expires_at:data.expires_at,auth_method:method});
+}
+async function passwordLogin(email,password){
+  const attempt=++loginAttempt, startingToken=session()?.access_token;
+  const data=await request('/api/mobile/session/password',{method:'POST',authenticated:false,data:{email,password}});
+  saveLogin(data,attempt,startingToken,'password');
+  return data;
 }
 function privacy() {
   return new Promise((resolve, reject) => {
@@ -140,6 +150,7 @@ function key() {
 module.exports = {
   request,
   login,
+  passwordLogin,
   upload,
   privacy,
   session,
