@@ -17,7 +17,10 @@ except ImportError:
     import mobile_entry_release as runner
 
 SOURCE = "e22cfefab2cfaba62cda04218b2cc1f07bcb13db"
-CANDIDATE = "be4e89d044a77fe0ce13e4dc0657762c12e39fdc"
+# Base of the release PR: develop's verified code already merged with main's
+# 0.11.1 artifacts, so the candidate-to-target diff is only docs and this
+# release's ops script instead of unrelated earlier release files.
+CANDIDATE = "905a1c102d6cf289be9d6a6f582e921d5de16254"
 REVISION = runner.REVISION
 RELEASE_FILES = {
     "scripts/ops/mobile_account_release.py",

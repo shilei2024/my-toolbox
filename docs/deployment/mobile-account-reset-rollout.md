@@ -1,6 +1,6 @@
 # 忘记密码（管理员一次性码）与客户按账号归属发布
 
-生产起点 e22cfefab2cfaba62cda04218b2cc1f07bcb13db（0.11.1 手机新建周期版），f5a6b7c8d9e0、mobile enabled。业务候选 db2d55d1611da5b23434570daeb9b1ae4063b1b4 已合入 develop。
+生产起点 e22cfefab2cfaba62cda04218b2cc1f07bcb13db（0.11.1 手机新建周期版），f5a6b7c8d9e0、mobile enabled。业务候选 db2d55d1611da5b23434570daeb9b1ae4063b1b4 已合入 develop；发布脚本的 CANDIDATE 固定为发布 PR 的基线 905a1c102d6cf289be9d6a6f582e921d5de16254（develop 业务代码与 main 0.11.1 工件合并后的提交），使候选到目标的差异只剩文档与本轮运维脚本。
 
 ## 前置
 
