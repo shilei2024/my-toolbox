@@ -664,6 +664,55 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
         )
         self.assertEqual(forbidden.status_code, 403)
 
+    def test_reimbursement_customer_directory_is_per_account_with_history_fallback(self) -> None:
+        self._login()
+        created = self.client.post(
+            "/tools/reimbursement/api/customers",
+            json={"name": "私有客户甲", "short_name": "甲客户", "grade": "AA"},
+        )
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer = created.get_json()["customer"]
+        self.assertIn(
+            customer["id"],
+            {item["id"] for item in self.client.get("/tools/reimbursement/api/bootstrap").get_json()["customers"]},
+        )
+        self.client.post("/logout")
+
+        self._login("fae@test.com")
+        bootstrap = self.client.get("/tools/reimbursement/api/bootstrap").get_json()
+        self.assertNotIn(customer["id"], {item["id"] for item in bootstrap["customers"]})
+        period = self.client.post(
+            "/tools/reimbursement/api/periods",
+            json={"start_year": 2027, "start_month": 1, "end_year": 2027, "end_month": 2},
+        ).get_json()["period"]
+        rejected = self.client.post(
+            "/tools/reimbursement/api/invoices",
+            json={
+                "period_id": period["id"],
+                "office_id": bootstrap["offices"][0]["id"],
+                "customer_id": customer["id"],
+                "total_amount": 20,
+            },
+        )
+        self.assertEqual(rejected.status_code, 400, rejected.get_json())
+        saved = self.client.post(
+            "/tools/reimbursement/api/invoices",
+            json={
+                "period_id": period["id"],
+                "office_id": bootstrap["offices"][0]["id"],
+                "total_amount": 20,
+            },
+        ).get_json()["invoice"]
+        # Simulate a row written before the directory became per-account.
+        with app.app_context():
+            db.session.get(ReimbursementInvoice, saved["id"]).customer_id = customer["id"]
+            db.session.commit()
+        listing = self.client.get(
+            f"/tools/reimbursement/api/invoices?period_id={period['id']}"
+        ).get_json()["invoices"]
+        self.assertEqual(listing[0]["customer"]["display_name"], "甲客户")
+        self.assertEqual(listing[0]["customer_level"], "AA")
+
     def test_material_price_conversion_permissions_and_excel_export(self) -> None:
         project_id = self._seed_project()
         app._fx_cache = {

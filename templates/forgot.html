@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}重置密码 — {{ site_name }}{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="h4 mb-3"><i class="bi bi-key"></i> 重置密码</h2>
+        <p class="text-muted small mb-4">
+          本站不发送邮件。请联系管理员在「管理后台 → 用户」为你生成一次性重置码，拿到后在此填写。
+          重置码 {{ ttl }} 分钟内有效，只能使用一次。
+        </p>
+        {% if message %}<div class="alert alert-danger">{{ message }}</div>{% endif %}
+        <form method="post" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label">账号邮箱</label>
+            <input class="form-control form-control-lg" name="email" type="email" autocomplete="email" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">一次性重置码</label>
+            <input class="form-control" name="code" autocomplete="one-time-code" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">新密码（至少 8 位）</label>
+            <input class="form-control" name="password" type="password" autocomplete="new-password" minlength="8" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">再次输入新密码</label>
+            <input class="form-control" name="confirm" type="password" autocomplete="new-password" minlength="8" required>
+          </div>
+          <button class="btn btn-primary w-100 btn-lg" type="submit">重置密码</button>
+        </form>
+        <hr/>
+        <p class="text-center text-muted mb-0"><a href="{{ url_for('auth.login') }}">返回登录</a></p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -10,6 +10,7 @@ from flask import abort, current_app, flash, jsonify, redirect, render_template,
 from flask_login import current_user, login_required
 from sqlalchemy import func, text
 
+from auth import password_reset
 from auth.decorators import admin_required
 from extensions import db
 from models import (
@@ -118,6 +119,10 @@ def dashboard():
 @login_required
 @admin_required
 def users():
+    return _render_users()
+
+
+def _render_users(**extra):
     page = max(int(request.args.get("page", 1)), 1)
     per_page = 25
     q = db.session.query(User).order_by(User.created_at.desc())
@@ -161,6 +166,26 @@ def users():
         page=page,
         per_page=per_page,
         total=total,
+        **extra,
+    )
+
+
+@admin_bp.post("/users/<int:user_id>/password-reset")
+@login_required
+@admin_required
+def issue_password_reset(user_id: int):
+    """Mint one code and show it once; nothing is mailed or stored."""
+    user = db.session.get(User, user_id) or abort(404)
+    try:
+        token = password_reset.issue(user)
+    except ValueError:
+        flash("重置功能已关闭（PASSWORD_RESET_MODE=disabled）。", "warning")
+        return redirect(url_for("admin.users"))
+    return _render_users(
+        reset_token=token,
+        reset_user=user,
+        reset_ttl=password_reset.ttl_minutes(),
+        page=max(int(request.args.get("page", 1)), 1),
     )
 
 

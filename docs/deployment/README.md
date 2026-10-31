@@ -68,4 +68,4 @@ AI 模块并入生产主线的合并流程与审批门见 [AI 模块并入生产
 
 - [网站密码登录、隔离审核账号与精简录入发布](mobile-password-login-rollout.md)。
 
-- [手机端新建报销周期发布](mobile-period-create-rollout.md)。
+- [忘记密码（管理员一次性码）与客户按账号归属发布](mobile-account-reset-rollout.md)。
