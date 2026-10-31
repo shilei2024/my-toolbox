@@ -62,3 +62,5 @@ done
 ```
 
 成功标记 MOBILE_RESET_FIX_DEPLOY_OK；随后在后台点一次「生成重置码」，应直接显示一次性码而不是 500。回滚退回 dc98efc，数据不受影响。
+
+2026-10-31 结果：0.12.1 部署后操作者确认，管理后台「生成重置码」正常返回一次性码，`/forgot` 兑换成功并可用新密码登录，重置流程验收通过。线上只读核对：`/forgot` 200、`/admin/users/<id>/password-reset` 对 GET 返回 405（路由存在）、`/api/mobile/periods` 对未授权 POST 返回 401、`/healthz` 200。手机端旧 password 会话按设计在改密后失效。
