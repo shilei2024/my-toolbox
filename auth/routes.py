@@ -4,12 +4,13 @@ from __future__ import annotations
 import hmac
 from urllib.parse import urlparse
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
-from extensions import db
+from extensions import db, limiter
 from models import User
 from utils.helpers import utc_naive_now
+from . import password_reset as reset_service
 from .forms import LoginForm, RegisterForm
 
 auth_bp = Blueprint("auth", __name__, template_folder="../templates")
@@ -18,7 +19,7 @@ auth_bp = Blueprint("auth", __name__, template_folder="../templates")
 @auth_bp.after_app_request
 def _no_store_auth_pages(response):
     """Never cache login/register/logout pages (CDN-cached CSRF tokens break forms)."""
-    if request.endpoint in {"auth.login", "auth.register", "auth.logout"}:
+    if request.endpoint in {"auth.login", "auth.register", "auth.logout", "auth.forgot_password"}:
         response.headers["Cache-Control"] = "private, no-store, max-age=0"
         response.headers["Vary"] = "Cookie"
     return response
@@ -114,6 +115,33 @@ def login():
         return redirect(next_url or "/")
 
     return render_template("login.html", form=form, next_url=next_url)
+
+
+@auth_bp.route("/forgot", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def forgot_password():
+    """Redeem an administrator-issued one-time code; no mail delivery involved."""
+    if reset_service.mode() == "disabled":
+        abort(404)
+    message = ""
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        code = request.form.get("code") or ""
+        password = request.form.get("password") or ""
+        confirm = request.form.get("confirm") or ""
+        if len(password) < 8:
+            message = "新密码至少 8 位。"
+        elif password != confirm:
+            message = "两次输入的新密码不一致。"
+        else:
+            user, _reason = reset_service.verify(code)
+            if user is None or (user.email or "").strip().lower() != email:
+                message = reset_service.GENERIC_ERROR
+            else:
+                reset_service.reset(user, password)
+                flash("密码已重置，请用新密码登录。", "success")
+                return redirect(url_for("auth.login"))
+    return render_template("forgot.html", message=message, ttl=reset_service.ttl_minutes())
 
 
 @auth_bp.route("/logout", methods=["GET", "POST"])
