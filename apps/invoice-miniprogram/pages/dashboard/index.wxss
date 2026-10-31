@@ -1,3 +1,7 @@
 .period-select { display:flex; align-items:center; justify-content:space-between; gap:24rpx; min-height:80rpx; }
 .period-name { font-size:30rpx; font-weight:600; }
 .distance-card { grid-column:1 / -1; }
+.period-actions { margin-top: 6rpx; }
+.period-actions .link { font-size:26rpx; font-weight:600; }
+.create-panel { margin-top:20rpx; padding-top:20rpx; border-top:1rpx solid #edf1ee; }
+.create-panel button { margin-top:20rpx; }

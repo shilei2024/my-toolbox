@@ -79,4 +79,6 @@ bootstrap新增customers（网站同一_customer_directory/_customer_dict）、c
 
 POST /api/mobile/session/password接受JSON email/password（最长255/256字符，body最多4096字节），复用网站规范化邮箱/hash、启用状态和reimbursement grant。正确返回access_token、expires_at、display_name、auth_method=password；24h Bearer，不签网站Cookie。错误/未知/禁用/无grant均通用401，结构无效400、过大413、限流429；全部no-store。IP5/min、规范邮箱摘要10/h，存储沿既有Flask-Limiter配置，memory://为每worker。修改网站密码立即使该类旧token失效；微信token不受此次密码摘要更改影响，解绑接口仍只管理微信。退出撤销当前会话，其他会话可并存。禁止客户端owner_id/AppSecret等字段。
 
+POST /api/mobile/periods接受JSON start_year/start_month（必需整数）、name/employee_name（可选）。周期固定为连续两个月，结束月由服务端推导，12月自动跨年；校验沿用网站规则（月份1–12、恰好跨两个月），同名409、相同起止月份409、非法输入400、未登录401，创建后自动成为当前周期（同owner其余周期置为非当前）。bootstrap的periods额外返回start_year/start_month/end_year/end_month，供客户端推导默认起始月；employee_name缺省取账号昵称。owner仍为user，不跨账号可见。
+
 上传occurrence_month现在可空（未确认的原件没有实际发生月），非空仍需YYYY-MM；不从当天或报销周期猜发生月。原生新上传用首页当前期、默认办事处、invoice/review与空客户/月，核对页继续完整确认。旧带月/客户/用途的客户端契约保留；幂等fingerprint及变更409不变。新客户端需新后端后再上传，否则旧后端会拒绝空月份。
