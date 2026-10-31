@@ -101,4 +101,4 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 
 ## 2026-10-31 忘记密码与客户按账号归属（候选）
 
-忘记密码改为管理员一次性签名码：后台用户页生成、`/auth/forgot` 兑换，码绑定当前密码摘要，改密即失效，TTL/开关由 `PASSWORD_RESET_MODE`、`PASSWORD_RESET_TTL_MINUTES` 配置，无新表。报销客户目录改为“本人创建/本人负责 + 无创建者的历史行”，办事处、产品线、类别等 seed 仍为每人同一套默认；发票展示改用组织级解析，旧发票引用他人客户仍显示名称与等级。见[ADR0045](../adr/0045-password-reset-and-customer-scope.md)。
+忘记密码改为管理员一次性签名码：后台用户页生成、`/forgot` 兑换，码绑定当前密码摘要，改密即失效，TTL/开关由 `PASSWORD_RESET_MODE`、`PASSWORD_RESET_TTL_MINUTES` 配置，无新表。报销客户目录改为“本人创建/本人负责 + 无创建者的历史行”，办事处、产品线、类别等 seed 仍为每人同一套默认；发票展示改用组织级解析，旧发票引用他人客户仍显示名称与等级。见[ADR0045](../adr/0045-password-reset-and-customer-scope.md)。

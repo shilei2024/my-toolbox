@@ -960,3 +960,5 @@
 管理后台可为账号生成一次性重置码（无邮件服务亦可），用户在 /auth/forgot 兑换后立即改密并让旧码与手机 password 会话失效；模式与有效期可用 PASSWORD_RESET_MODE、PASSWORD_RESET_TTL_MINUTES 配置。报销客户目录改为按账号：只显示本人创建/负责的客户与无创建者的历史行，办事处、产品线等默认清单仍共用；发票展示改组织级解析，历史票据不丢客户名。无迁移、无新表。
 
 发布工件：mobile_account_release.py 固定 SOURCE=e22cfef（0.11.1）、CANDIDATE=db2d55d，沿用停写备份、022 检出与历史指纹校验；合并后按发布说明用固定 main SHA 执行。
+
+操作者已反馈MOBILE_ACCOUNT_DEPLOY_OK：主站dc98efc、f5不变、备份mobile-entry-final-jr83nrkw、service/HTTPS/mobile正常；线上/forgot 200且no-store、登录页有「忘记密码？」、未授权手机接口401。真实重置与真机客户隔离待验收。

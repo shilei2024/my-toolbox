@@ -77,3 +77,11 @@
 ## 2026-10-31 高铁票修复真机验收完成
 
 操作者确认新版原高铁票可保存、不再出现合计不等，网站票价与税额一致，两项均OK。更新前文该项待办；不等同微信正式审核或发布。
+
+## 2026-10-31 0.12.0 忘记密码与客户按账号部署成功
+
+操作者反馈MOBILE_ACCOUNT_DEPLOY_OK：release_commit=dc98efcd28c41a929769dbb47db59dba53be1904，migration_revision=f5a6b7c8d9e0不变，最终备份为mobile-entry-final-jr83nrkw受限目录，service active、HTTPS OK、mobile enabled、reset=admin、customers=per-account。
+
+线上只读核对：`/forgot` 200且Cache-Control含no-store，`/login`包含「忘记密码？」入口，未带凭据的`/api/mobile/periods`与`/api/mobile/session/password`均401，`/healthz` 200。注意：网站登录/注册/重置页在根路径（/login、/register、/forgot），不在/auth下；本轮发布说明初稿误写为/auth/forgot，已更正。
+
+真实账号重置、审核账号登录与真机客户隔离仍待操作者确认；微信备案与正式审核未变。
