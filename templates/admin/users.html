@@ -2,6 +2,16 @@
 {% block admin_content %}
 <h1 class="h3 mb-3"><i class="bi bi-people"></i> 用户</h1>
 
+{% if reset_token %}
+<div class="alert alert-warning">
+  <div class="fw-semibold mb-1">为 {{ reset_user.email }} 生成的一次性重置码（只显示一次）</div>
+  <code class="fs-5 user-select-all">{{ reset_token }}</code>
+  <div class="small mt-2 mb-0">
+    {{ reset_ttl }} 分钟内有效，使用或改密后立即失效。请私下转给本人：登录页 →「忘记密码」→ 填邮箱、此码和新密码。
+  </div>
+</div>
+{% endif %}
+
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">
     <table class="table align-middle mb-0">
@@ -114,6 +124,10 @@
                   <button class="btn btn-sm btn-outline-{{ 'danger' if u.is_active_user else 'success' }}">
                     {{ '禁用' if u.is_active_user else '启用' }}
                   </button>
+                </form>
+                <form action="{{ url_for('admin.issue_password_reset', user_id=u.id) }}" method="post" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">生成重置码</button>
                 </form>
                 <form action="{{ url_for('admin.delete_user', user_id=u.id) }}" method="post" class="d-inline"
                       onsubmit="return confirm('确定删除该用户？将停用账号并匿名化邮箱，历史记录保留。');">

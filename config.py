@@ -103,6 +103,12 @@ class Config:
     ADMIN_EMAIL: str = os.environ.get("ADMIN_EMAIL", "admin@example.com")
     ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "ChangeMe123!")
 
+    # --- Password reset (admin-issued one-time code; no mail backend needed) ---
+    # admin: administrators issue a signed code from the users page (default)
+    # disabled: hide the flow entirely
+    PASSWORD_RESET_MODE: str = os.environ.get("PASSWORD_RESET_MODE", "admin")
+    PASSWORD_RESET_TTL_MINUTES: int = int(os.environ.get("PASSWORD_RESET_TTL_MINUTES", "60"))
+
     # --- App-wide limits ---
     DAILY_FREE_LIMIT: int = int(os.environ.get("DAILY_FREE_LIMIT", "10"))
     ANON_FREE_LIMIT: int = int(os.environ.get("ANON_FREE_LIMIT", "3"))
