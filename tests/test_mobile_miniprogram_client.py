@@ -210,3 +210,123 @@ const signed=letter=>({statusCode:200,data:{access_token:letter.repeat(43),expir
 """
         result=subprocess.run([shutil.which('node'),'-e',source],cwd=Path(__file__).parents[1],capture_output=True,encoding='utf-8',timeout=20)
         self.assertEqual(result.returncode,0,result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is required for native client logic checks')
+    def test_tab_switch_after_sign_in_never_renders_the_login_card(self):
+        root = Path(__file__).parents[1]
+        source = r"""
+const assert=require('node:assert/strict');
+const storage=new Map();
+const sessionValue=()=>({access_token:'a'.repeat(43),expires_at:'2099-01-01T00:00:00Z',auth_method:'wechat'});
+let switched='';
+const app={globalData:{}};
+global.getApp=()=>app;
+let opened=[];
+global.getCurrentPages=()=>opened;
+global.wx={getStorageSync:k=>storage.get(k),setStorageSync:(k,v)=>storage.set(k,v),removeStorageSync:k=>storage.delete(k),
+ switchTab:o=>{switched=o.url;},showModal:o=>o.success({confirm:true}),
+ onNeedPrivacyAuthorization:()=>{},offNeedPrivacyAuthorization:()=>{}};
+const api=require('./apps/invoice-miniprogram/lib/api');
+const auth=require('./apps/invoice-miniprogram/lib/auth');
+const context=require('./apps/invoice-miniprogram/lib/context');
+function page(name){
+ let p;
+ global.Page=definition=>{p=definition;};
+ const file='./apps/invoice-miniprogram/pages/'+name+'/index';
+ delete require.cache[require.resolve(file)];
+ require(file);
+ p.data=structuredClone(p.data);
+ p.updates=[];
+ p.setData=update=>{
+   p.updates.push({patch:structuredClone(update),signedIn:!!api.session()});
+   for(const [key,value] of Object.entries(update)){
+     const parts=key.split('.');
+     let target=p.data;
+     for(const part of parts.slice(0,-1))target=target[part];
+     target[parts.at(-1)]=value;
+   }
+ };
+ opened.push(p);
+ return p;
+}
+const loginShown=p=>p.data.authReady&&!p.data.loggedIn;
+const contentShown=p=>p.data.authReady&&p.data.loggedIn;
+const falseAfterSignIn=p=>p.updates.filter(u=>u.signedIn&&u.patch.loggedIn===false);
+(async()=>{
+ const dashboard=page('dashboard'),home=page('home'),dispatch=page('dispatch'),mine=page('mine');
+ for(const p of [dashboard,home,dispatch,mine]){
+   assert.equal(p.data.authReady,false);
+   assert.equal(p.data.loggedIn,false);
+   assert.equal(loginShown(p),false);
+   assert.equal(contentShown(p),false);
+ }
+ dashboard.refresh=()=>{};home.bootstrap=async()=>{};dispatch.load=()=>{};
+ api.request=async()=>({display_name:'测试账号',periods:[]});
+ dashboard.onShow();home.onShow();
+ assert.equal(loginShown(dashboard),true);
+ assert.equal(loginShown(home),true);
+ await mine.restore();
+ assert.equal(mine.data.authReady,true);
+ assert.equal(loginShown(mine),true);
+ storage.set('invoice_session_v1',sessionValue());
+ api.login=async()=>({display_name:'测试账号'});
+ mine.updates.length=0;
+ await mine.signIn();
+ assert.equal(switched,'/pages/dashboard/index');
+ assert.equal(mine.data.loggedIn,true);
+ assert.equal(falseAfterSignIn(mine).length,0);
+ for(const p of [dashboard,home,dispatch])assert.equal(p.data.authReady,false);
+ assert.equal(loginShown(dashboard),false);
+ assert.equal(contentShown(dashboard),false);
+ const freshHome=page('home');
+ assert.equal(loginShown(freshHome),false);
+ freshHome.bootstrap=async()=>{};
+ freshHome.onShow();
+ assert.equal(freshHome.data.authReady,true);
+ assert.equal(freshHome.data.loggedIn,true);
+ assert.equal(loginShown(freshHome),false);
+ assert.equal(falseAfterSignIn(freshHome).length,0);
+ dashboard.onShow();
+ assert.equal(dashboard.data.loggedIn,true);
+ assert.equal(contentShown(dashboard),true);
+ assert.equal(falseAfterSignIn(dashboard).length,0);
+ home.onShow();dispatch.onShow();
+ assert.equal(home.data.loggedIn,true);assert.equal(dispatch.data.loggedIn,true);
+ assert.equal(falseAfterSignIn(home).length,0);assert.equal(falseAfterSignIn(dispatch).length,0);
+ await mine.logout();
+ assert.equal(api.session(),null);
+ assert.equal(mine.data.loggedIn,false);
+ for(const p of [dashboard,home,dispatch,freshHome])assert.equal(p.data.authReady,false);
+ dashboard.onShow();
+ assert.equal(dashboard.data.authReady,true);
+ assert.equal(dashboard.data.loggedIn,false);
+ assert.equal(loginShown(dashboard),true);
+ assert.equal(contentShown(dashboard),false);
+ storage.set('invoice_session_v1',{access_token:'b'.repeat(43),expires_at:'2000-01-01T00:00:00Z'});
+ assert.equal(api.session(),null);
+ home.onShow();
+ assert.equal(home.data.loggedIn,false);
+ assert.equal(loginShown(home),true);
+ home.updates.length=0;mine.updates.length=0;
+ auth.invalidate(home);
+ assert.equal(home.updates.length,0);
+ assert.equal(mine.data.authReady,false);
+ console.log('tab switch keeps signed-in state and never flashes the login card');
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        result = subprocess.run([shutil.which('node'), '-e', source], cwd=root,
+            capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tab_pages_gate_login_entry_until_auth_state_is_known(self):
+        root = Path(__file__).parents[1]
+        for name in ("dashboard", "home", "dispatch", "mine"):
+            with self.subTest(page=name):
+                page_dir = root / "apps/invoice-miniprogram/pages" / name
+                markup = (page_dir / "index.wxml").read_text(encoding="utf-8")
+                script = (page_dir / "index.js").read_text(encoding="utf-8")
+                self.assertIn("authReady", markup)
+                self.assertIn("authReady && message", markup)
+                self.assertNotIn('wx:if="{{!loggedIn}}"', markup)
+                self.assertNotIn("wx:else", markup)
+                self.assertIn("auth.sync(this)", script)

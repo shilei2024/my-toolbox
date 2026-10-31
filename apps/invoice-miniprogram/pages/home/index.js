@@ -1,4 +1,5 @@
 const api = require("../../lib/api"),
+  auth = require("../../lib/auth"),
   context = require("../../lib/context");
 const KINDS = [
   { value: "invoice", label: "普通发票" },
@@ -9,6 +10,7 @@ const KINDS = [
 Page({
   data: {
     showPrivacy: false,
+    authReady: false,
     loggedIn: false,
     busy: false,
     message: "",
@@ -46,6 +48,8 @@ Page({
     this.setData({ showPrivacy: false });
   },
   onShow() {
+    auth.sync(this);
+    const loggedIn = this.data.loggedIn;
     const epoch = context.state().authEpoch;
     if (this._epoch !== epoch) {
       this._epoch = epoch;
@@ -53,14 +57,14 @@ Page({
         invoices: [],
         queue: [],
         periods: [],
-        loggedIn: false,
+        loggedIn,
         offices: [],
         periodIndex: -1,
       });
     }
     if (wx.onNeedPrivacyAuthorization)
       wx.onNeedPrivacyAuthorization(this.privacyHandler);
-    if (!api.session()) {
+    if (!loggedIn) {
       this.setData({
         loggedIn: false,
         invoices: [],

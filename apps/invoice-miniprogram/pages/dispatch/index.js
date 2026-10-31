@@ -1,4 +1,5 @@
 const api = require("../../lib/api"),
+  auth = require("../../lib/auth"),
   context = require("../../lib/context");
 const textFields = [
   { key: "from_location", name: "出发地" },
@@ -13,6 +14,7 @@ const numberFields = [
 ];
 Page({
   data: {
+    authReady: false,
     loggedIn: false,
     busy: false,
     dirty: false,
@@ -31,6 +33,8 @@ Page({
     numberFields,
   },
   onShow() {
+    auth.sync(this);
+    const loggedIn = this.data.loggedIn;
     const epoch = context.state().authEpoch;
     if (this._epoch !== epoch) {
       this._epoch = epoch;
@@ -39,10 +43,10 @@ Page({
         editing: false,
         dirty: false,
         periodId: null,
-        loggedIn: false,
+        loggedIn,
       });
     }
-    if (!api.session()) {
+    if (!loggedIn) {
       this.setData({
         loggedIn: false,
         rows: [],

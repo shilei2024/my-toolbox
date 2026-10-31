@@ -1,7 +1,9 @@
 const api = require("../../lib/api"),
+  auth = require("../../lib/auth"),
   context = require("../../lib/context");
 Page({
   data: {
+    authReady: false,
     loggedIn: false,
     busy: false,
     message: "",
@@ -44,8 +46,9 @@ Page({
     this.setData({ showPrivacy: false });
   },
   async restore() {
-    if (!api.session()) {
-      this.setData({ loggedIn: false, displayName: "" });
+    auth.sync(this);
+    if (!this.data.loggedIn) {
+      this.setData({ displayName: "" });
       return;
     }
     try {
@@ -57,7 +60,7 @@ Page({
         message: "",
       });
     } catch (e) {
-      this.setData({ loggedIn: !!api.session(), message: e.message });
+      this.setData({ loggedIn: auth.current(), message: e.message });
     }
   },
   onBindingInput(e) {
@@ -69,6 +72,7 @@ Page({
     try {
       const login = await api.login(this.data.bindingCode || undefined);
       context.clear();
+      auth.invalidate(this);
       this.setData({
         loggedIn: true,
         displayName: login.display_name,
@@ -118,6 +122,7 @@ Page({
     try {
       const login = await api.passwordLogin(email, password);
       context.clear();
+      auth.invalidate(this);
       this.setData({
         loggedIn: true,
         displayName: login.display_name,
@@ -158,6 +163,7 @@ Page({
     } finally {
       api.clearSession();
       context.clear();
+      auth.invalidate(this);
       this.setData({
         busy: false,
         loggedIn: false,
