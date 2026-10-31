@@ -70,3 +70,7 @@ bootstrap新增customers（网站同一_customer_directory/_customer_dict）、c
 确认新增customer_id（可null）、customer_level（未关联客户可空/0-1/A/AA/AAA）、amount_confirmed（布尔）、linked_detail（可null或明细对象）。客户必须在当前组织有效目录中，所选客户等级由客户资料带出，客户端伪造等级无效。明细白名单为date/category/place/participants/amount/purpose/approval/location/expense_type/customer/customer_id；客户字段由服务端规范，金额非负两位小数、日期ISO或空、文本最多4000字，拒绝其他字段。按费用类别生成应酬/出差明细，显式明细依赖原票完整快照防旧覆盖；未提供新字段兼容旧客户端。新表单对齐网站可留空的发票号码/商家/日期，填日期仍校验，不改变费用计入前明确核对要求。
 
 全部字段清单及范围见[对齐计划](../product/mobile-form-parity.md)。保留独立确认提交、旧写冲突、分摊保护、仅留存口径。移动端默认明细仅跟随原默认值，修改商家/客户不重置用户单独填写的明细金额/日期/事由。网站既有force默认联动可能覆盖手工明细，本轮不复制此缺陷，网站修复另跟踪。
+
+## 2026-10-31 缺失金额补齐（候选）
+
+识别及缓存响应新增可选amount_note，draft的amount/tax_amount/total_amount补缺失组件（空字符串/null/纯空白，不含显式0）。仅总额已知：amount=total_amount、tax_amount=0.00，amount_note明确暂记0须核对。两个数已知按差额/合计补第三个，不推算税率。confirm同样兼容旧客户端空白组件，在invoice.confirm审计记录amount_note；三个显式数不一致继续400，并保留Bearer登录态。不改变确认、owner、快照、费用口径。详见[规则](../product/mobile-ticket-amount-fix.md)。

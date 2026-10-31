@@ -16,7 +16,7 @@ from auth.tool_access import can_access_private_tool
 from auth.decorators import remaining_for, commit_usage
 from auth import mobile_service as service
 from .models import ReimbursementAudit
-from .retention import money
+from .retention import money, complete_invoice_amounts
 
 FIELDS = {
     "customer_id",
@@ -94,7 +94,7 @@ def draft_fields(result):
         try:
             data[target] = str(
                 money(
-                    str(result.get(source) or "")
+                    str(result.get(source) if result.get(source) is not None else "")
                     .replace(",", "")
                     .replace("￥", "")
                     .replace("¥", "")
@@ -110,6 +110,16 @@ def draft_fields(result):
     except ValueError:
         data["invoice_date"] = ""
     return data
+
+
+def complete_draft(data):
+    """Also normalizes old cached drafts without another provider call."""
+    try:
+        amounts, note = complete_invoice_amounts(data)
+        return {**data, **amounts}, note
+    except ValueError:
+        # An inconsistent OCR suggestion must remain available for correction.
+        return data, "识别金额不完整或不一致，请按原票补齐后确认。"
 
 
 def recognize(invoice_id, retry=False):
@@ -147,9 +157,11 @@ def recognize(invoice_id, retry=False):
         cached = json.loads(entry.data_json)
         if cached.get("invoice_id") == row.id and cached.get("source") == source:
             if cached.get("success") or not retry:
+                draft, amount_note = complete_draft(cached["draft"])
                 return {
                     "success": cached["success"],
-                    "draft": cached["draft"],
+                    "draft": draft,
+                    "amount_note": cached.get("amount_note") or amount_note,
                     "snapshot": snapshot,
                     "cached": True,
                 }
@@ -168,7 +180,7 @@ def recognize(invoice_id, retry=False):
         raise service.MobileError("原件已变更，请刷新后识别", 409)
     if remaining_for("reimbursement") <= 0:
         raise service.MobileError("今日可用次数已用完", 429)
-    draft = draft_fields(result)
+    draft, amount_note = complete_draft(draft_fields(result))
     success = bool(result)
     db.session.add(
         ReimbursementAudit(
@@ -182,6 +194,7 @@ def recognize(invoice_id, retry=False):
                     "source": source,
                     "success": success,
                     "draft": draft,
+                    "amount_note": amount_note,
                     "provider": provider,
                 },
                 ensure_ascii=False,
@@ -191,7 +204,7 @@ def recognize(invoice_id, retry=False):
     if success:
         commit_usage("reimbursement", commit=False)
     db.session.commit()
-    return {"success": success, "draft": draft, "snapshot": snapshot, "cached": False}
+    return {"success": success, "draft": draft, "amount_note": amount_note, "snapshot": snapshot, "cached": False}
 
 
 def confirm(invoice_id, payload):
@@ -256,6 +269,8 @@ def confirm(invoice_id, payload):
                 raise ValueError("文本字段长度或格式无效")
         if values.get("invoice_date"):
             date.fromisoformat(str(values["invoice_date"]))
+        completed, amount_note = complete_invoice_amounts(values)
+        values.update(completed)
         amounts = [
             money(values.get(k) or 0) for k in ("amount", "tax_amount", "total_amount")
         ]
@@ -391,7 +406,7 @@ def confirm(invoice_id, payload):
             period_id=row.period_id,
             action="invoice.confirm",
             data_json=json.dumps(
-                {"invoice_id": row.id, "before": before, "after": _invoice_dict(row)},
+                {"invoice_id": row.id, "before": before, "after": _invoice_dict(row), "amount_note": amount_note},
                 ensure_ascii=False,
             ),
         )
