@@ -50,3 +50,5 @@
 - [ADR-0040：票据留存、打印与费用口径分离](0040-invoice-retention-and-accounting.md)。
 - [ADR-0041：微信轻量录入复用平台身份及报销事务](0041-wechat-mobile-invoice-upload.md)。
 - [ADR-0042：移动报销工作台、识别确认与派车事实源](0042-mobile-reimbursement-entry.md)。
+
+- [ADR-0043：移动票据缺失金额拆分](0043-mobile-invoice-missing-amounts.md)。

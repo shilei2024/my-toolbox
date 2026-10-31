@@ -934,3 +934,7 @@
 - 安全：CSRF、密码哈希、文件类型 / 大小校验、限速、cookie 签名
 - 部署：Gunicorn + systemd + Nginx（参考 `deploy/`）+ logrotate + SQLite 备份脚本
 - 配置：`.env` 全部参数化
+
+### 2026-10-31 高铁票缺失金额拆分（候选）
+
+手机OCR只有票价时提供可核对的金额/税额暂记0建议，旧缓存与旧客户端确认兼容；部分缺失按差额补齐，完整但不一致仍拒绝。核对页提供按票价补齐按钮，补填时不再因空白覆盖票价。无迁移、不改历史票据，不套税率。测试/生产状态见[发布手册](docs/deployment/mobile-ticket-amount-rollout.md)。

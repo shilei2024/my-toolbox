@@ -37,6 +37,7 @@ Page({
   data: {
     busy: false,
     message: "",
+    amountNote: "",
     invoice: null,
     snapshot: "",
     confirmed: false,
@@ -73,7 +74,7 @@ Page({
     await this.load(options.recognize === "1");
   },
   async load(recognize = false) {
-    this.setData({ busy: true, confirmed: false, message: "" });
+    this.setData({ busy: true, confirmed: false, message: "", amountNote: "" });
     try {
       const [refs, detail] = await Promise.all([
         api.request("/api/mobile/bootstrap"),
@@ -278,7 +279,7 @@ Page({
     this.setData({ ["invoice." + key]: e.detail.value, confirmed: false });
     if (["amount", "tax_amount"].includes(key)) {
       const values = ["amount", "tax_amount"].map((k) =>
-        String(this.data.invoice[k] || "0"),
+        String(this.data.invoice[k] ?? ""),
       );
       if (values.every((v) => /^\d+(\.\d{0,2})?$/.test(v))) {
         const total = values.reduce(
@@ -298,6 +299,32 @@ Page({
       ].includes(key)
     )
       this.syncLinked(true);
+  },
+  completeFromTotal() {
+    if (this.data.busy || !this.data.invoice) return;
+    const total = String(this.data.invoice.total_amount ?? "").trim();
+    const tax = String(this.data.invoice.tax_amount ?? "").trim() || "0";
+    if (![total, tax].every((v) => /^\d+(\.\d{1,2})?$/.test(v))) {
+      this.setData({ message: "请先填写有效票价及税额；未单列税额可暂记0。" });
+      return;
+    }
+    const totalCents = Math.round(Number(total) * 100);
+    const taxCents = Math.round(Number(tax) * 100);
+    if (taxCents > totalCents || totalCents > 99999999999) {
+      this.setData({
+        message: "税额不能大于票价，金额不能超过999999999.99元。",
+      });
+      return;
+    }
+    this.setData({
+      "invoice.amount": ((totalCents - taxCents) / 100).toFixed(2),
+      "invoice.tax_amount": (taxCents / 100).toFixed(2),
+      confirmed: false,
+      amountNote:
+        "已按票价减税额补齐金额；税额为0不代表免税或可抵扣，请按原票核对。",
+      message: "请核对补齐后的金额，再勾选确认保存。",
+    });
+    this.syncLinked(true);
   },
   pick(e) {
     const { key, list } = e.currentTarget.dataset;
@@ -346,6 +373,7 @@ Page({
       if (result.success) {
         this.setData({
           invoice: { ...this.data.invoice, ...result.draft },
+          amountNote: result.amount_note || "",
           message:
             "识别为建议，请逐项核对；类别和产品线需自行选择。确认前不改变网站费用。",
         });

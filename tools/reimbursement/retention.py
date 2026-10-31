@@ -18,6 +18,32 @@ def money(value):
         raise ValueError("金额须为非负数，最多两位小数且不超过 999999999.99") from None
 
 
+def complete_invoice_amounts(values):
+    """Complete absent components without overwriting explicit amounts or rates.
+
+    A total-only receipt uses the existing expense-record convention (no tax
+    recorded). This is a suggestion for explicit confirmation, not a tax claim.
+    """
+    keys = ("amount", "tax_amount", "total_amount")
+    amounts = {
+        key: None if values.get(key) is None or str(values[key]).strip() == ""
+        else money(values[key]) for key in keys
+    }
+    net, tax, total = (amounts[key] for key in keys)
+    note = ""
+    if total is not None:
+        if net is None and tax is None:
+            amounts.update(amount=total, tax_amount=money(0))
+            note = "仅识别到票价，金额按票价、税额暂记0；不代表免税或可抵扣税额。请核对原票，有税额请补填。"
+        elif net is None:
+            amounts["amount"] = money(total - tax)
+        elif tax is None:
+            amounts["tax_amount"] = money(total - net)
+    elif net is not None and tax is not None:
+        amounts["total_amount"] = money(net + tax)
+    return {key: "" if value is None else str(value) for key, value in amounts.items()}, note
+
+
 def month(value):
     if not isinstance(value, str) or not re.fullmatch(r"[1-9]\d{3}-(0[1-9]|1[0-2])", value):
         raise ValueError("月份须为 YYYY-MM")
