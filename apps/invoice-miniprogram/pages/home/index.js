@@ -14,15 +14,7 @@ Page({
     message: "",
     periods: [],
     offices: [],
-    customers: [{ id: null, display_name: "未关联客户" }],
-    levels: [{ value: "", name: "未分类" }],
-    periodIndex: 0,
-    officeIndex: 0,
-    customerIndex: 0,
-    levelIndex: 0,
-    kindIndex: 0,
-    kinds: KINDS,
-    month: "",
+    periodIndex: -1,
     queue: [],
     invoices: [],
     page: 1,
@@ -33,11 +25,6 @@ Page({
       this.resolvePrivacy = resolve;
       this.setData({ showPrivacy: true });
     };
-    const now = new Date();
-    this.setData({
-      month:
-        now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0"),
-    });
   },
   onUnload() {
     if (this.resolvePrivacy) this.resolvePrivacy({ event: "disagree" });
@@ -63,20 +50,24 @@ Page({
     if (this._epoch !== epoch) {
       this._epoch = epoch;
       this.setData({
-        invoices: [], queue: [], periods: [], loggedIn: false,
-        customers: [{ id: null, display_name: "未关联客户" }],
-        levels: [{ value: "", name: "未分类" }],
-        customerIndex: 0, levelIndex: 0,
+        invoices: [],
+        queue: [],
+        periods: [],
+        loggedIn: false,
+        offices: [],
+        periodIndex: -1,
       });
     }
     if (wx.onNeedPrivacyAuthorization)
       wx.onNeedPrivacyAuthorization(this.privacyHandler);
     if (!api.session()) {
       this.setData({
-        loggedIn: false, invoices: [], queue: [], periods: [],
-        customers: [{ id: null, display_name: "未关联客户" }],
-        levels: [{ value: "", name: "未分类" }],
-        customerIndex: 0, levelIndex: 0,
+        loggedIn: false,
+        invoices: [],
+        queue: [],
+        periods: [],
+        offices: [],
+        periodIndex: -1,
       });
       return;
     }
@@ -89,6 +80,9 @@ Page({
   goMine() {
     wx.switchTab({ url: "/pages/mine/index" });
   },
+  goDashboard() {
+    wx.switchTab({ url: "/pages/dashboard/index" });
+  },
   showError(e) {
     const update = { message: e.message || "操作未完成，请重试" };
     if (e.status === 401 || e.status === 428) update.loggedIn = false;
@@ -96,35 +90,17 @@ Page({
   },
   async bootstrap() {
     const d = await api.request("/api/mobile/bootstrap");
-    const index = context.choose(d.periods);
-    const customers = [
-      { id: null, display_name: "未关联客户" },
-      ...(d.customers || []),
-    ];
-    const levels = [
-      { value: "", name: "未分类" },
-      ...(d.customer_levels || []).map((value) => ({ value, name: value })),
-    ];
-    const selectedCustomer = this.data.customers[this.data.customerIndex];
-    const customerIndex = Math.max(
-      0,
-      customers.findIndex((item) => item.id === selectedCustomer?.id),
-    );
-    const selectedLevel = this.data.levels[this.data.levelIndex]?.value;
-    const levelIndex = customers[customerIndex].id
-      ? Math.max(0, levels.findIndex((item) => item.value === customers[customerIndex].grade))
-      : Math.max(0, levels.findIndex((item) => item.value === selectedLevel));
+    const index = d.periods.findIndex((p) => p.id === context.state().periodId);
     this.setData({
       loggedIn: true,
       periods: d.periods,
       offices: d.offices,
-      customers,
-      levels,
       periodIndex: index,
-      officeIndex: 0,
-      customerIndex,
-      levelIndex,
-      message: d.periods.length ? "" : "请先在网站创建报销周期，再下拉刷新",
+      message: !d.periods.length
+        ? "请先在网站创建报销周期，再下拉刷新"
+        : index < 0
+          ? "请先在首页选择报销周期，再上传票据。"
+          : "",
     });
     await this.loadInvoices();
   },
@@ -181,43 +157,21 @@ Page({
       this.showError(e);
     }
   },
-  onOffice(e) {
-    this.setData({ officeIndex: Number(e.detail.value) });
-  },
-  onKind(e) {
-    this.setData({ kindIndex: Number(e.detail.value) });
-  },
-  onMonth(e) {
-    this.setData({ month: e.detail.value });
-  },
-  onCustomer(e) {
-    const customerIndex = Number(e.detail.value);
-    const customer = this.data.customers[customerIndex];
-    if (!customer) return;
-    this.setData({
-      customerIndex,
-      levelIndex: customer.id
-        ? Math.max(0, this.data.levels.findIndex((item) => item.value === customer.grade))
-        : 0,
-    });
-  },
-  onLevel(e) {
-    if (this.data.customers[this.data.customerIndex]?.id) return;
-    this.setData({ levelIndex: Number(e.detail.value) });
-  },
   intent() {
-    const p = this.data.periods[this.data.periodIndex],
-      o = this.data.offices[this.data.officeIndex],
-      customer = this.data.customers[this.data.customerIndex],
-      level = this.data.levels[this.data.levelIndex];
-    if (!p || !o) throw new Error("请先选择网站报销周期及办事处");
+    const p = this.data.periods[this.data.periodIndex];
+    const office = this.data.offices[0];
+    if (!p || p.id !== context.state().periodId)
+      throw new Error("请先在首页选择报销周期，再刷新上传页。");
+    if (!office) throw new Error("请先在网站配置办事处。");
+    // Only stage the original. Real classification/month/customer are confirmed
+    // on the review page; never infer occurrence month from today's date.
     return {
       period_id: String(p.id),
-      office_id: String(o.id),
-      document_kind: KINDS[this.data.kindIndex].value,
-      occurrence_month: this.data.month,
-      customer_id: customer?.id || "",
-      customer_level: customer?.id ? customer.grade || "" : level?.value || "",
+      office_id: String(office.id),
+      document_kind: "invoice",
+      occurrence_month: "",
+      customer_id: "",
+      customer_level: "",
     };
   },
   async chooseImage() {
@@ -306,9 +260,7 @@ Page({
       return;
     }
     const label =
-      this.data.periods[this.data.periodIndex].name +
-      " · " +
-      KINDS[this.data.kindIndex].label;
+      this.data.periods[this.data.periodIndex].name + " · " + "待核对票据";
     this.setData({
       queue: [
         ...this.data.queue,

@@ -38,11 +38,14 @@ def mobile_guard():
         return jsonify(error="手机录入暂未开放"), 404
     if request.headers.get("Cookie"):
         return jsonify(error="手机接口只接受独立登录凭证"), 401
+    if request.endpoint == "mobile_api.mobile_password_login":
+        if request.content_length and request.content_length > 4096:
+            return jsonify(error="登录参数过长"), 413
     if request.content_length and request.content_length > 21 * 1024 * 1024:
         return jsonify(error="文件大小不能超过 20MB"), 413
-    if request.endpoint != "mobile_api.mobile_login" and (not current_user.is_authenticated or not hasattr(g, "mobile_session")):
+    if request.endpoint not in {"mobile_api.mobile_login","mobile_api.mobile_password_login"} and (not current_user.is_authenticated or not hasattr(g, "mobile_session")):
         return jsonify(error="登录已失效，请重新登录"), 401
-    if request.endpoint not in {"mobile_api.mobile_login", "mobile_api.mobile_logout"} and not can_access_private_tool("reimbursement"):
+    if request.endpoint not in {"mobile_api.mobile_login", "mobile_api.mobile_password_login", "mobile_api.mobile_logout"} and not can_access_private_tool("reimbursement"):
         return jsonify(error="你的账号尚未获得报销助手的使用权限，请在网站联系管理员授权。"), 403
 
 
@@ -80,6 +83,16 @@ def database_conflict(_error):
 
 mobile_bp.errorhandler(IntegrityError)(database_conflict)
 binding_bp.errorhandler(IntegrityError)(database_conflict)
+
+
+@mobile_bp.errorhandler(429)
+def mobile_rate_limited(_error):
+    return jsonify(error="尝试次数过多，请稍后再试"), 429
+
+
+@mobile_bp.errorhandler(413)
+def mobile_too_large(_error):
+    return jsonify(error="请求内容过大，请缩小后重试"), 413
 
 
 def require_password():
@@ -137,6 +150,39 @@ def mobile_logout():
     service.audit(current_user.id, "session.revoked", session_id=g.mobile_session.id)
     db.session.commit()
     return jsonify(success=True)
+
+
+def password_payload():
+    # Flask 3.0 has no per-request max_content_length setter. Bound the read
+    # before JSON parsing, including chunked requests with no Content-Length.
+    if not hasattr(g, "mobile_password_payload"):
+        if not request.is_json:
+            raise service.MobileError("登录参数无效")
+        raw = request.stream.read(4097)
+        if len(raw) > 4096:
+            raise service.MobileError("登录参数过长", 413)
+        try:
+            g.mobile_password_payload = json.loads(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            raise service.MobileError("登录参数无效") from None
+    return g.mobile_password_payload
+
+
+def password_account_limit_key():
+    data=password_payload()
+    email=data.get('email','') if isinstance(data,dict) else ''
+    value=email.strip().lower() if isinstance(email,str) and len(email)<=255 else 'invalid'
+    return 'mobile-password-account:'+hashlib.sha256(value.encode()).hexdigest()
+
+
+@mobile_bp.post('/session/password')
+@limiter.limit('5/minute')
+@limiter.limit('10/hour',key_func=password_account_limit_key)
+def mobile_password_login():
+    data=password_payload()
+    if not isinstance(data,dict) or set(data)-{'email','password'}:
+        raise service.MobileError('登录参数无效')
+    return jsonify(success=True,**service.password_login(data.get('email'),data.get('password')))
 
 
 @mobile_bp.get("/bootstrap")
@@ -275,7 +321,8 @@ def mobile_upload():
         kind = fields.get("document_kind", "")
         if kind not in KINDS:
             raise ValueError("请选择票据用途")
-        occurrence = month(fields.get("occurrence_month", ""))
+        occurrence = fields.get("occurrence_month", "")
+        occurrence = month(occurrence) if occurrence else ""
         customer_id = fields.get("customer_id", "").strip()
         customer_level = fields.get("customer_level", "").strip()
         if len(customer_id) > 64 or len(customer_level) > 8:

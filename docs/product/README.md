@@ -15,3 +15,5 @@
 - [发票留存实施计划](invoice-retention-plan.md)与[微信手机录入准备及 Codex 提示词](wechat-invoice-upload-codex-prompt.md)。
 
 - [手机高铁票缺失金额拆分修复](mobile-ticket-amount-fix.md)。
+
+- [手机账号密码登录与精简录入方案](mobile-password-login-plan.md)。

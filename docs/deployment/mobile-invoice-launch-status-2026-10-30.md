@@ -73,3 +73,7 @@
 操作者反馈MOBILE_TICKET_DEPLOY_OK：实际release_commit=c74de7ee7ae3c39ed246448e9622c51613e6bfed，migration_revision=f5a6b7c8d9e0保持不变，最终备份为本轮mobile-entry-final-6vgbet06受限目录，service active、HTTPS OK、mobile enabled。主线run41150721349五项CI作业全部成功，tag v0.10.2指向同一提交。
 
 以上更新本节之前“待生产”的历史状态。本修复真机高铁票再确认及网站金额仍待操作者验收；小程序仅开发版本0.10.2上传，不宣称正式微信审核或发布成功。
+
+## 2026-10-31 高铁票修复真机验收完成
+
+操作者确认新版原高铁票可保存、不再出现合计不等，网站票价与税额一致，两项均OK。更新前文该项待办；不等同微信正式审核或发布。

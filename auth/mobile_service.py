@@ -10,8 +10,11 @@ from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import User, utcnow
 from .mobile_models import BindingChallenge, ExternalIdentity, MobileAccountAudit, MobileSession
+from werkzeug.security import generate_password_hash, check_password_hash
 
 PROVIDER = "wechat_miniprogram"
+PASSWORD_PROVIDER = "website_password"
+_DUMMY_HASH = generate_password_hash(secrets.token_urlsafe(32))
 
 
 class MobileError(Exception):
@@ -130,9 +133,42 @@ def authenticate(raw_token):
         return None
     identity = db.session.get(ExternalIdentity, row.identity_id, populate_existing=True)
     user = db.session.get(User, row.user_id, populate_existing=True)
-    if not identity or not identity.active or identity.client_id != client_id() or identity.provider != PROVIDER or identity.user_id != row.user_id or not user or not user.is_active_user:
+    if not identity or not identity.active or identity.client_id != client_id() or identity.provider not in {PROVIDER,PASSWORD_PROVIDER} or identity.user_id != row.user_id or not user or not user.is_active_user:
+        return None
+    if identity.provider == PASSWORD_PROVIDER and identity.subject != digest(f'{user.id}:{user.password_hash}'):
         return None
     return user, row
+
+
+def password_login(email, password):
+    """Normal website credentials issue only a scoped, short-lived mobile session."""
+    message = "账号或密码不正确，或账号暂不可用"
+    if (not isinstance(email, str) or not isinstance(password, str)
+            or not 1 <= len(email) <= 255 or not 1 <= len(password) <= 256):
+        raise MobileError(message, 401)
+    user = User.query.filter_by(email=email.strip().lower()).with_for_update().populate_existing().first()
+    try:
+        valid = check_password_hash(user.password_hash if user else _DUMMY_HASH, password)
+    except ValueError:
+        valid = False
+    from models import UserToolGrant
+
+    if (not user or not valid or not user.is_active_user or (not user.is_admin
+            and not db.session.get(UserToolGrant, {"user_id": user.id, "tool_id": "reimbursement"}))):
+        raise MobileError(message, 401)
+    subject = digest(f"{user.id}:{user.password_hash}")
+    identity = ExternalIdentity.query.filter_by(provider=PASSWORD_PROVIDER, client_id=client_id(), subject=subject).first()
+    if not identity:
+        identity = ExternalIdentity(provider=PASSWORD_PROVIDER, client_id=client_id(), subject=subject, user_id=user.id, active=True)
+        db.session.add(identity)
+        db.session.flush()
+    if not identity.active or identity.user_id != user.id:
+        raise MobileError(message, 401)
+    token, expires = secrets.token_urlsafe(32), utcnow() + timedelta(hours=24)
+    db.session.add(MobileSession(identity_id=identity.id, user_id=user.id, token_hash=digest(token), expires_at=expires))
+    audit(user.id, "password_session.created", identity_id=identity.id)
+    db.session.commit()
+    return {"access_token": token, "expires_at": expires.isoformat()+"Z", "display_name": user.nickname or "网站账号", "auth_method": "password"}
 
 
 def unbind(user_id, identity_id):
