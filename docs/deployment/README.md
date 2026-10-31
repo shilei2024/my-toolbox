@@ -63,3 +63,5 @@ AI 模块并入生产主线的合并流程与审批门见 [AI 模块并入生产
 - [客户项目提醒功能验证](customer-project-reminder-verification.md)
 
 - [发票留存功能发布与回滚](invoice-retention-rollout.md)：兼容迁移、预发布验收与旧版本误计费回滚风险。
+
+- [高铁票金额补齐发布与回滚](mobile-ticket-amount-rollout.md)。

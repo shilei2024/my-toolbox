@@ -144,3 +144,31 @@ const api=require('./apps/invoice-miniprogram/lib/api');
         result = subprocess.run([shutil.which('node'), '-e', source], cwd=root,
             capture_output=True, encoding='utf-8', timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is required for native client checks')
+    def test_ticket_missing_components_do_not_erase_fare_and_warning_is_shown(self):
+        source = r"""
+const assert=require('node:assert/strict');let page;
+global.Page=p=>{page=p;};
+const api=require('./apps/invoice-miniprogram/lib/api');
+require('./apps/invoice-miniprogram/pages/review/index');
+page.data=structuredClone(page.data);
+page.setData=updates=>{for(const [key,value] of Object.entries(updates)){const parts=key.split('.');let target=page.data;for(const p of parts.slice(0,-1))target=target[p];target[parts.at(-1)]=value;}};
+page.syncLinked=()=>{};
+page.data.invoice={amount:'',tax_amount:'',total_amount:'590.48'};
+page.input({currentTarget:{dataset:{key:'tax_amount'}},detail:{value:'0'}});
+assert.equal(page.data.invoice.total_amount,'590.48');
+page.input({currentTarget:{dataset:{key:'amount'}},detail:{value:'590.48'}});
+assert.equal(page.data.invoice.total_amount,'590.48');
+page.input({currentTarget:{dataset:{key:'amount'}},detail:{value:''}});
+assert.equal(page.data.invoice.total_amount,'590.48');
+page.data.invoice={amount:0,tax_amount:0,total_amount:'590.48'};page.completeFromTotal();
+assert.equal(page.data.invoice.amount,'590.48');assert.equal(page.data.invoice.tax_amount,'0.00');
+assert.equal(page.data.confirmed,false);assert(page.data.amountNote.includes('核对'));
+page.data.invoice.tax_amount='600';page.completeFromTotal();assert.equal(page.data.invoice.amount,'590.48');assert(page.data.message.includes('不能大于'));
+page.id=1;page.data.snapshot='snapshot';
+api.request=async()=>({success:true,snapshot:'snapshot',draft:{amount:'590.48',tax_amount:'0.00',total_amount:'590.48'},amount_note:'税额暂记0，请核对'});
+(async()=>{await page.recognize();assert.equal(page.data.invoice.amount,'590.48');assert.equal(page.data.amountNote,'税额暂记0，请核对');assert.equal(page.data.confirmed,false);})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+        result=subprocess.run([shutil.which('node'), '-e', source], cwd=Path(__file__).parents[1], capture_output=True,encoding='utf-8',timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)

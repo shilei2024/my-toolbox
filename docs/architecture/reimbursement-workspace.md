@@ -90,3 +90,7 @@ PaddleOCR），不进入共享 AI 任务队列：单张票据识别是秒级同�
 ## 2026-10-30 移动录入字段补齐（候选）
 
 手机目录及客户创建复用网站组织客户服务和权限，确认表单支持客户、等级及完整关联明细，产品代码只读。无迁移；新字段兼容旧请求，显式关联明细仍受快照保护。详见[字段对齐](../product/mobile-form-parity.md)及[API](../api/wechat-invoice-upload.md)。
+
+## 2026-10-31 高铁票金额拆分修复（候选）
+
+移动草稿、旧缓存读取和确认通过retention.complete_invoice_amounts补空白，显式0保留；仅合计时返回税额暂记0的核对提示，已有不一致仍拒绝。旧客户端空白兼容，无迁移/额外OCR；[ADR-0043](../adr/0043-mobile-invoice-missing-amounts.md)。
