@@ -38,3 +38,27 @@ done
 ## 回滚
 
 代码退回 e22cfef，客户端不变；重置码只是签名串，回退后自然失效；客户与发票数据未改动，无需回库。
+
+## 0.12.1 热修：生成重置码 500
+
+0.12.0 部署后发现管理后台「生成重置码」返回 500：`issue_password_reset` 传入的 `page` 与 `_render_users` 内部传给 `render_template` 的 `page` 重复，触发 TypeError。修复只改 `admin/routes.py` 的渲染入口，重置码格式、有效期、客户隔离逻辑均未变；新增 `tests/test_admin_users_render.py` 复现该调用。
+
+源码 dc98efc，报告 SHA 为 release PR 合并后的 main；用本轮专用 `mobile_reset_fix_release.py`，连同 `mobile_entry_release.py`、`invoice_release.py`、`invoice_backup.py` 从同一 main SHA 提取到 root 新建 0700 目录。
+
+```bash
+(
+set -euo pipefail
+umask 077
+cd /opt/mytoolbox
+git fetch origin main
+release=APPROVED_MAIN_SHA
+test "$(git rev-parse origin/main)" = "$release"
+runner=$(mktemp -d /root/mytoolbox-reset-fix-release-XXXXXX)
+for helper in mobile_reset_fix_release.py mobile_entry_release.py invoice_release.py invoice_backup.py; do
+  git show "${release}:scripts/ops/${helper}" > "$runner/$helper"
+done
+/opt/mytoolbox/.venv/bin/python "$runner/mobile_reset_fix_release.py" "$release"
+)
+```
+
+成功标记 MOBILE_RESET_FIX_DEPLOY_OK；随后在后台点一次「生成重置码」，应直接显示一次性码而不是 500。回滚退回 dc98efc，数据不受影响。
