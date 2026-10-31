@@ -196,13 +196,55 @@ def mobile_bootstrap():
     offices = _seed_offices("user", owner_id)
     periods = ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id).order_by(ReimbursementPeriod.start_year.desc(), ReimbursementPeriod.start_month.desc()).all()
     return jsonify(display_name=current_user.nickname or "网站账号",
-        periods=[{"id":p.id, "name":p.name, "is_active":p.is_active} for p in periods],
+        periods=[{"id":p.id, "name":p.name, "is_active":p.is_active,
+                  "start_year":p.start_year, "start_month":p.start_month,
+                  "end_year":p.end_year, "end_month":p.end_month} for p in periods],
         offices=[{"id":o.id, "name":o.name} for o in offices],
         categories=[_category_dict(c) for c in _seed_categories('user',owner_id)],
         product_lines=[_product_line_dict(p) for p in _seed_product_lines('user',owner_id)],
         customers=[_customer_dict(c) for c in _customer_directory()],
         customer_levels=list(CUSTOMER_LEVELS),
         customer_creation_enabled=_customer_creation_membership() is not None)
+
+
+@mobile_bp.post("/periods")
+@limiter.limit("5/minute")
+def mobile_period_create():
+    """Create the two-month period the rest of the phone flow depends on."""
+    from tools.reimbursement.manager import (_period_dict, _period_name, _set_active,
+        _validate_period)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) - {"start_year", "start_month", "name", "employee_name"}:
+        raise service.MobileError("周期参数无效")
+    start_year, start_month = data.get("start_year"), data.get("start_month")
+    if not all(isinstance(value, int) and not isinstance(value, bool) for value in (start_year, start_month)):
+        raise service.MobileError("请输入完整的起始年月")
+    if not 2000 <= start_year <= 2100:
+        raise service.MobileError("起始年份不合法")
+    end_year, end_month = (start_year + 1, 1) if start_month == 12 else (start_year, start_month + 1)
+    values, error = _validate_period({
+        "start_year": start_year,
+        "start_month": start_month,
+        "end_year": end_year,
+        "end_month": end_month,
+        "name": str(data.get("name") or "").strip() or _period_name(start_year, start_month, end_year, end_month),
+    })
+    if error:
+        raise service.MobileError(error)
+    owner_id = str(current_user.id)
+    if ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id, name=values["name"]).first():
+        raise service.MobileError("同名周期已存在", 409)
+    if ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id,
+            start_year=values["start_year"], start_month=values["start_month"],
+            end_year=values["end_year"], end_month=values["end_month"]).first():
+        raise service.MobileError("相同起止月份的周期已存在", 409)
+    period = ReimbursementPeriod(owner_type="user", owner_id=owner_id,
+        employee_name=str(data.get("employee_name") or current_user.nickname or "").strip(),
+        **values)
+    _set_active(period)
+    db.session.add(period)
+    db.session.commit()
+    return jsonify(success=True, period=_period_dict(period, with_stats=False)), 201
 
 
 @mobile_bp.post('/customers')

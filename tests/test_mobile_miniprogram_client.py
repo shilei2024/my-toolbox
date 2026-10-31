@@ -39,6 +39,16 @@ function page(path){let p;global.Page=d=>{p=d;};require('./apps/invoice-miniprog
  context.state().uploading=false;modal=true;api.request=async()=>({success:true});await mine.logout();assert.equal(api.session(),null);assert.equal(context.state().periodId,undefined);assert.equal(context.state().dispatchDirty,false);
  dispatch.load=()=>{};dispatch.data.rows=[{private:'old-account'}];dispatch.onShow();assert.deepEqual(dispatch.data.rows,[]);
  dashboard.refresh=()=>{};dashboard.data.summary={private:'old-account'};dashboard.onShow();assert.equal(dashboard.data.summary,null);
+ const dashboardWxml=require('node:fs').readFileSync('./apps/invoice-miniprogram/pages/dashboard/index.wxml','utf8');
+ assert(dashboardWxml.includes('toggleCreate')&&dashboardWxml.includes('createPeriod'));
+ assert.equal(dashboard.defaultMonth([{end_year:2099,end_month:12}]),'2100-01');
+ assert(/^\d{4}-\d{2}$/.test(dashboard.defaultMonth([])));
+ let created={};api.request=async(path,opt)=>{created={path,data:opt.data};return {period:{id:9,name:'2026年11-12月'}};};
+ dashboard.data.creating=true;dashboard.data.newMonth='2026-11';dashboard.data.busy=false;
+ await dashboard.createPeriod();
+ assert.equal(created.path,'/api/mobile/periods');
+ assert.deepEqual(created.data,{start_year:2026,start_month:11});
+ assert.equal(context.state().periodId,9);assert.equal(dashboard.data.creating,false);assert.equal(dashboard.data.busy,false);
  // An old account response may not clear a newly signed-in session.
  login();let callback;delete require.cache[require.resolve('./apps/invoice-miniprogram/lib/api')];const freshApi=require('./apps/invoice-miniprogram/lib/api');wx.request=o=>{callback=o;};
  const pending=freshApi.request('/api/mobile/bootstrap');token='b'.repeat(43);login();callback.success({statusCode:401,data:{error:'old session'}});
