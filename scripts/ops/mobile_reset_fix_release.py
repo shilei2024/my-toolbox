@@ -16,7 +16,7 @@ try:
 except ImportError:
     import mobile_entry_release as runner
 
-SOURCE = "e22cfefab2cfaba62cda04218b2cc1f07bcb13db"
+SOURCE = "dc98efcd28c41a929769dbb47db59dba53be1904"
 # Base of the release PR: develop's verified code already merged with main's
 # 0.11.1 artifacts, so the candidate-to-target diff is only docs and this
 # release's ops script instead of unrelated earlier release files.
