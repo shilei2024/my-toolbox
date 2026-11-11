@@ -129,9 +129,9 @@ class FormParityTests(unittest.TestCase):
             db.session.commit()
         self.assertEqual(
             self.mobile.post(
-                "/api/mobile/customers", headers=headers, json={"name": "越权"}
+                "/api/mobile/customers", headers=headers, json={"name": "本人客户"}
             ).status_code,
-            403,
+            201,
         )
         body.update(
             snapshot=refreshed["snapshot"],

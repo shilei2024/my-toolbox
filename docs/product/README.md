@@ -4,6 +4,8 @@
 
 ## 当前文档
 
+- [发票助手普通账号新增客户](invoice-customer-access.md)：双端创建权限、个人客户隔离与验收。
+
 - [发票助手小程序视觉统一](mobile-ui-design.md)：五页面排版、原生控件、间距及视觉验证边界。
 - [移动完整录入实施计划](mobile-invoice-recognition-plan.md)：首页、发票识别核对、派车单与我的四个标签，基础上传之后的待发布能力。
 

@@ -17,6 +17,33 @@ from tools.reimbursement.mobile_models import UploadReceipt
 
 @unittest.skipUnless(os.environ.get('MOBILE_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class MobilePostgresTests(fixtures.MobileInvoiceTests):
+    def test_ordinary_invoice_customers_on_postgres(self):
+        from tests.test_invoice_customer_access import InvoiceCustomerAccessTests
+        from tests.test_mobile_recognition import RecognitionTests
+        self.prepare=lambda kind='invoice':RecognitionTests.prepare(self,kind)
+        self.values=lambda headers,id,policy='review':RecognitionTests.values(self,headers,id,policy)
+        InvoiceCustomerAccessTests.test_ordinary_user_without_organization_creates_from_both_clients_and_exports(self)
+
+    def test_parallel_personal_customer_space_creation(self):
+        from shared.models import Organization, OrganizationMembership
+        from customer_projects.models import Customer
+        headers = self.login()
+        barrier = Barrier(2)
+
+        def create(index):
+            client = self.app.test_client(use_cookies=False)
+            barrier.wait(timeout=10)
+            response = client.post('/api/mobile/customers', headers=headers,
+                                   json={'name': f'并发客户{index}', 'grade': 'AA'})
+            return response.status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(list(pool.map(create, (1, 2))), [201, 201])
+        with self.app.app_context():
+            self.assertEqual(Organization.query.count(), 1)
+            self.assertEqual(OrganizationMembership.query.count(), 0)
+            self.assertEqual(Customer.query.count(), 2)
+
     def _password_case(self, name):
         from tests.test_mobile_password_login import PasswordLoginTests
         self.password_sign_in=lambda email="mobile0@example.test",password="test-password":PasswordLoginTests.password_sign_in(self,email,password)

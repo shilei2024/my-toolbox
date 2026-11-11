@@ -65,7 +65,9 @@ vehicle可编辑date、from_location、to_location、contact、km_start、km_tot
 
 ## 录入字段补齐（2026-10-30候选）
 
-bootstrap新增customers（网站同一_customer_directory/_customer_dict）、customer_levels和customer_creation_enabled；categories补export_key，product_lines补code，均复用网站序列化。POST /customers接受{name,short_name,grade}，同工具Bearer授权、User锁后复查及网站_customer_creation_membership/create_customer权限与审计，201返回{success,customer}；无权403，参数无效400，10次/分钟。客户端不传组织/owner。
+bootstrap提供customers（网站同一_customer_directory/_customer_dict）、customer_levels和customer_creation_enabled；categories含export_key，product_lines含code。2026-11-11起，新增能力由有效账号的发票助手授权决定，不要求普通用户具备CRM组织角色或进入试点名单。POST /customers接受{name,short_name,grade}，与网站POST /tools/reimbursement/api/customers共用创建服务、User锁后复查、校验及审计；201返回{success,customer}，无权403，参数无效400，手机10次/分钟。两端拒绝组织/owner及其他额外字段；名称必填最多255、简称最多120、等级为空或0-1/A/AA/AAA。
+
+有原组织客户创建权限时保留原行为；否则客户进入本人隔离空间，不创建组织成员关系。目录包含本人空间和原组织可选记录；网站新增后重新打开手机核对页可选，手机新增后刷新网站可选。客户字段、等级、关联明细和Excel仍读取同一主数据。下文“有效目录”也包含本人空间，详见[ADR-0046](../adr/0046-personal-invoice-customer-access.md)。
 
 确认新增customer_id（可null）、customer_level（未关联客户可空/0-1/A/AA/AAA）、amount_confirmed（布尔）、linked_detail（可null或明细对象）。客户必须在当前组织有效目录中，所选客户等级由客户资料带出，客户端伪造等级无效。明细白名单为date/category/place/participants/amount/purpose/approval/location/expense_type/customer/customer_id；客户字段由服务端规范，金额非负两位小数、日期ISO或空、文本最多4000字，拒绝其他字段。按费用类别生成应酬/出差明细，显式明细依赖原票完整快照防旧覆盖；未提供新字段兼容旧客户端。新表单对齐网站可留空的发票号码/商家/日期，填日期仍校验，不改变费用计入前明确核对要求。
 

@@ -24,7 +24,7 @@ from . import admin_bp
 @admin_bp.get("/customer-projects")
 @admin_required
 def customer_projects_settings():
-    organizations = list(db.session.scalars(select(Organization).order_by(Organization.created_at)))
+    organizations = list(db.session.scalars(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at)))
     org = organizations[0] if organizations else None
     rows = []
     policy = None
@@ -94,7 +94,7 @@ def customer_projects_bootstrap():
 @admin_bp.post("/customer-projects/business-calendar")
 @admin_required
 def customer_projects_business_calendar_update():
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at).limit(1))
     if org is None:
         flash("请先初始化客户项目组织。", "danger")
         return redirect(url_for("admin.customer_projects_settings"))
@@ -128,7 +128,7 @@ def customer_projects_business_calendar_update():
 @admin_bp.post("/customer-projects/business-calendar/<string:override_id>/delete")
 @admin_required
 def customer_projects_business_calendar_delete(override_id: str):
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at).limit(1))
     row = db.session.get(OrganizationBusinessDayOverride, override_id)
     if org is None or row is None or row.organization_id != org.id:
         flash("日历覆盖不存在。", "danger")
@@ -161,7 +161,7 @@ def customer_projects_business_calendar_delete(override_id: str):
 @admin_bp.post("/customer-projects/members/<int:user_id>")
 @admin_required
 def customer_projects_member_update(user_id: int):
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at).limit(1))
     user = db.session.get(User, user_id)
     if org is None or user is None:
         flash("组织或用户不存在。", "danger")
@@ -199,7 +199,7 @@ def customer_projects_member_update(user_id: int):
 @admin_bp.post("/customer-projects/export-policy")
 @admin_required
 def customer_projects_export_policy_update():
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at).limit(1))
     if org is None:
         flash("请先初始化客户项目组织。", "danger")
         return redirect(url_for("admin.customer_projects_settings"))
@@ -245,7 +245,7 @@ def customer_projects_export_policy_update():
 @admin_bp.post("/customer-projects/reminder-policy")
 @admin_required
 def customer_projects_reminder_policy_update():
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at).limit(1))
     if org is None:
         flash("请先初始化客户项目组织。", "danger")
         return redirect(url_for("admin.customer_projects_settings"))

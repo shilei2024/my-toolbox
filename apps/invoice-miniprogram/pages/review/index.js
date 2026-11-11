@@ -229,6 +229,7 @@ Page({
     });
   },
   openCustomer() {
+    if (this.data.busy || !this.data.customer_creation_enabled) return;
     this.setData({
       newCustomer: { name: "", short_name: "", grade: "" },
       newGradeIndex: 0,
@@ -251,6 +252,10 @@ Page({
   },
   async createCustomer() {
     if (this.data.busy) return;
+    if (!this.data.newCustomer?.name?.trim()) {
+      this.setData({ message: "请填写客户名称。" });
+      return;
+    }
     this.setData({ busy: true });
     try {
       const r = await api.request("/api/mobile/customers", {
@@ -264,6 +269,7 @@ Page({
         "invoice.customer_level": r.customer.grade || "",
         customerTouched: true,
         confirmed: false,
+        message: "客户已新增并选中，网站与小程序同步可用。",
       });
       this.indices();
       this.syncLinked(true);

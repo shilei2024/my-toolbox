@@ -307,7 +307,7 @@ def seed_default_statuses(organization_id: str) -> None:
 
 
 def bootstrap_organization(name: str, admin_user_id: int) -> Organization:
-    org = db.session.scalar(select(Organization).order_by(Organization.created_at.asc()).limit(1))
+    org = db.session.scalar(select(Organization).where(Organization.status != "personal").order_by(Organization.created_at.asc()).limit(1))
     if org is None:
         org = Organization(name=name or "默认业务组织")
         db.session.add(org)
@@ -369,13 +369,23 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         {"organization_admin", "business_manager", "sales"}
     ):
         raise DomainError("INVALID_OWNER", "客户负责人不是当前组织的有效业务成员。")
+    return _create_customer_record(data, membership.organization_id, owner_id, membership.user_id)
+
+
+def _create_customer_record(
+    data: dict[str, Any], organization_id: str, owner_id: int, actor_id: int
+) -> Customer:
+    """Persist validated customer fields; callers enforce the destination scope."""
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise DomainError("VALIDATION_ERROR", "请填写客户名称。", field_errors={"name": "必填"})
     grade = str(data.get("grade") or "").upper().strip()
     if grade and grade not in {"0-1", "A", "AA", "AAA"}:
         raise DomainError(
             "VALIDATION_ERROR", "客户评级无效。", field_errors={"grade": "仅支持 0-1/A/AA/AAA"}
         )
     customer = Customer(
-        organization_id=membership.organization_id,
+        organization_id=organization_id,
         name=name[:255],
         normalized_name=normalize_name(name)[:255],
         short_name=str(data.get("short_name") or "").strip()[:120] or None,
@@ -384,12 +394,12 @@ def create_customer(data: dict[str, Any], membership: OrganizationMembership) ->
         grade=grade or None,
         primary_owner_user_id=owner_id,
         notes=str(data.get("notes") or "").strip()[:4000] or None,
-        created_by_user_id=membership.user_id,
-        updated_by_user_id=membership.user_id,
+        created_by_user_id=actor_id,
+        updated_by_user_id=actor_id,
     )
     db.session.add(customer)
     db.session.flush()
-    add_audit(customer.organization_id, "customer", customer.id, "created", membership.user_id, {"name": customer.name})
+    add_audit(customer.organization_id, "customer", customer.id, "created", actor_id, {"name": customer.name})
     return customer
 
 
