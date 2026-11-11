@@ -27,6 +27,9 @@ def new_uuid() -> str:
 class Organization(db.Model):
     __tablename__ = "organizations"
 
+    # "personal" is reserved for private customer containers: never provision
+    # memberships or CRM policies for them, or change their status to "active".
+
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", index=True)

@@ -191,7 +191,7 @@ def mobile_password_login():
 def mobile_bootstrap():
     from tools.reimbursement.manager import (_seed_offices, _seed_categories, _seed_product_lines,
         _category_dict, _product_line_dict, _customer_directory, _customer_dict,
-        _customer_creation_membership, CUSTOMER_LEVELS)
+        _customer_creation_enabled, CUSTOMER_LEVELS)
     owner_id = str(current_user.id)
     offices = _seed_offices("user", owner_id)
     periods = ReimbursementPeriod.query.filter_by(owner_type="user", owner_id=owner_id).order_by(ReimbursementPeriod.start_year.desc(), ReimbursementPeriod.start_month.desc()).all()
@@ -204,7 +204,7 @@ def mobile_bootstrap():
         product_lines=[_product_line_dict(p) for p in _seed_product_lines('user',owner_id)],
         customers=[_customer_dict(c) for c in _customer_directory()],
         customer_levels=list(CUSTOMER_LEVELS),
-        customer_creation_enabled=_customer_creation_membership() is not None)
+        customer_creation_enabled=_customer_creation_enabled())
 
 
 @mobile_bp.post("/periods")
@@ -250,19 +250,19 @@ def mobile_period_create():
 @mobile_bp.post('/customers')
 @limiter.limit('10/minute')
 def mobile_customer_create():
-    from tools.reimbursement.manager import _customer_creation_membership, _customer_dict
+    from tools.reimbursement.manager import _create_invoice_customer, _customer_dict
     from tools.reimbursement.mobile_recognition import reauthorize
-    from customer_projects.services.projects import create_customer, DomainError
+    from customer_projects.services.projects import DomainError
     data=request.get_json(silent=True)
     if not isinstance(data,dict) or set(data)-{'name','short_name','grade'}:
         raise service.MobileError('客户参数无效')
     User.query.filter_by(id=current_user.id).with_for_update().one()
     db.session.expire_all(); reauthorize()
-    membership=_customer_creation_membership()
-    if membership is None: raise service.MobileError('当前账号无权录入客户，请联系组织管理员',403)
     try:
-        customer=create_customer(data,membership)
+        customer=_create_invoice_customer(data)
         db.session.commit()
+    except PermissionError as exc:
+        raise service.MobileError(str(exc),403) from None
     except DomainError as exc:
         raise service.MobileError(exc.message) from None
     return jsonify(success=True,customer=_customer_dict(customer)),201

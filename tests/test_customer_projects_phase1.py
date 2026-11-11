@@ -41,7 +41,7 @@ from customer_projects.services.projects import (  # noqa: E402
     local_day_bounds,
 )
 from extensions import db  # noqa: E402
-from models import ReimbursementInvoice, ReimbursementProductLine, User  # noqa: E402
+from models import ReimbursementInvoice, ReimbursementProductLine, User, Tool, UserToolGrant  # noqa: E402
 from shared.models import AuditEvent, Organization, OrganizationMembership  # noqa: E402
 
 
@@ -60,6 +60,11 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             self.sales_id = self._add_user("sales@test.com")
             self.other_id = self._add_user("other@test.com")
             self.fae_id = self._add_user("fae@test.com")
+            db.session.add(Tool(id="reimbursement", name="发票助手", route="/tools/reimbursement",
+                                blueprint_module="tools.reimbursement", required_plan="private"))
+            db.session.flush()
+            for uid in (self.sales_id, self.other_id):
+                db.session.add(UserToolGrant(user_id=uid, tool_id="reimbursement"))
             org = bootstrap_organization("测试组织", self.admin_id)
             self.org_id = org.id
             sales_membership = OrganizationMembership(
@@ -630,6 +635,25 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             },
         )
         self.assertEqual(rejected.status_code, 400)
+
+    def test_admin_organization_selection_excludes_personal_customer_containers(self) -> None:
+        from customer_projects.services.personal_customers import create_personal_customer
+        with app.app_context():
+            customer = create_personal_customer({'name': '个人客户'}, self.fae_id)
+            personal_id = customer.organization_id
+            db.session.get(Organization, personal_id).created_at = datetime(2000, 1, 1, tzinfo=timezone.utc)
+            db.session.commit()
+            self.assertEqual(bootstrap_organization('不应替换现有团队', self.admin_id).id, self.org_id)
+        self._login('manager@test.com')
+        settings = self.client.get('/admin/customer-projects')
+        self.assertEqual(settings.status_code, 200)
+        self.assertIn('测试组织', settings.get_data(as_text=True))
+        self.assertNotIn('个人客户空间', settings.get_data(as_text=True))
+        response = self.client.post(f'/admin/customer-projects/members/{self.fae_id}',
+                                    data={'roles': ['fae'], 'status': 'active'})
+        self.assertEqual(response.status_code, 302)
+        with app.app_context():
+            self.assertEqual(OrganizationMembership.query.filter_by(organization_id=personal_id).count(), 0)
 
     def test_reimbursement_can_create_and_select_shared_customer(self) -> None:
         self._login()

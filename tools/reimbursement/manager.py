@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, current_app, g, has_request_context, jsonify, request, send_file
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 
 from tools.reimbursement.models import ReimbursementAudit
 from tools.reimbursement.retention import POLICIES, KINDS, money, month, allocate
@@ -63,36 +63,41 @@ def _owner() -> tuple[str, str]:
 def _customer_directory() -> list[Any]:
     """Return only the customers this account may pick, once per request.
 
-    The organization still owns the rows, but each account keeps its own list:
-    customers created or owned by the caller, plus legacy rows that have no
-    creator at all. Office/product-line seeds stay shared defaults.
+    Include the caller's private space and their current organization's owned
+    or legacy shared rows. Reading never provisions an organization/membership.
     """
+    if not has_request_context():
+        return []
     if hasattr(g, "_reimbursement_customers"):
         return g._reimbursement_customers
-    if not has_request_context():
-        g._reimbursement_customers = []
-        return g._reimbursement_customers
-    from customer_projects.permissions import current_membership
-
-    membership = current_membership()
-    if membership is None:
-        g._reimbursement_customers = []
-        return g._reimbursement_customers
     from flask_login import current_user
+    from customer_projects.permissions import current_membership
+    from customer_projects.services.personal_customers import personal_customer_organization_id
+
+    if not current_user.is_authenticated or not current_user.is_active:
+        g._reimbursement_customers = []
+        return g._reimbursement_customers
+    membership = current_membership()
 
     own = or_(
         Customer.created_by_user_id == current_user.id,
         Customer.primary_owner_user_id == current_user.id,
         Customer.created_by_user_id.is_(None),
     )
+    scope = and_(
+        Customer.organization_id == personal_customer_organization_id(current_user.id),
+        Customer.created_by_user_id == current_user.id,
+        Customer.primary_owner_user_id == current_user.id,
+    )
+    if membership is not None:
+        scope = or_(scope, and_(Customer.organization_id == membership.organization_id, own))
     g._reimbursement_customers = list(
         db.session.scalars(
             select(Customer)
             .where(
-                Customer.organization_id == membership.organization_id,
+                scope,
                 Customer.deleted_at.is_(None),
                 Customer.status == "active",
-                own,
             )
             .order_by(func.coalesce(Customer.short_name, Customer.name), Customer.name)
         )
@@ -101,7 +106,7 @@ def _customer_directory() -> list[Any]:
 
 
 def _org_customer(customer_id: Any) -> Any | None:
-    """Resolve any customer in the caller's organization, for display or history.
+    """Resolve a private customer or current-organization history for display.
 
     Invoices keep only a customer id; a colleague's older rows must still render a
     name after the per-account directory change, even though nobody else may pick
@@ -111,14 +116,23 @@ def _org_customer(customer_id: Any) -> Any | None:
     if not value or not has_request_context():
         return None
     from customer_projects.permissions import current_membership
+    from customer_projects.services.personal_customers import personal_customer_organization_id
+    from flask_login import current_user
 
-    membership = current_membership()
-    if membership is None:
+    if not current_user.is_authenticated or not current_user.is_active:
         return None
+    membership = current_membership()
+    scope = and_(
+        Customer.organization_id == personal_customer_organization_id(current_user.id),
+        Customer.created_by_user_id == current_user.id,
+        Customer.primary_owner_user_id == current_user.id,
+    )
+    if membership is not None:
+        scope = or_(scope, Customer.organization_id == membership.organization_id)
     return db.session.scalar(
         select(Customer).where(
             Customer.id == value,
-            Customer.organization_id == membership.organization_id,
+            scope,
         )
     )
 
@@ -147,6 +161,41 @@ def _customer_creation_membership() -> Any | None:
     ):
         return None
     return membership
+
+
+def _customer_creation_enabled() -> bool:
+    from flask_login import current_user
+    from auth.tool_access import can_access_private_tool
+
+    return bool(current_user.is_authenticated and current_user.is_active
+                and can_access_private_tool("reimbursement"))
+
+
+def _create_invoice_customer(data: Any) -> Any:
+    from flask_login import current_user
+    from models import User
+    from customer_projects.services.projects import DomainError, create_customer
+    from customer_projects.services.personal_customers import create_personal_customer
+
+    if not _customer_creation_enabled():
+        raise PermissionError("当前账号无权使用发票助手，请联系管理员授权")
+    if not isinstance(data, dict) or set(data) - {"name", "short_name", "grade"}:
+        raise DomainError("VALIDATION_ERROR", "客户参数无效")
+    if not isinstance(data.get("name"), str) or not data["name"].strip():
+        raise DomainError("VALIDATION_ERROR", "请填写客户名称。", field_errors={"name": "必填"})
+    for key, limit in (("name", 255), ("short_name", 120), ("grade", 8)):
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or len(value.strip()) > limit):
+            raise DomainError("VALIDATION_ERROR", "客户字段格式或长度无效。")
+    # Serialize first creation from the website and mini-program on PostgreSQL.
+    User.query.filter_by(id=current_user.id).with_for_update().one()
+    db.session.expire_all()
+    if not _customer_creation_enabled():
+        raise PermissionError("当前账号无权使用发票助手，请联系管理员授权")
+    membership = _customer_creation_membership()
+    if membership is not None:
+        return create_customer(data, membership)
+    return create_personal_customer(data, current_user.id)
 
 
 def _owned_customer(customer_id: Any) -> Any | None:
@@ -1726,7 +1775,7 @@ def register_routes(bp: Blueprint) -> None:
             product_lines=[_product_line_dict(item) for item in product_lines],
             offices=[_office_dict(item) for item in offices],
             customers=[_customer_dict(item) for item in _customer_directory()],
-            customer_creation_enabled=_customer_creation_membership() is not None,
+            customer_creation_enabled=_customer_creation_enabled(),
             customer_levels=list(CUSTOMER_LEVELS),
             recent=[_invoice_dict(item) for item in invoices],
             stats={
@@ -1740,23 +1789,13 @@ def register_routes(bp: Blueprint) -> None:
 
     @bp.post("/api/customers")
     def create_customer_from_invoice():
-        membership = _customer_creation_membership()
-        if membership is None:
-            return jsonify(error="当前账号无权录入客户，请联系组织管理员"), 403
-
-        from customer_projects.services.projects import DomainError, create_customer
-
-        data = _payload()
+        from customer_projects.services.projects import DomainError
         try:
-            customer = create_customer(
-                {
-                    "name": data.get("name"),
-                    "short_name": data.get("short_name"),
-                    "grade": data.get("grade"),
-                },
-                membership,
-            )
+            customer = _create_invoice_customer(request.get_json(silent=True))
             db.session.commit()
+        except PermissionError as exc:
+            db.session.rollback()
+            return jsonify(error=str(exc)), 403
         except DomainError as exc:
             db.session.rollback()
             return jsonify(error=exc.message, field_errors=exc.field_errors), 400
