@@ -21,7 +21,7 @@
 | 模型 | 加法方案 |
 | --- | --- |
 | users / Account | 保持 id；新增 email_verified_at、auth_epoch（默认 0）、updated_at；保留 is_active_user 等原字段。完成兼容审计后才允许 email/password_hash 为空，以支持微信专用账号；不使用假邮箱/随机密码伪装身份 |
-| account_external_identities / Identity | 扩展 identity_type、password_hash、updated_at、last_login_at、verified_at；subject 从 128 扩到 255；现 provider/client_id/subject/user_id/active 保持。web_password 使用固定非空 client_id=web、规范化邮箱 subject；openid 三元唯一性不变 |
+| account_external_identities / Identity | 扩展 identity_type、identifier(255)、password_hash、updated_at、last_login_at、verified_at；subject 保持128。web_password 使用固定非空 client_id=web、规范化邮箱 identifier 和邮箱 SHA256 subject；现有身份主键与 openid 三元唯一性不变 |
 | 旧 website_password 行 | 标记为 legacy_mobile_password 类型，不作为网站密码权威，不改 subject 或行 ID，以保留现存移动会话 |
 | 网站会话 account_web_sessions | 新表：随机 session id 摘要、user_id、epoch、expiry、revoked_at、认证时间；Cookie/Remember 只携带签名的会话引用，不存密码 |
 | 移动会话 | 保留旧表、token 摘要及 TTL；新增 epoch、认证时间/方式，新增列兼容回填；本期可继续 24h/7d，不为重构硬加 refresh token |
