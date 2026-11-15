@@ -108,6 +108,8 @@ cd /opt/mytoolbox
 
 预期 `AUTH_RELEASE_OK`、固定 release_commit、`revision=c8d9e0f1a2b3` 和新的 backup_dir。工具会停写、生成最终备份、保留 .env/Caddy、快进 main、事务迁移和回填、核对历史摘要、重启并检查正式域名。它拒绝依赖/Caddy版本变化、非预期数据库版本和未提交的其他改动；遇到拒绝不要删除检查。
 
+合并后的 main `a7aac0b4428b6afc41bdc6bd0e6826dd12eec9c5` 已通过全部 CI。发布前还会确认 SOURCE 是 TARGET 的祖先，分叉会在停止网站前拒绝。若发生分叉，先检查本地提交来源，在独立环境整理发布方案；不能用强制 reset 覆盖服务器改动。
+
 ```bash
 systemctl is-active mytoolbox
 curl --fail --silent --show-error https://mindfulpenpal.com/healthz
