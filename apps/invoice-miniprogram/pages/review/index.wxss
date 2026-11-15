@@ -1,9 +1,9 @@
 .original-card .tag { margin:0; flex-shrink:0; }
 .section-head button { margin:0; }
-.linked-customer { display:flex; justify-content:space-between; gap:24rpx; background:#f2f6f3; padding:24rpx; border-radius:16rpx; font-size:28rpx; margin-bottom:28rpx; }
+.linked-customer { display:flex; justify-content:space-between; gap:24rpx; background:#F3EFF2; padding:24rpx; border-radius:16rpx; font-size:28rpx; margin-bottom:28rpx; }
 .confirm-row { display:flex; align-items:center; gap:16rpx; }
 .confirm-copy { flex:1; min-width:0; }
 .confirm-title { font-size:28rpx; font-weight:600; }
 .confirm-copy .hint { margin-top:8rpx; }
-.confirmation-card { border-color:#ccdfd2; }
+.confirmation-card { border-color:#D8CAD4; }
 .form-grid .ghost { margin-top:4rpx; padding:8rpx 0; min-height:64rpx; text-align:left; }

@@ -67,5 +67,26 @@ def verify(code: str, *, max_age: int | None = None) -> tuple[User | None, str |
 
 
 def reset(user: User, new_password: str) -> None:
-    user.set_password(new_password)
+    from .account_service import change_password
+    expected = user.password_hash
+    if not change_password(user.id, new_password, expected_hash=expected):
+        raise ValueError("password_reset_state_changed")
     db.session.commit()
+
+
+def redeem(code: str, email: str, new_password: str) -> bool:
+    """Recheck the signed credential under the account lock before changing it."""
+    from .account_service import lock_account, change_password
+    user, _ = verify(code)
+    if user is None:
+        return False
+    user = lock_account(user.id)
+    user, _ = verify(code)
+    if user is None or (user.email or "").strip().lower() != email:
+        db.session.rollback()
+        return False
+    if not change_password(user.id, new_password, expected_hash=user.password_hash):
+        db.session.rollback()
+        return False
+    db.session.commit()
+    return True

@@ -19,3 +19,9 @@
 - [手机高铁票缺失金额拆分修复](mobile-ticket-amount-fix.md)。
 
 - [手机账号密码登录与精简录入方案](mobile-password-login-plan.md)。
+
+- [发票小程序界面精简](invoice-mini-ui-simplify.md)：五页信息层级、按需展开与体验版验收。
+
+- [发票小程序配色与 Logo](invoice-mini-brand.md)。
+
+- [发票小程序视觉修订 V3](invoice-mini-brand-v3.md)：当前配色与折纸徽记。

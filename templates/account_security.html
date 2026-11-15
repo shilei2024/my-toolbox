@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mx-auto" style="max-width:560px"><h1 class="h4 mb-4">账号安全</h1>
+<div class="card card-body mb-3"><h2 class="h6">邮箱</h2><p>{{ user.email or '未设置' }} · {{ '已验证' if user.email_verified_at else '未验证' }}</p>
+{% if user.email and not user.email_verified_at %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button name="action" value="verify" class="btn btn-outline-primary">验证邮箱</button></form>{% endif %}</div>
+<form method="post" class="card card-body"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label class="form-label" for="current">当前密码</label><input id="current" name="current_password" type="password" autocomplete="current-password" maxlength="128" required class="form-control mb-3">
+<label class="form-label" for="new">新密码</label><input id="new" name="password" type="password" autocomplete="new-password" maxlength="128" minlength="8" class="form-control mb-3">
+<label class="form-label" for="confirm">确认新密码</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" maxlength="128" class="form-control mb-3">
+<button name="action" value="password" class="btn btn-primary mb-2">修改密码并退出全部设备</button><button name="action" value="logout_all" class="btn btn-outline-secondary">仅退出全部设备</button></form></section>
+{% endblock %}

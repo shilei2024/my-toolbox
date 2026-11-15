@@ -1,0 +1,75 @@
+# 07 认证重构测试报告
+
+更新：2026-11-15。本报告区分历史阶段与当前发布候选结果，不代表真实生产验收。
+
+## 当前 Phase 1–6 发布候选
+
+| 检查 | 结果 |
+| --- | --- |
+| Python 全量 `unittest discover -s tests -t . -p 'test_*.py'` | 423 项，369 通过，54 skipped，0 失败，295.679 秒 |
+| 新增演练 CLI 保护 + 邮件/微信回归 | 12/12 通过，其中 10 项与全量重叠，2 项为之后新增 |
+| Generation 完整 Node 测试 | 108/108 通过 |
+| Gallery Node 测试 | 21/21 通过 |
+| Generation / Gallery TypeScript | 两者通过 |
+| Gallery Next 生产构建 | 通过 |
+
+新增覆盖邮箱验证/过期/一次性消费、重置撤销、失败重试、GET不消费、微信注册即发票权限、重复注册、设置网站密码保留ID、绑定来源会话撤销和冲突拒绝。退出相关旧测试已改为 POST；GET继续显示确认，不执行退出。普通客户权限、网站/小程序字段一致、Excel、历史原件和用户隔离回归通过。
+
+54 个跳过包括需要数据库或外部环境的既有测试；其中认证 PG 测试13个尚待 PG16 环境执行。新增 PG 测试覆盖并发注册、令牌竞争和生产发布器实际三阶段迁移。没有把 SQLite 或 mock SMTP 结果称为 PG 或真实投递成功。
+
+**未完成的外部验收**：远端 CI、真实恢复库对账、实际 SMTP 收件、微信体验版和生产域名完整 E2E。当前为可提交审查的发布候选，不能越过这些门禁直接部署。
+
+以下保留历史阶段记录，数字不与当前全量叠加。
+
+## 本地已执行
+
+```text
+python -m unittest tests.test_auth_identity_phase1 tests.test_mobile_invoice_migration tests.test_password_reset tests.test_mobile_password_login tests.test_mobile_invoice_upload tests.test_gallery_auth_bridge tests.test_invoice_customer_access
+Ran 54 tests ... OK
+```
+
+54/54 通过。新增 12 项覆盖：只读预检、恒等映射/重复回填、旧密码原字节复制、邮箱碰撞、停用匿名化账号、资料不完整与未知 hash、凭据漂移、注入失败整事务回滚、无数据 schema downgrade/有数据拒绝删除、唯一身份约束、会话归属冲突、旧数字 ID 解析，以及隔离 CLI 升级/备份摘要/恢复。
+
+随后加强真实迁移后旧网站 Cookie、微信 Bearer 和旧移动密码 Bearer 的兼容验证，12 项再次通过。补充的 SQLite 备份文件恢复至另一临时库验证单独通过；不重复计入 54 项总数。
+
+原件 BLOB、发票 ownership、用户密码/角色/套餐/配额、既有微信及 password-session 身份、会话 token_hash/时效、绑定挑战和工具授权均比较前后快照不变。没有新增或改写真实用户。
+
+`git diff --check` 通过。仅有 Windows 行尾转换提示，不属于测试失败。
+
+## PostgreSQL
+
+新增 `tests.test_auth_identity_postgres` 3 项：双线程并发回填、事务回滚重试、真实 PG CHECK/结构恢复。当前本地没有配置专用 PostgreSQL，结果为 **skipped=3**，未视为通过。已接入 CI 的 PostgreSQL16 job，本轮未取得远端运行结果。
+
+## Phase 1 当时未执行 / 未实现
+
+- 真实生产备份恢复、用户总量与异常统计、全业务表逐用户对账；仍无恢复库。
+- 邮箱验证/真实发信/新密码重置；属于后续阶段。
+- 微信独立注册及注册即获得发票权限；规则已批准，接口将在后续阶段实施。
+- 双端 prepare/confirm 绑定、安全合并、新全端 session 撤销、浏览器与微信真机 E2E。
+
+因此 Phase 1 实现与 SQLite 验证可供审查，**PG 验收和真实迁移前置条件尚未满足；不符合生产部署条件**。
+
+
+## Phase 2 本地验证（2026-11-14）
+
+执行：
+
+```text
+python -m unittest tests.test_auth_service_phase2 tests.test_auth_service_postgres tests.test_auth_identity_phase1 tests.test_auth_identity_postgres tests.test_mobile_invoice_migration tests.test_password_reset tests.test_mobile_password_login tests.test_mobile_invoice_upload tests.test_gallery_auth_bridge tests.test_invoice_customer_access
+Ran 70 tests in 67.281s
+OK (skipped=5)
+```
+
+主回归65项通过，5项PG测试因无专用数据库跳过（不是通过）。之后补充真实退出模板/CSRF验证、隔离CLI Phase 2 upgrade-auth和重复执行验证，再执行：
+
+```text
+python -m unittest tests.test_auth_service_phase2 tests.test_auth_identity_phase1 -v
+Ran 24 tests in 4.962s
+OK
+```
+
+当前新增Phase 2本地测试共12项；第二次运行与主回归重叠，不能相加为89项。总计覆盖66个不同的通过用例，5个PG用例未运行。覆盖：真实Cookie/Remember恢复及退出重放、Gallery数值ID、注册身份镜像且无私有授权、统一失败响应与脱敏审计、双移动渠道/绑定挑战全端重置、禁用再启用、旧Cookie窗口、到期/非法标识、失败事务回滚、软删除、迁移空回退/有数据拒绝删除，以及退出确认与CSRF。
+
+PG新增两项：同一恢复码并发兑换只有一个成功；旧密码登录与重置并发不遗留有效旧会话。与Phase 1三项合计五项，已配置在CI的PG16任务，但没有本轮远端执行证据。
+
+限制：没有真实生产恢复库、真机微信或完整浏览器预发布；原件/业务归属通过合成数据回归验证。Flask-Login有既有datetime.utcnow弃用提示，不影响当前通过结果。尚未发信、开放微信独立注册或执行真实数据迁移。不能据此认定可直接生产上线。

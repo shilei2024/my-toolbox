@@ -34,7 +34,13 @@ const fields = [
   "amount_confirmed",
 ];
 Page({
+  toggleAmountHelp() { this.setData({ showAmountHelp: !this.data.showAmountHelp }); },
+  toggleMore() { this.setData({ showMore: !this.data.showMore }); },
+
   data: {
+    showAmountHelp: false,
+    showMore: false,
+
     busy: false,
     message: "",
     amountNote: "",

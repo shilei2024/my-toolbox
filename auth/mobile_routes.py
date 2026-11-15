@@ -43,9 +43,9 @@ def mobile_guard():
             return jsonify(error="登录参数过长"), 413
     if request.content_length and request.content_length > 21 * 1024 * 1024:
         return jsonify(error="文件大小不能超过 20MB"), 413
-    if request.endpoint not in {"mobile_api.mobile_login","mobile_api.mobile_password_login"} and (not current_user.is_authenticated or not hasattr(g, "mobile_session")):
+    if request.endpoint not in {"mobile_api.mobile_login","mobile_api.mobile_password_login", "mobile_api.binding_prepare", "mobile_api.binding_confirm"} and (not current_user.is_authenticated or not hasattr(g, "mobile_session")):
         return jsonify(error="登录已失效，请重新登录"), 401
-    if request.endpoint not in {"mobile_api.mobile_login", "mobile_api.mobile_password_login", "mobile_api.mobile_logout"} and not can_access_private_tool("reimbursement"):
+    if request.endpoint not in {"mobile_api.mobile_login", "mobile_api.mobile_password_login", "mobile_api.mobile_logout", "mobile_api.account_info", "mobile_api.setup_password", "mobile_api.logout_all", "mobile_api.binding_prepare", "mobile_api.binding_confirm"} and not can_access_private_tool("reimbursement"):
         return jsonify(error="你的账号尚未获得报销助手的使用权限，请在网站联系管理员授权。"), 403
 
 
@@ -100,7 +100,10 @@ def require_password():
     if not isinstance(data, dict) or not login_fresh():
         raise service.MobileError("请重新登录网站后操作", 401)
     password = data.get("password")
-    if not isinstance(password, str) or len(password) > 256 or not current_user.check_password(password):
+    from .account_service import authenticate_password
+    user = authenticate_password(current_user.email, password, channel="web_reauth")
+    if user is None or user.id != current_user.id:
+        db.session.commit()
         raise service.MobileError("网站密码不正确", 403)
     return data
 
@@ -146,8 +149,86 @@ def mobile_login():
 
 @mobile_bp.post("/logout")
 def mobile_logout():
-    g.mobile_session.revoked_at = utcnow()
+    from .session_service import end_mobile_session
+    end_mobile_session(current_user.id, g.mobile_session.id)
     service.audit(current_user.id, "session.revoked", session_id=g.mobile_session.id)
+    db.session.commit()
+    return jsonify(success=True)
+
+
+@mobile_bp.post("/binding/prepare")
+@limiter.limit("5/minute")
+def binding_prepare():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise service.MobileError("请求格式不正确")
+    return jsonify(service.prepare_binding(service.exchange_code(data.get("code")), data.get("binding_code")))
+
+
+@mobile_bp.post("/binding/confirm")
+@limiter.limit("5/minute")
+def binding_confirm():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise service.MobileError("请求格式不正确")
+    return jsonify(service.confirm_binding(service.exchange_code(data.get("code")), data.get("confirmation_token")))
+
+
+@mobile_bp.get("/account")
+def account_info():
+    return jsonify(account_id=current_user.id, display_name=current_user.display_name,
+        has_password=bool(current_user.password_hash and current_user.password_hash != "!"),
+        email_verified=bool(current_user.email_verified_at),
+        email=current_user.email or "")
+
+
+@mobile_bp.post("/account/password")
+@limiter.limit("5/minute")
+def setup_password():
+    from . import account_service, email_service, session_service
+    from datetime import timedelta
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data)-{"code", "email", "password"}:
+        raise service.MobileError("请求格式不正确")
+    email = account_service.normalized_email(data.get("email"))
+    password = data.get("password")
+    from email_validator import validate_email, EmailNotValidError
+    try:
+        validate_email(email or "", check_deliverability=False)
+        if not isinstance(password, str) or not 8 <= len(password) <= 128 or not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+            raise ValueError()
+        password.encode("utf-8")
+    except (EmailNotValidError, ValueError, UnicodeError):
+        raise service.MobileError("请填写有效邮箱，密码需8–128位并包含字母和数字") from None
+    subject = service.exchange_code(data.get("code"))
+    user = account_service.lock_account(current_user.id)
+    identity = service.identity_for_subject(subject)
+    if not user or not user.is_active_user or not identity or not identity.active or identity.user_id != user.id or g.mobile_session.auth_epoch != user.auth_epoch:
+        raise service.MobileError("请重新微信登录后操作", 401)
+    if user.email or user.password_hash:
+        raise service.MobileError("此账号已有网站登录方式，请在网站账号安全中修改", 409)
+    if User.query.filter_by(email=email).first():
+        raise service.MobileError("该邮箱已被使用，请登录原账号；两个账号的数据不能自动合并", 409)
+    try:
+        user.email = email
+        if not account_service.change_password(user.id, password, expected_hash=None, channel="wechat"):
+            raise service.MobileError("账号状态已变化，请重试", 409)
+        db.session.flush()
+        if email_service.ready():
+            email_service.enqueue(user.id, "verify", email)
+        token, expires = session_service.issue_mobile_session(user, identity, channel="wechat", lifetime=timedelta(days=7))
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        raise service.MobileError("该邮箱已被使用，请使用其他邮箱", 409) from None
+    return jsonify(access_token=token, expires_at=expires.isoformat()+"Z", display_name=user.display_name, auth_method="wechat")
+
+
+@mobile_bp.post("/account/logout-all")
+def logout_all():
+    from . import account_service
+    user = account_service.lock_account(current_user.id)
+    account_service.revoke_all(user, reason="sessions.revoked_all", channel="mobile")
     db.session.commit()
     return jsonify(success=True)
 

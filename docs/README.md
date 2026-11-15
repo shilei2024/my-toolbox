@@ -20,6 +20,17 @@
 | [troubleshooting](troubleshooting/README.md) | 常见故障的定位、恢复和升级路径 | 开发、运维、客服 |
 | [changelog](changelog/README.md) | Phase 1–10 与后续里程碑的交付和验证记录 | 全体成员 |
 
+## 统一用户中心重构（Phase 1–6 发布候选，真实环境验收待补）
+
+- [当前认证审计](auth-refactor/01-current-auth-audit.md)
+- [目标架构](auth-refactor/02-target-architecture.md)
+- [旧数据迁移与对账方案](auth-refactor/03-data-migration-plan.md)
+- [风险登记与阶段门禁](auth-refactor/04-risk-register.md)
+- [Phase 1 实施记录](auth-refactor/phase-1-implementation.md)
+- [Phase 2 实施记录](auth-refactor/phase-2-implementation.md) / [认证契约](auth-refactor/05-auth-api.md)
+- [Phase 3–6 实施记录](auth-refactor/release-implementation.md) / [人工发布与恢复命令](auth-refactor/10-release-runbook.md)
+- [隔离演练指南](auth-refactor/06-deployment-guide.md) / [测试报告](auth-refactor/07-test-report.md) / [回退方案](auth-refactor/08-rollback-guide.md) / [迁移报告](auth-refactor/09-user-migration-report.md)
+
 ## 文档去重说明（2026-08-08 整理）
 
 - **新手部署**：唯一入口是 [deploy/DEPLOY_GUIDE.md](../deploy/DEPLOY_GUIDE.md)；

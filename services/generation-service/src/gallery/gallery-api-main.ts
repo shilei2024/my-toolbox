@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { accountSessionCheck } from "./account-session-check.ts";
 import { AdminService } from "../admin/admin-service.ts";
 import { PostgresAdminRepository } from "../admin/postgres-admin-repository.ts";
 import { BillingService } from "../billing/billing-service.ts";
@@ -65,7 +66,8 @@ const curated = new CuratedImageService({
 const admin = new AdminService({ repository: adminRepository, logger, onContentChanged: () => service.invalidatePublicData(), curated, ...(generationQueue ? { queueObservability: generationQueue } : {}) });
 const generation = new GenerationService({ repository: new PostgresGenerationRepository(pool), cursor: cursorCodec, storage: generationStorage, ...(configuredGenerationCreditCost ? { defaultCreditCost: configuredGenerationCreditCost } : {}), ...(generationQueue ? { cancellation: generationQueue } : {}), ready: Boolean(generationQueue) });
 const tasks = generationTaskCenter(generation);
-const app = await createGalleryHttpServer({ service, admin, billing, generation, tasks, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy, ...(redis ? { redis } : {}) });
+const app = await createGalleryHttpServer({ service, admin, billing, generation, tasks, auth: new InternalViewerContextCodec(config.internalAuthSecret), logger, trustProxy: config.trustProxy,
+  ...(process.env.AUTH_ENFORCE_SESSION === "true" ? {checkAccountSession: accountSessionCheck(pool)} : {}), ...(redis ? { redis } : {}) });
 
 await app.listen({ host: config.host, port: config.port });
 logger.info("gallery.api_started", { host: config.host, port: config.port });

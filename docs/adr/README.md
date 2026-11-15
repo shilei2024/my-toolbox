@@ -58,3 +58,4 @@
 - [ADR-0045：管理员一次性重置码与报销客户按账号归属](0045-password-reset-and-customer-scope.md)。
 
 - [ADR-0046：发票助手普通账号的个人客户空间](0046-personal-invoice-customer-access.md)。
+- [ADR-0047：统一账号、可撤销会话与认证邮件](0047-unified-account-sessions-and-email.md)。

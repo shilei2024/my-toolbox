@@ -200,7 +200,8 @@ def toggle_user(user_id: int):
     if user.id == current_user.id:
         flash("不能禁用自己的账号。", "warning")
         return redirect(url_for("admin.users"))
-    user.is_active_user = not user.is_active_user
+    from auth.account_service import toggle_active
+    user = toggle_active(user.id)
     db.session.commit()
     flash(
         f"用户 {user.email} 已{'禁用' if not user.is_active_user else '启用'}。",
@@ -350,10 +351,8 @@ def delete_user(user_id: int):
         return redirect(url_for("admin.users"))
     # Soft delete: disable login and anonymize the account while preserving
     # audit history, usage logs and generated artwork attribution.
-    user.is_active_user = False
-    user.email = f"deleted-{user.id}@invalid.local"
-    user.nickname = None
-    user.password_hash = "!"
+    from auth.account_service import soft_delete
+    user = soft_delete(user.id)
     db.session.commit()
     flash(f"用户 #{user.id} 已删除（停用并匿名化，历史记录保留）。", "success")
     return redirect(url_for("admin.users"))

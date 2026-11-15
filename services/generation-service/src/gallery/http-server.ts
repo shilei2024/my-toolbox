@@ -18,6 +18,7 @@ import type { TaskListRequest, TaskModule } from "../tasks/types.ts";
 export async function createGalleryHttpServer(options: {
   readonly service: GalleryService;
   readonly auth: InternalViewerContextCodec;
+  readonly checkAccountSession?: (viewer: ViewerContext) => Promise<void>;
   readonly logger: StructuredLogger;
   readonly trustProxy?: boolean;
   readonly redis?: Redis;
@@ -36,6 +37,11 @@ export async function createGalleryHttpServer(options: {
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+  app.addHook("preHandler", async (request) => {
+    if (request.url.split("?")[0] !== "/health" && options.checkAccountSession) {
+      await options.checkAccountSession(viewer(request, options.auth));
+    }
+  });
 
   app.get("/v1/gallery", async (request) => options.service.listPublic(parsePageRequest(request.query), viewer(request, options.auth)));
   app.get("/v1/gallery/facets", { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } }, async (request) => {

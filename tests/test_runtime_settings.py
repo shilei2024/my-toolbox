@@ -124,7 +124,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.app.config["ENFORCE_PRIVATE_TOOL_ACCESS_IN_TESTS"] = True
         private_ids = ("fcst_merge", "reimbursement")
 
-        self.client.get("/logout")
+        self.client.post("/logout")
         self.assertEqual(self.client.get("/tools/json-formatter/").status_code, 200)
         for tool_id, route in (
             ("fcst_merge", "/tools/fcst-merge/"),
@@ -156,7 +156,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertNotIn(b'href="/tools/fcst-merge"', homepage.data)
         self.assertNotIn(b'href="/tools/reimbursement"', homepage.data)
         self.assertEqual(self.client.get("/tools/fcst-merge/").status_code, 403)
-        self.client.get("/logout")
+        self.client.post("/logout")
 
         self.client.post(
             "/login",
@@ -176,7 +176,7 @@ class RuntimeSettingsTests(unittest.TestCase):
             grants = db.session.query(UserToolGrant).filter_by(user_id=user_id).all()
             self.assertEqual({grant.tool_id for grant in grants}, set(private_ids))
 
-        self.client.get("/logout")
+        self.client.post("/logout")
         self.client.post(
             "/login",
             data={"email": "private-user@test.com", "password": "User123456"},
@@ -190,7 +190,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertNotEqual(self.client.get("/tools/reimbursement/").status_code, 403)
 
         # Revoking one grant removes it from the homepage and blocks direct access.
-        self.client.get("/logout")
+        self.client.post("/logout")
         self.client.post(
             "/login",
             data={"email": "admin@test.com", "password": "Admin123456"},
@@ -198,7 +198,7 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.client.post(
             f"/admin/users/{user_id}/tools/fcst_merge/toggle-access",
         )
-        self.client.get("/logout")
+        self.client.post("/logout")
         self.client.post(
             "/login",
             data={"email": "private-user@test.com", "password": "User123456"},

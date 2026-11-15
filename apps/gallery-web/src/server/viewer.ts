@@ -61,10 +61,13 @@ export async function resolveViewerFromCookieHeader(cookieHeader: string): Promi
     if (!Number.isInteger(userId) || Number(userId) <= 0) return fallback("error");
     const email = typeof emailValue === "string" && emailValue.trim() ? emailValue.trim().slice(0, 255) : undefined;
     const nickname = typeof nicknameValue === "string" && nicknameValue.trim() ? nicknameValue.trim().slice(0, 80) : undefined;
-    console.info(`[viewer] introspection ok role=${role} userId=${Number(userId)}${email ? ` email=${email}` : ""}${nickname ? ` nickname=${nickname}` : ""}`);
-    return { role, userId: Number(userId), ...(email ? { email } : {}), ...(nickname ? { nickname } : {}), requestId, bridge: "ok" };
-  } catch (reason) {
-    console.info(`[viewer] introspection exception ${String(reason)}`);
+    const authEpoch = (body as {authEpoch?: unknown}).authEpoch;
+    const sessionRef = (body as {sessionRef?: unknown}).sessionRef;
+    const auth = Number.isInteger(authEpoch) && Number(authEpoch) >= 0 && typeof sessionRef === "string" && /^[a-f0-9]{64}$/.test(sessionRef)
+      ? {authEpoch: Number(authEpoch), sessionRef} : {};
+    return { role, userId: Number(userId), ...auth, ...(email ? { email } : {}), ...(nickname ? { nickname } : {}), requestId, bridge: "ok" };
+  } catch {
+    console.info("[viewer] introspection unavailable");
     return fallback("error");
   }
 }

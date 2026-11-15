@@ -8,40 +8,40 @@
   ],
   "window": {
     "navigationBarTitleText": "票据助手",
-    "navigationBarBackgroundColor": "#f3f5f4",
+    "navigationBarBackgroundColor": "#F4F1ED",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f3f5f4"
+    "backgroundColor": "#F4F1ED"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json",
   "tabBar": {
-    "color": "#738278",
-    "selectedColor": "#176b50",
+    "color": "#716975",
+    "selectedColor": "#514054",
     "backgroundColor": "#ffffff",
     "list": [
       {
         "pagePath": "pages/dashboard/index",
         "text": "首页",
-        "iconPath": "assets/tabs/dashboard-normal.png",
-        "selectedIconPath": "assets/tabs/dashboard-active.png"
+        "iconPath": "assets/tabs/dashboard-normal-v2.png",
+        "selectedIconPath": "assets/tabs/dashboard-active-v2.png"
       },
       {
         "pagePath": "pages/home/index",
         "text": "发票录入",
-        "iconPath": "assets/tabs/home-normal.png",
-        "selectedIconPath": "assets/tabs/home-active.png"
+        "iconPath": "assets/tabs/home-normal-v2.png",
+        "selectedIconPath": "assets/tabs/home-active-v2.png"
       },
       {
         "pagePath": "pages/dispatch/index",
         "text": "派车单",
-        "iconPath": "assets/tabs/dispatch-normal.png",
-        "selectedIconPath": "assets/tabs/dispatch-active.png"
+        "iconPath": "assets/tabs/dispatch-normal-v2.png",
+        "selectedIconPath": "assets/tabs/dispatch-active-v2.png"
       },
       {
         "pagePath": "pages/mine/index",
         "text": "我的",
-        "iconPath": "assets/tabs/mine-normal.png",
-        "selectedIconPath": "assets/tabs/mine-active.png"
+        "iconPath": "assets/tabs/mine-normal-v2.png",
+        "selectedIconPath": "assets/tabs/mine-active-v2.png"
       }
     ]
   }

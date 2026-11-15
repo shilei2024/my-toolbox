@@ -6,7 +6,9 @@ export const USER_CONTEXT_HEADER = "x-mavis-user-context";
 export const USER_CONTEXT_SIGNATURE_HEADER = "x-mavis-user-signature";
 
 interface SignedViewerPayload {
-  readonly v: 1;
+  readonly v: 1 | 2;
+  readonly authEpoch?: number;
+  readonly sessionRef?: string;
   readonly role: ViewerRole;
   readonly userId?: number;
   readonly requestId: string;
@@ -52,7 +54,8 @@ export class InternalViewerContextCodec {
       const now = this.#clock();
       if (value.issuedAt > now + 5 || value.expiresAt < now || value.expiresAt - value.issuedAt > this.#maxLifetimeSeconds) throw unauthorized();
       validateIdentity(value.role, value.userId);
-      return { role: value.role, requestId: value.requestId, ...(value.userId ? { userId: value.userId } : {}) };
+      return { role: value.role, requestId: value.requestId, ...(value.userId ? { userId: value.userId } : {}),
+        ...(value.v === 2 ? {authEpoch: value.authEpoch!, sessionRef: value.sessionRef!} : {}) };
     } catch (error) {
       if (error instanceof GalleryError) throw error;
       throw unauthorized();
@@ -70,7 +73,7 @@ export class InternalViewerContextCodec {
 function isPayload(value: unknown): value is SignedViewerPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Partial<SignedViewerPayload>;
-  return item.v === 1
+  return (item.v === 1 || (item.v === 2 && Number.isInteger(item.authEpoch) && Number(item.authEpoch) >= 0 && typeof item.sessionRef === "string" && /^[a-f0-9]{64}$/.test(item.sessionRef)))
     && new Set(["guest", "user", "admin"]).has(item.role ?? "")
     && typeof item.requestId === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(item.requestId)
     && Number.isInteger(item.issuedAt) && Number.isInteger(item.expiresAt);
