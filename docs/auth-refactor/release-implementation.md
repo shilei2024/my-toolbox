@@ -29,4 +29,4 @@
 
 本地 Python 全量 423 项中 369 通过、54 跳过；新增发布演练保护另 2 项通过。Generation 108 项、Gallery 21 项通过，两个项目类型检查和 Gallery 生产构建通过。跳过的 PG/外部环境测试不计为通过。详见[测试报告](07-test-report.md)。
 
-剩余发布门禁：远端 PG16 CI、真实生产备份恢复与逐业务对账、实际 SMTP 收件与兑换、微信体验版/完整预发布、代码审查及最终合并发布。手册见[人工更新与验收](10-release-runbook.md)，架构决策见 [ADR-0047](../adr/0047-unified-account-sessions-and-email.md)。没有执行生产迁移或声称已上线。
+远端代码候选 `553bd4476cef870c487620846ba199a7992d1f87` 的五项 CI 已全部通过，含 PG16 认证/移动迁移与并发。剩余发布门禁：真实生产备份恢复与逐业务对账、实际 SMTP 收件与兑换、微信体验版/完整预发布、代码审查及最终合并发布。手册见[人工更新与验收](10-release-runbook.md)，架构决策见 [ADR-0047](../adr/0047-unified-account-sessions-and-email.md)。没有执行生产迁移或声称已上线。
