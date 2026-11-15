@@ -44,8 +44,8 @@ class User(UserMixin, db.Model):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active_user: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     nickname: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
@@ -54,13 +54,27 @@ class User(UserMixin, db.Model):
     custom_limits: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Phase 1: additive account metadata. Legacy credentials remain authoritative.
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    auth_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def account_id(self) -> int:
+        """Stable account identifier; never derive it from email or a provider ID."""
+        return self.id
 
     # ---- helpers ----
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
-        return check_password_hash(self.password_hash, password)
+        if not self.password_hash or not isinstance(password, str):
+            return False
+        try:
+            return check_password_hash(self.password_hash, password)
+        except (ValueError, UnicodeError):
+            return False
 
     @property
     def custom_limit_map(self) -> dict[str, int]:

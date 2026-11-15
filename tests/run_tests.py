@@ -498,7 +498,7 @@ except Exception as exc:  # noqa: BLE001
 # FCST 需要登录（owner 隔离）。先登录管理员再做 PN CRUD 测试
 def login_admin():
     # 先登出，确保从干净会话登录为管理员（已登录用户会被 login 直接重定向首页）
-    client.get("/logout", follow_redirects=False)
+    client.post("/logout", follow_redirects=False)
     return client.post("/login", data={
         "email": os.environ["ADMIN_EMAIL"],
         "password": os.environ["ADMIN_PASSWORD"],
@@ -759,7 +759,7 @@ except Exception as exc:  # noqa: BLE001
 # ---------------------------------------------------------------------------
 # 注销当前管理员，确保从干净状态开始
 try:
-    client.get("/logout", follow_redirects=False)
+    client.post("/logout", follow_redirects=False)
 except Exception:  # noqa: BLE001
     pass
 
@@ -792,7 +792,7 @@ except Exception as exc:  # noqa: BLE001
 
 # 错误密码登录失败（先登出，确保从匿名状态测试）
 try:
-    client.get("/logout", follow_redirects=False)
+    client.post("/logout", follow_redirects=False)
     r = client.post("/login", data={
         "email": "user@test.com",
         "password": "wrongpass",
@@ -817,7 +817,7 @@ except Exception as exc:  # noqa: BLE001
 
 # 登出
 try:
-    r = client.get("/logout", follow_redirects=False)
+    r = client.post("/logout", follow_redirects=False)
     ok = r.status_code in (301, 302)
     record("鉴权", "登出", ok, f"status={r.status_code}")
 except Exception as exc:  # noqa: BLE001
@@ -922,7 +922,7 @@ except Exception as exc:  # noqa: BLE001
 # 8. 匿名试用配额
 # ---------------------------------------------------------------------------
 try:
-    client.get("/logout", follow_redirects=False)
+    client.post("/logout", follow_redirects=False)
     # 匿名使用 json_formatter 一次（在免费额度内）
     r = post_tool("json_formatter", [("text", '{"x":1}'), ("action", "format")])
     ok = (r.get_json(silent=True) or {}).get("ok") is True

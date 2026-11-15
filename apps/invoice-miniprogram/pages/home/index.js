@@ -8,7 +8,11 @@ const KINDS = [
   { value: "toll_statement", label: "月度通行账单" },
 ];
 Page({
+  toggleHelp() { this.setData({ showHelp: !this.data.showHelp }); },
+
   data: {
+    showHelp: false,
+
     showPrivacy: false,
     authReady: false,
     loggedIn: false,

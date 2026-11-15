@@ -73,7 +73,7 @@ class GalleryRoundTripTests(unittest.TestCase):
     def test_login_and_logout_round_trip_keep_gallery_return(self):
         client = self.app.test_client()
         self._register("roundtrip-login@example.com")
-        client.get("/logout", follow_redirects=False)
+        client.post("/logout", follow_redirects=False)
 
         response = client.post(
             f"/login?next={quote(GALLERY, safe='')}",
@@ -83,7 +83,7 @@ class GalleryRoundTripTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], GALLERY)
 
-        logout = client.get(
+        logout = client.post(
             f"/logout?next={quote('https://gallery.example.com/my-images', safe='')}",
             follow_redirects=False,
         )

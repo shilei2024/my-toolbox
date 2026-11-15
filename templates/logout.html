@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-5" style="max-width:480px">
+  <h1 class="h4">退出登录</h1>
+  <p>确认退出当前登录？旧版登录退出时会同时退出其他设备。</p>
+  <form method="post" action="{{ url_for('auth.logout', next=next_url) if next_url else url_for('auth.logout') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary">确认退出</button>
+    <a href="/" class="btn btn-outline-secondary">取消</a>
+  </form>
+</div>
+{% endblock %}

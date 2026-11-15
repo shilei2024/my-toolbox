@@ -12,6 +12,8 @@ export type ViewerRole = "guest" | "user" | "admin";
 export type ViewerBridge = "ok" | "guest" | "unconfigured" | "error";
 
 export interface ViewerContext {
+  readonly authEpoch?: number;
+  readonly sessionRef?: string;
   readonly userId?: number;
   readonly email?: string;
   readonly nickname?: string;

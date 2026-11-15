@@ -2,7 +2,13 @@ const api = require("../../lib/api"),
   auth = require("../../lib/auth"),
   context = require("../../lib/context");
 Page({
+  toggleLoginOptions() { this.setData({ showLoginOptions: !this.data.showLoginOptions }); },
+
   data: {
+    showLoginOptions: false,
+    hasPassword: true,
+    showAccountSetup: false,
+
     authReady: false,
     loggedIn: false,
     busy: false,
@@ -52,8 +58,9 @@ Page({
       return;
     }
     try {
-      const d = await api.request("/api/mobile/bootstrap");
+      const d = await api.request("/api/mobile/account");
       this.setData({
+        hasPassword: d.has_password,
         loggedIn: true,
         displayName: d.display_name,
         loginMethod: api.session()?.auth_method || "wechat",
@@ -81,7 +88,7 @@ Page({
       });
       const d = await api.request("/api/mobile/bootstrap");
       context.choose(d.periods);
-      this.setData({ message: "已登录并连接网站账号" });
+      this.setData({ message: "登录成功" });
       wx.switchTab({ url: "/pages/dashboard/index" });
     } catch (e) {
       this.setData({ message: e.message });
@@ -138,6 +145,18 @@ Page({
     } finally {
       this.setData({ busy: false, password: "" });
     }
+  },
+  toggleAccountSetup() { this.setData({showAccountSetup:!this.data.showAccountSetup,password:""}); },
+  async setupAccount() {
+    if(this.data.busy || context.state().uploading) return;
+    const email=this.data.email.trim(),password=this.data.password;
+    this.setData({busy:true,password:"",message:""});
+    try {
+      await api.setupPassword(email,password);
+      auth.invalidate(this);
+      this.setData({hasPassword:true,showAccountSetup:false,message:"已设置，可使用同一邮箱密码登录网站"});
+    } catch(e) {this.setData({message:e.message});}
+    finally {this.setData({busy:false,password:""});}
   },
   async logout() {
     if (this.data.busy) return;

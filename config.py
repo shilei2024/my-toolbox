@@ -82,6 +82,11 @@ def engine_options_for(database_url: str) -> dict:
 
 
 class Config:
+    AUTH_MAIL_ADAPTER = os.getenv("AUTH_MAIL_ADAPTER", "disabled")
+    WECHAT_MINI_REGISTRATION_ENABLED = _bool(os.getenv("WECHAT_MINI_REGISTRATION_ENABLED"), default=False)
+    # Explicit UTC deadline for legacy numeric login cookies; empty means re-login.
+    AUTH_LEGACY_COOKIE_UNTIL = os.getenv("AUTH_LEGACY_COOKIE_UNTIL", "")
+
     # --- Flask ---
     SECRET_KEY: str = os.environ.get("SECRET_KEY", "dev-only-change-me")
     SESSION_COOKIE_NAME = "mytoolbox_session"

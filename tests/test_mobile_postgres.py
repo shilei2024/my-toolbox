@@ -217,6 +217,10 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
         with self.app.app_context():
             with db.engine.begin() as conn:
                 revision.op = Operations(MigrationContext.configure(conn))
+                # create_all includes later auth tables. This fixture rehearses
+                # f5 in isolation; remove only its empty, newer FK dependent.
+                self.assertEqual(conn.exec_driver_sql('SELECT count(*) FROM account_legacy_mappings').scalar(), 0)
+                conn.exec_driver_sql('DROP TABLE account_legacy_mappings')
                 revision.downgrade()
                 conn.execute(sa.text("INSERT INTO reimbursement_attachments (owner_type,owner_id,stored_name,original_name,mime_type,file_size,content,created_at) VALUES ('user','1','legacy-a.pdf','a.pdf','application/pdf',3,:content,CURRENT_TIMESTAMP),('user','1','legacy-b.pdf','b.pdf','application/pdf',3,:content,CURRENT_TIMESTAMP)"), {'content':b'\x01\x02\xff'})
                 revision.upgrade()
@@ -268,6 +272,8 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 spec=importlib.util.spec_from_file_location('rehearsal_pg_revision',path)
                 revision=importlib.util.module_from_spec(spec);spec.loader.exec_module(revision)
                 with db.engine.begin() as conn:
+                    self.assertEqual(conn.exec_driver_sql('SELECT count(*) FROM account_legacy_mappings').scalar(), 0)
+                    conn.exec_driver_sql('DROP TABLE account_legacy_mappings')
                     revision.op=Operations(MigrationContext.configure(conn));revision.downgrade()
                     conn.exec_driver_sql('CREATE TABLE public.alembic_version (version_num varchar(32) PRIMARY KEY)')
                     conn.exec_driver_sql("INSERT INTO public.alembic_version VALUES ('e4f5a6b7c8d9')")
@@ -296,7 +302,15 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
                 revision.op=Operations(MigrationContext.configure(conn));revision.downgrade()
                 conn.exec_driver_sql("UPDATE public.alembic_version SET version_num='e4f5a6b7c8d9'")
             from scripts.ops.mobile_invoice_release import migrate
-            migrate(root,target)
+            from scripts.ops.invoice_release import ReleaseFailure
+            # The one-time historical publisher must reject today's newer head.
+            with self.assertRaisesRegex(ReleaseFailure, 'unexpected-migration-head'):
+                migrate(root,target)
+            # Rehearse its original e4 -> f5 contract using a frozen migration tree.
+            with tempfile.TemporaryDirectory() as frozen:
+                shutil.copytree(root/'migrations', Path(frozen)/'migrations', ignore=shutil.ignore_patterns(
+                    '__pycache__', 'a6b7c8d9e0f1_*.py', 'b7c8d9e0f1a2_*.py', 'c8d9e0f1a2b3_*.py'))
+                migrate(Path(frozen),target)
             # The incremental release must only read f5 and detect a modified
             # historical invoice; run the exact fingerprint against real PG.
             from scripts.ops.mobile_entry_release import database_state

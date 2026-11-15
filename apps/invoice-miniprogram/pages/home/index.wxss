@@ -1,2 +1,2 @@
-.step-label { font-size:22rpx; color:#718378; white-space:nowrap; }
+.step-label { font-size:22rpx; color:#716975; white-space:nowrap; }
 .upload-actions button { padding-left:12rpx; padding-right:12rpx; font-size:26rpx; }

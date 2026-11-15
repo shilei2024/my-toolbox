@@ -1,6 +1,8 @@
 export type ViewerRole = "guest" | "user" | "admin";
 
 export interface ViewerContext {
+  readonly authEpoch?: number;
+  readonly sessionRef?: string;
   readonly userId?: number;
   readonly role: ViewerRole;
   readonly requestId: string;

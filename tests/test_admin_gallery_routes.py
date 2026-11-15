@@ -292,7 +292,7 @@ class AdminGalleryRoutesTests(unittest.TestCase):
             data={"email": "gallery-user@example.com", "password": "Passw0rd1", "confirm": "Passw0rd1", "remember": "y"},
             follow_redirects=False,
         )
-        client.get("/logout", follow_redirects=False)
+        client.post("/logout", follow_redirects=False)
         client.post(
             "/login",
             data={"email": "gallery-user@example.com", "password": "Passw0rd1", "remember": "y"},

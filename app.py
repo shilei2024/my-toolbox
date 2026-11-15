@@ -436,10 +436,8 @@ def _init_extensions(app: Flask) -> None:
 
     @login_manager.user_loader
     def load_user(user_id: str):  # noqa: ANN001
-        try:
-            return db.session.get(User, int(user_id))
-        except (TypeError, ValueError):
-            return None
+        from auth.session_service import load_web_user
+        return load_web_user(user_id)
 
     csrf.init_app(app)
     limiter.init_app(app)
@@ -473,6 +471,8 @@ def _register_blueprints(app: Flask) -> None:
     from auth.mobile_routes import binding_bp, mobile_bp
 
     app.register_blueprint(auth_bp)
+    from auth.email_routes import security_bp
+    app.register_blueprint(security_bp)
     app.register_blueprint(binding_bp)
     app.register_blueprint(mobile_bp)
     app.register_blueprint(admin_bp)
@@ -585,6 +585,25 @@ def _register_context(app: Flask) -> None:
 
 
 def _register_cli(app: Flask) -> None:
+    @app.cli.command("auth-mail-dispatch")
+    def auth_mail_dispatch():
+        """Send at most 20 queued authentication mails; print counts only."""
+        import json
+        from auth.email_service import dispatch
+        from shared.mail import MailError
+        try:
+            print(json.dumps(dispatch()))
+        except MailError:
+            print("AUTH_MAIL_NOT_READY")
+            raise SystemExit(1)
+
+    @app.cli.command("auth-mail-check")
+    def auth_mail_check():
+        from auth.email_service import ready
+        print("AUTH_MAIL_READY" if ready() else "AUTH_MAIL_NOT_READY")
+        if not ready():
+            raise SystemExit(1)
+
     @app.cli.command("create-admin")
     def create_admin():  # noqa: ANN202
         """Create the bootstrap admin from env vars if missing."""

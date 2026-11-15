@@ -76,7 +76,8 @@ const storage=new Map();let requests=[],uploads=[],uploadFails=true;
 const token='a'.repeat(43);
 global.wx={getStorageSync:k=>storage.get(k),setStorageSync:(k,v)=>storage.set(k,v),removeStorageSync:k=>storage.delete(k),
  login:opt=>opt.success({code:'temporary-wechat-code'}),
- request:opt=>{requests.push(opt);opt.success(opt.url.endsWith('/session')?{statusCode:200,data:{access_token:token,expires_at:'2099-01-01T00:00:00Z'}}:{statusCode:200,data:{ok:true}});},
+ showModal:opt=>opt.success({confirm:true}),
+ request:opt=>{requests.push(opt);opt.success(opt.url.endsWith('/binding/prepare')?{statusCode:200,data:{confirmation_token:'c'.repeat(43),account_label:'te***@example.com'}}:opt.url.endsWith('/binding/confirm')?{statusCode:200,data:{access_token:token,expires_at:'2099-01-01T00:00:00Z'}}:{statusCode:200,data:{ok:true}});},
  uploadFile:opt=>{uploads.push(opt);queueMicrotask(()=>uploadFails?opt.fail({errMsg:'private-native-message'}):opt.success({statusCode:200,data:JSON.stringify({success:true,duplicate:true})}));return{onProgressUpdate:fn=>fn({progress:50})};},
  requirePrivacyAuthorize:opt=>opt.fail({errMsg:'private-native-message'})};
 const api=require('./apps/invoice-miniprogram/lib/api');
@@ -86,9 +87,11 @@ const api=require('./apps/invoice-miniprogram/lib/api');
  assert(!requests[0].header.Authorization);
  assert(!JSON.stringify([...storage.values()]).includes('binding_code'));
  await api.request('/api/mobile/bootstrap');
- assert.equal(requests[1].header.Authorization,'Bearer '+token);
- assert(!requests[1].header.Cookie);
- assert(!requests[1].url.includes(token));
+ assert(requests[1].url.endsWith('/binding/confirm'));
+ assert.equal(requests[1].data.confirmation_token,'c'.repeat(43));
+ assert.equal(requests[2].header.Authorization,'Bearer '+token);
+ assert(!requests[2].header.Cookie);
+ assert(!requests[2].url.includes(token));
  const item={path:'wxfile://tmp/no-extension',name:'收据.pdf',key:'same-retry-key-0001',intent:{period_id:'1',office_id:'2',document_kind:'toll',occurrence_month:'2026-06'}};
  await assert.rejects(api.upload(item,()=>{}),e=>e.message.includes('重试')&&!e.message.includes('private'));
  uploadFails=false;await api.upload(item,()=>{});

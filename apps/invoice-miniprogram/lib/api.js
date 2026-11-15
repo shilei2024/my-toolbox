@@ -54,7 +54,32 @@ function request(
     }),
   );
 }
+function wxCode() {
+  return new Promise((resolve, reject) => wx.login({timeout:10000,
+    success:r=>r.code?resolve(r.code):reject(error("微信登录未完成，请重试")),
+    fail:()=>reject(error("微信登录未完成，请重试"))}));
+}
+async function bindLogin(bindingCode) {
+  const attempt=++loginAttempt, startingToken=session()?.access_token;
+  const prepared=await request("/api/mobile/binding/prepare", {method:"POST",authenticated:false,
+    data:{code:await wxCode(),binding_code:bindingCode}});
+  const confirmed=await new Promise(resolve=>wx.showModal({title:"确认绑定网站账号",
+    content:"将微信连接到 "+prepared.account_label+"，后续票据保存在该账号。已有账号不会自动合并。",
+    success:r=>resolve(r.confirm),fail:()=>resolve(false)}));
+  if (!confirmed) throw error("已取消绑定");
+  const data=await request("/api/mobile/binding/confirm", {method:"POST",authenticated:false,
+    data:{code:await wxCode(),confirmation_token:prepared.confirmation_token}});
+  saveLogin(data,attempt,startingToken,"wechat");
+  return data;
+}
+async function setupPassword(email,password) {
+  const attempt=++loginAttempt, startingToken=session()?.access_token;
+  const data=await request("/api/mobile/account/password",{method:"POST",data:{code:await wxCode(),email,password}});
+  saveLogin(data,attempt,startingToken,"wechat");
+  return data;
+}
 function login(bindingCode) {
+  if (bindingCode) return bindLogin(bindingCode);
   const attempt = ++loginAttempt,
     startingToken = session()?.access_token;
   return new Promise((resolve, reject) =>
@@ -162,6 +187,7 @@ module.exports = {
   request,
   login,
   passwordLogin,
+  setupPassword,
   upload,
   privacy,
   session,

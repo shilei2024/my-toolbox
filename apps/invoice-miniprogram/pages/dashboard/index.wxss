@@ -3,5 +3,5 @@
 .distance-card { grid-column:1 / -1; }
 .period-actions { margin-top: 6rpx; }
 .period-actions .link { font-size:26rpx; font-weight:600; }
-.create-panel { margin-top:20rpx; padding-top:20rpx; border-top:1rpx solid #edf1ee; }
+.create-panel { margin-top:20rpx; padding-top:20rpx; border-top:1rpx solid #E9E3DF; }
 .create-panel button { margin-top:20rpx; }

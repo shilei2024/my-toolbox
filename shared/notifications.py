@@ -120,40 +120,11 @@ def _render_message(outbox: NotificationOutbox) -> tuple[str, str]:
 
 
 def _smtp_send(recipient: str, subject: str, body: str) -> None:
-    host = str(current_app.config.get("SMTP_HOST", "")).strip()
-    sender = str(current_app.config.get("SMTP_FROM", "")).strip()
-    if not host or not sender:
-        raise NotificationAdapterError("SMTP_NOT_CONFIGURED")
-    mode = str(current_app.config.get("SMTP_SECURITY", "starttls")).lower()
-    if mode not in {"starttls", "ssl"}:
-        raise NotificationAdapterError("SMTP_SECURITY_INVALID")
-    if not _valid_mail_address(sender) or not _valid_mail_address(recipient):
-        raise NotificationAdapterError("INVALID_MAIL_ADDRESS")
-    message = EmailMessage()
-    message["From"] = sender
-    message["To"] = recipient
-    message["Subject"] = subject
-    message.set_content(body)
-    port = int(current_app.config.get("SMTP_PORT", 587))
-    timeout = int(current_app.config.get("SMTP_TIMEOUT_SECONDS", 10))
+    from shared.mail import MailError, send_smtp
     try:
-        client_cls = smtplib.SMTP_SSL if mode == "ssl" else smtplib.SMTP
-        with client_cls(host, port, timeout=timeout) as client:
-            if mode == "starttls":
-                client.ehlo()
-                client.starttls(context=ssl.create_default_context())
-                client.ehlo()
-            username = str(current_app.config.get("SMTP_USERNAME", ""))
-            password = str(current_app.config.get("SMTP_PASSWORD", ""))
-            if bool(username) != bool(password):
-                raise NotificationAdapterError("SMTP_CREDENTIALS_INCOMPLETE")
-            if username and password:
-                client.login(username, password)
-            client.send_message(message)
-    except NotificationAdapterError:
-        raise
-    except (OSError, smtplib.SMTPException, ValueError) as exc:
-        raise NotificationAdapterError("SMTP_DELIVERY_FAILED") from exc
+        send_smtp(recipient, subject, body)
+    except MailError as exc:
+        raise NotificationAdapterError(str(exc)) from None
 
 
 def send_test_email(recipient: str) -> None:

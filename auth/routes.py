@@ -2,18 +2,25 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 from urllib.parse import urlparse
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
-from flask_login import current_user, login_required, login_user, logout_user
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
+from flask_login import current_user, login_required, logout_user
 
 from extensions import db, limiter
 from models import User
-from utils.helpers import utc_naive_now
 from . import password_reset as reset_service
 from .forms import LoginForm, RegisterForm
+from sqlalchemy.exc import IntegrityError
+from . import account_service, session_service
 
 auth_bp = Blueprint("auth", __name__, template_folder="../templates")
+
+
+def _password_account_limit_key():
+    email = account_service.normalized_email(request.form.get("email")) or "invalid"
+    return "web-password-account:" + hashlib.sha256(email.encode()).hexdigest()
 
 
 @auth_bp.after_app_request
@@ -65,6 +72,7 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
 def register():
     next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     if current_user.is_authenticated:
@@ -78,12 +86,17 @@ def register():
             flash("该邮箱已注册，请直接登录。", "warning")
             return redirect(url_for("auth.login", **({"next": next_url} if next_url else {})))
 
-        user = User(email=email, is_admin=False, is_active_user=True)
-        user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
-
-        login_user(user, remember=True)
+        try:
+            user = account_service.register_password(email, form.password.data)
+            session_service.start_web_session(user, remember=True)
+        except IntegrityError:
+            db.session.rollback()
+            flash("注册状态已变化，请尝试登录或重新注册。", "warning")
+            return redirect(url_for("auth.login"))
+        except ValueError:
+            db.session.rollback()
+            flash("注册信息格式不正确，请检查后重试。", "warning")
+            return render_template("register.html", form=form, next_url=next_url), 400
         flash("注册成功，欢迎！", "success")
         return redirect(next_url or "/")
 
@@ -91,6 +104,8 @@ def register():
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+@limiter.limit("10 per hour", key_func=_password_account_limit_key, methods=["POST"])
 def login():
     next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     if current_user.is_authenticated:
@@ -99,17 +114,12 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         email = form.email.data.strip().lower()
-        user = db.session.query(User).filter_by(email=email).one_or_none()
-        if user is None or not user.check_password(form.password.data):
-            flash("邮箱或密码错误。", "danger")
+        user = account_service.authenticate_password(email, form.password.data, channel="web")
+        if user is None:
+            db.session.commit()
+            flash("邮箱或密码错误，或账号暂不可用。", "danger")
             return render_template("login.html", form=form, next_url=next_url), 401
-        if not user.is_active_user:
-            flash("账号已被禁用，请联系管理员。", "danger")
-            return render_template("login.html", form=form, next_url=next_url), 403
-
-        user.last_login_at = utc_naive_now()
-        db.session.commit()
-        login_user(user, remember=form.remember.data)
+        session_service.start_web_session(user, remember=form.remember.data)
         flash(f"欢迎回来，{user.email}", "success")
 
         return redirect(next_url or "/")
@@ -129,8 +139,8 @@ def forgot_password():
         code = request.form.get("code") or ""
         password = request.form.get("password") or ""
         confirm = request.form.get("confirm") or ""
-        if len(password) < 8:
-            message = "新密码至少 8 位。"
+        if not 8 <= len(password) <= 128:
+            message = "新密码长度需在 8–128 位之间。"
         elif password != confirm:
             message = "两次输入的新密码不一致。"
         else:
@@ -138,9 +148,10 @@ def forgot_password():
             if user is None or (user.email or "").strip().lower() != email:
                 message = reset_service.GENERIC_ERROR
             else:
-                reset_service.reset(user, password)
-                flash("密码已重置，请用新密码登录。", "success")
-                return redirect(url_for("auth.login"))
+                if reset_service.redeem(code, email, password):
+                    flash("密码已重置，请用新密码登录。", "success")
+                    return redirect(url_for("auth.login"))
+                message = reset_service.GENERIC_ERROR
     return render_template("forgot.html", message=message, ttl=reset_service.ttl_minutes())
 
 
@@ -148,6 +159,9 @@ def forgot_password():
 @login_required
 def logout():
     next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
+    if request.method == "GET":
+        return render_template("logout.html", next_url=next_url)
+    session_service.end_web_session(current_user.id)
     logout_user()
     flash("已退出登录。", "info")
     return redirect(next_url or url_for("home"))
@@ -178,8 +192,12 @@ def gallery_session():
     else:
         payload = {
             "role": "admin" if bool(getattr(current_user, "is_admin", False)) else "user",
-            "userId": int(current_user.get_id()),
+            "userId": int(current_user.id),
         }
+        reference = session.get("_user_id", "")
+        if isinstance(reference, str) and reference.startswith("v2:"):
+            payload["authEpoch"] = current_user.auth_epoch
+            payload["sessionRef"] = session_service.digest(reference[3:])
         email = str(getattr(current_user, "email", "") or "")
         if email:
             payload["email"] = email

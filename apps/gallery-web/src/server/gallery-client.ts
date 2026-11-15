@@ -51,7 +51,8 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
   const secret = internalSecret();
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    v: 1,
+    v: viewer.sessionRef && Number.isInteger(viewer.authEpoch) ? 2 : 1,
+    ...(viewer.sessionRef && Number.isInteger(viewer.authEpoch) ? {sessionRef: viewer.sessionRef, authEpoch: viewer.authEpoch} : {}),
     role: viewer.role,
     ...(viewer.userId ? { userId: viewer.userId } : {}),
     requestId: viewer.requestId,
