@@ -11,7 +11,7 @@ from flask_login import current_user, login_required, logout_user
 from extensions import db, limiter
 from models import User
 from . import password_reset as reset_service
-from .forms import LoginForm, RegistrationEmailForm
+from .forms import LoginForm, RegisterForm
 from sqlalchemy.exc import IntegrityError
 from . import account_service, session_service
 
@@ -79,7 +79,7 @@ def register():
     if current_user.is_authenticated:
         return redirect(next_url or url_for("home"))
 
-    form = RegistrationEmailForm()
+    form = RegisterForm()
     if form.validate_on_submit():
         from . import email_service, registration_service
         if not email_service.ready():
@@ -87,7 +87,7 @@ def register():
             return render_template("register.html", form=form, next_url=next_url), 503
         email = form.email.data.strip().lower()
         try:
-            registration_service.request_registration(email, next_url)
+            registration_service.request_registration(email, next_url, password=form.password.data)
             db.session.commit()
         except IntegrityError:
             db.session.rollback()

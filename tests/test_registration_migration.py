@@ -20,6 +20,24 @@ def c8_fixture(conn):
 
 
 class RegistrationMigrationTests(unittest.TestCase):
+    def test_password_column_keeps_legacy_pending_request_and_all_rows(self):
+        engine = sa.create_engine('sqlite://')
+        try:
+            with engine.begin() as conn:
+                c8_fixture(conn)
+                revision(conn,REGISTRATION)
+                conn.exec_driver_sql("INSERT INTO account_registrations(id,email,token_hash,expires_at,last_requested_at,created_at) VALUES(1,'pending@example.test','"+'a'*64+"','2099-01-01',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+                before = snapshot(conn)
+                pending = conn.exec_driver_sql('SELECT * FROM account_registrations').one()
+                revision(conn,'e0f1a2b3c4d5_registration_password.py')
+                self.assertEqual(snapshot(conn),before)
+                row = conn.exec_driver_sql('SELECT * FROM account_registrations').one()
+                self.assertEqual(tuple(row)[:-1],tuple(pending))
+                self.assertIsNone(row[-1])
+                self.assertEqual(conn.exec_driver_sql('PRAGMA foreign_key_check').all(),[])
+        finally:
+            engine.dispose()
+
     def test_additive_migration_preserves_old_jobs_rows_and_foreign_keys(self):
         engine = sa.create_engine('sqlite://')
         try:

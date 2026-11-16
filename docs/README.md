@@ -30,6 +30,7 @@
 - [Phase 2 实施记录](auth-refactor/phase-2-implementation.md) / [认证契约](auth-refactor/05-auth-api.md)
 - [Phase 3–6 实施记录](auth-refactor/release-implementation.md) / [人工发布与恢复命令](auth-refactor/10-release-runbook.md)
 - [邮箱验证注册闭环](auth-refactor/11-verified-registration.md) / [注册验证更新指南](auth-refactor/12-registration-release.md)
+- [先填密码、邮件确认的注册流程与更新](auth-refactor/13-password-first-registration.md)
 - [隔离演练指南](auth-refactor/06-deployment-guide.md) / [测试报告](auth-refactor/07-test-report.md) / [回退方案](auth-refactor/08-rollback-guide.md) / [迁移报告](auth-refactor/09-user-migration-report.md)
 
 ## 文档去重说明（2026-08-08 整理）

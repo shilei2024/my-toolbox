@@ -48,14 +48,14 @@ def exercise(app):
             return app.extensions['auth_mail_capture'][-1]
 
     with app.app_context(): before_users = User.query.count()
-    require(post('/register', {'email':email}).status_code == 302, 'registration-request-failed')
+    require(post('/register', {'email':email,'password':password,'confirm':password}).status_code == 302, 'registration-request-failed')
     with app.app_context():
         require(User.query.count() == before_users, 'unverified-account-created')
         row = AccountRegistration.query.filter_by(email=email).one()
         registration_id = row.id
     mail = deliver(registration_id=registration_id)
     raw = mail[2].split('#')[1].split('\n')[0]
-    require(post('/account/email/register', {'token':raw,'password':password,'confirm':password}).status_code == 302, 'registration-confirmation-failed')
+    require(post('/account/email/register-confirm', {'token':raw}).status_code == 302, 'registration-confirmation-failed')
     with app.app_context():
         user = User.query.filter_by(email=email).one()
         uid = user.id

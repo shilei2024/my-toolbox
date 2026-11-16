@@ -6,7 +6,7 @@
     <div class="card border-0 shadow-sm">
       <div class="card-body p-4">
         <h2 class="h4 mb-3"><i class="bi bi-person-plus"></i> 创建账号</h2>
-        <p class="text-muted">先验证邮箱，再设置密码完成注册。</p>
+        <p class="text-muted">填写注册信息后，前往邮箱确认即可完成注册。</p>
         <form method="post" novalidate>
           {{ form.hidden_tag() }}
           <div class="mb-3">
@@ -14,7 +14,16 @@
             {{ form.email(class="form-control form-control-lg", autocomplete="email", autofocus=True) }}
             {% for err in form.email.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
           </div>
-          <button class="btn btn-primary w-100 btn-lg" type="submit">发送注册验证邮件</button>
+          <div class="mb-3"><label class="form-label" for="password">密码</label>
+            {{ form.password(class="form-control form-control-lg", autocomplete="new-password") }}
+            <div class="form-text">8–128位，包含字母和数字。</div>
+            {% for err in form.password.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="mb-3"><label class="form-label" for="confirm">确认密码</label>
+            {{ form.confirm(class="form-control form-control-lg", autocomplete="new-password") }}
+            {% for err in form.confirm.errors %}<div class="invalid-feedback d-block">{{ err }}</div>{% endfor %}
+          </div>
+          <button class="btn btn-primary w-100 btn-lg" type="submit">注册并发送验证邮件</button>
         </form>
         <hr/>
         <p class="text-center text-muted mb-0">

@@ -88,7 +88,7 @@ def main(*, registration=False):
         app.add_url_rule('/', 'home', lambda:'staging')
         with app.app_context():
             require(db.session.execute(text('SELECT current_database()')).scalar() == DATABASE, 'wrong-database')
-            revision = 'd9e0f1a2b3c4' if registration else 'c8d9e0f1a2b3'
+            revision = 'e0f1a2b3c4d5' if registration else 'c8d9e0f1a2b3'
             require(db.session.execute(text('SELECT version_num FROM public.alembic_version')).scalars().all() == [revision], 'wrong-revision')
             before = snapshot(db)
             if registration:

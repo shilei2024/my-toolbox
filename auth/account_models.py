@@ -42,6 +42,7 @@ class AccountRegistration(db.Model):
     __tablename__ = "account_registrations"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     return_to: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

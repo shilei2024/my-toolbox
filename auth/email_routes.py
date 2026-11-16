@@ -50,23 +50,24 @@ def recover():
 @security_bp.route("/account/email/<purpose>", methods=["GET", "POST"])
 @limiter.limit("10/minute", methods=["POST"])
 def email_action(purpose):
-    if purpose not in {"verify", "reset", "register"}:
+    if purpose not in {"verify", "reset", "register", "register-confirm"}:
         return "页面不存在", 404
     message = ""
     if request.method == "POST":
         password = request.form.get("password")
         if purpose in {"reset", "register"} and password != request.form.get("confirm"):
             message = "两次密码输入不一致，请重新打开邮件链接。"
-        elif purpose == "register":
+        elif purpose in {"register", "register-confirm"}:
             from .registration_service import complete
-            result = complete(request.form.get("token"), password)
+            result = complete(request.form.get("token"), password if purpose == 'register' else None)
             if result:
                 from .routes import _safe_next_url
                 target = _safe_next_url(result[1], current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
                 session.pop("registration_email", None)
                 session["registration_complete"] = {"next":target}
                 return redirect(url_for("account_security.registration_complete"))
-            message = "链接无效或已过期，或密码不符合8–128位且包含字母和数字的要求。请检查密码或重新申请邮件。"
+            message = ("链接无效、已过期或已使用，请重新申请验证邮件。" if purpose == 'register-confirm'
+                else "链接无效或已过期，或密码不符合8–128位且包含字母和数字的要求。请检查密码或重新申请邮件。")
         elif mail.consume(request.form.get("token"), purpose, password):
             if purpose == "reset":
                 logout_user()
