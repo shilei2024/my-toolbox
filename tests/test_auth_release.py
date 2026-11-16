@@ -98,7 +98,7 @@ class EmailSecurityTests(unittest.TestCase):
         self.app.jinja_loader=FileSystemLoader(Path(__file__).resolve().parents[1]/"templates")
         response=self.client.get("/account/email/verify")
         self.assertEqual(response.status_code,200)
-        self.assertEqual(response.headers["Referrer-Policy"],"no-referrer")
+        self.assertEqual(response.headers["Referrer-Policy"],"same-origin")
         self.assertIn("default-src 'none'",response.headers["Content-Security-Policy"])
         self.assertIn(b"history.replaceState",response.data)
         with self.app.app_context():

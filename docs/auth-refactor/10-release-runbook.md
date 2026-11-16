@@ -84,6 +84,16 @@ unset AUTH_MIGRATION_DATABASE_URL
 
 随后让预发布应用连接该恢复库，执行第 1 节所有业务验收；记录用户/业务/原件对账结果和候选 SHA。新微信注册仅获得发票助手权限。测试邮箱使用操作员自己的地址；不要向历史用户群发验证邮件。演练失败时保留隔离库供排查，从未升级的备份创建另一个隔离库重试。
 
+### 已迁移恢复库的应用 smoke
+
+新增 `scripts/ops/auth_staging_smoke.py`，专用于本次 `auth_rehearsal_20261116`、revision c8；必须以 postgres 用户在无 .env 的独立候选目录运行，不能直接在生产工作区执行。使用固定候选业务代码，配套同版本 `mobile_invoice_staging_smoke.py`。不启动服务，不加载生产配置，不调用真实微信、SMTP或OCR。只创建合成用户和业务数据，结束后对原有用户、票据和BLOB逐行摘要复核；失败后保留隔离库排查，不清理历史数据。
+
+```bash
+sudo -u postgres /opt/mytoolbox/.venv/bin/python /var/lib/postgresql/auth-rehearsal-20261116/candidate/scripts/ops/auth_staging_smoke.py
+```
+
+预期包含原有 MOBILE_* 业务标志，以及 `AUTH_APPLICATION_OK`、`AUTH_HISTORY_OK`、`AUTH_STAGING_OK`。真实网站登录/v2 Cookie、新绑定确认、微信注册即用、网站密码设置、捕获邮件验证/重置及全端撤销均覆盖；CSRF/限流在进程内 smoke 关闭，不能以此替代正式 HTTP、浏览器和微信体验版验收。成功后恢复库总数会增加合成数据，不应再要求总数等于旧15/75/91；历史摘要保持才是此阶段检查。
+
 ## 4. 生产网站升级
 
 维护窗口内先停止**实际运行的**其他写者（邮件定时器、任务调度、Generation workers 等）。用 `docker compose ls` 和既有部署清单确认真实项目；本仓库有两套历史 compose 文件，不能猜一个执行。保留反向代理以便健康检查。发布脚本会停止并启动 `mytoolbox`，不会管理其他项目。
@@ -107,6 +117,8 @@ cd /opt/mytoolbox
 ```
 
 预期 `AUTH_RELEASE_OK`、固定 release_commit、`revision=c8d9e0f1a2b3` 和新的 backup_dir。工具会停写、生成最终备份、保留 .env/Caddy、快进 main、事务迁移和回填、核对历史摘要、重启并检查正式域名。它拒绝依赖/Caddy版本变化、非预期数据库版本和未提交的其他改动；遇到拒绝不要删除检查。
+
+合并后的 main `a7aac0b4428b6afc41bdc6bd0e6826dd12eec9c5` 已通过全部 CI。发布前还会确认 SOURCE 是 TARGET 的祖先，分叉会在停止网站前拒绝。若发生分叉，先检查本地提交来源，在独立环境整理发布方案；不能用强制 reset 覆盖服务器改动。
 
 ```bash
 systemctl is-active mytoolbox

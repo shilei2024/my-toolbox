@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop]
   push:
-    branches: [main, develop, codex/unified-auth-phase2]
+    branches: [main, develop, codex/unified-auth-phase2, codex/auth-release-preflight]
   workflow_dispatch:
 
 permissions:

@@ -29,6 +29,14 @@ MIGRATIONS = (
 )
 
 
+def require_fast_forward(root, source, target):
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source, target], cwd=root,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+    )
+    common.require(result.returncode == 0, "source-not-ancestor-of-target")
+
+
 def history(conn, schema="public"):
     from sqlalchemy import text
     expressions = {
@@ -91,6 +99,7 @@ def main():
         common.require(set(common.git(root,"diff","--name-only","HEAD").splitlines()) <= {common.CADDY},"unexpected-tracked-changes")
         common.require(not common.git(root,"diff","--cached","--name-only"),"staged-changes")
         common.require(not common.git(root,"diff","--name-only",args.source,args.target,"--",common.CADDY,"requirements.txt"),"proxy-or-dependencies-need-separate-review")
+        require_fast_forward(root, args.source, args.target)
         # The source service must still run here; credentials are read privately.
         url=backup.service_database_url(root)
         base=Path("/var/backups/mytoolbox");base.mkdir(mode=0o700,parents=True,exist_ok=True)

@@ -34,7 +34,7 @@ def snapshot(db, baseline=None):
     return result
 
 
-def exercise(app):
+def exercise(app, *, unified=False):
     from extensions import db
     from models import User, UsageLog, ReimbursementInvoice, UserToolGrant
     from PIL import Image
@@ -49,20 +49,28 @@ def exercise(app):
     def account():
         password=secrets.token_urlsafe(24)
         with app.app_context():
-            user=User(email='mobile-stage-'+secrets.token_hex(12)+'@example.invalid')
+            user=User(email='mobile-stage-'+secrets.token_hex(12)+('@example.com' if unified else '@example.invalid'))
             user.set_password(password)
             db.session.add(user);db.session.flush()
             db.session.add(UserToolGrant(user_id=user.id,tool_id='reimbursement'))
             db.session.commit()
             user_id=user.id
+            email=user.email
         web=app.test_client()
-        with web.session_transaction() as session:
-            session['_user_id']=str(user_id);session['_fresh']=True
+        if unified:
+            call(web,'post','/login',302,data={'email':email,'password':password})
+        else:
+            with web.session_transaction() as session:
+                session['_user_id']=str(user_id);session['_fresh']=True
         challenge=call(web,'post','/auth/mobile/challenge',json={'password':password}).json['binding_code']
         mobile=app.test_client(use_cookies=False)
         # Never requests a real identity or stores any real WeChat secret.
         with patch('auth.mobile_service.exchange_code',return_value='stage-'+secrets.token_hex(16)):
-            signed=call(mobile,'post','/api/mobile/session',json={'code':'synthetic-code','binding_code':challenge})
+            if unified:
+                prepared=call(mobile,'post','/api/mobile/binding/prepare',json={'code':'synthetic-code','binding_code':challenge}).json
+                signed=call(mobile,'post','/api/mobile/binding/confirm',json={'code':'synthetic-confirm','confirmation_token':prepared['confirmation_token']})
+            else:
+                signed=call(mobile,'post','/api/mobile/session',json={'code':'synthetic-code','binding_code':challenge})
         require('Set-Cookie' not in signed.headers,'login-issued-cookie')
         token=signed.json['access_token']
         headers={'Authorization':'Bearer '+token}

@@ -18,7 +18,9 @@ def email_limit_key():
 @security_bp.after_request
 def private(response):
     response.headers["Cache-Control"] = "private, no-store"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    # HTTPS CSRF protection requires a same-origin Referer on form POSTs.
+    # Cross-origin requests still receive no referrer; tokens use fragments.
+    response.headers["Referrer-Policy"] = "same-origin"
     return response
 
 
