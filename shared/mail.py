@@ -14,7 +14,8 @@ def valid_address(value):
     address = parseaddr(value)[1]
     return bool(address and "@" in address and address.rsplit("@", 1)[1])
 
-def send_smtp(recipient: str, subject: str, body: str, *, sender: str | None = None) -> None:
+def send_smtp(recipient: str, subject: str, body: str, *, sender: str | None = None,
+              credentials: tuple[str, str] | None = None) -> None:
     host = str(current_app.config.get("SMTP_HOST", "")).strip()
     sender = str(current_app.config.get("SMTP_FROM", "") if sender is None else sender).strip()
     if not host or not sender:
@@ -24,6 +25,10 @@ def send_smtp(recipient: str, subject: str, body: str, *, sender: str | None = N
         raise MailError("SMTP_SECURITY_INVALID")
     if not valid_address(sender) or not valid_address(recipient):
         raise MailError("INVALID_MAIL_ADDRESS")
+    username, password = credentials if credentials is not None else (
+        str(current_app.config.get("SMTP_USERNAME", "")), str(current_app.config.get("SMTP_PASSWORD", "")))
+    if bool(username) != bool(password):
+        raise MailError("SMTP_CREDENTIALS_INCOMPLETE")
     message = EmailMessage()
     message["From"] = sender
     message["To"] = recipient
@@ -38,10 +43,6 @@ def send_smtp(recipient: str, subject: str, body: str, *, sender: str | None = N
                 client.ehlo()
                 client.starttls(context=ssl.create_default_context())
                 client.ehlo()
-            username = str(current_app.config.get("SMTP_USERNAME", ""))
-            password = str(current_app.config.get("SMTP_PASSWORD", ""))
-            if bool(username) != bool(password):
-                raise MailError("SMTP_CREDENTIALS_INCOMPLETE")
             if username and password:
                 client.login(username, password)
             client.send_message(message)

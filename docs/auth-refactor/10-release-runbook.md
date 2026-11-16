@@ -157,14 +157,17 @@ systemctl is-active auth-mail.timer
 
 ### 账号邮件专用发件地址
 
-已支持 `AUTH_MAIL_FROM`，验证和重置邮件优先使用此地址，项目通知继续使用 `SMTP_FROM`。地址留空时兼容原发送行为。复用现有 SMTP 登录和 TLS 连接；服务商必须允许该 SMTP 凭据使用新 From，应用配置成功不代表服务商已授权。
+已支持 `AUTH_MAIL_FROM`，验证和重置邮件优先使用此地址，项目通知继续使用 `SMTP_FROM`。地址留空时兼容原发送行为。TLS和端口共用；可选 AUTH_MAIL_SMTP_USERNAME/PASSWORD 必须成对配置，否则账号邮件就绪检查失败，不能混配旧密码。独立凭据还要求显式 AUTH_MAIL_FROM；未设置独立凭据时才兼容原SMTP登录。
 
-操作员已选择 `账号安全 <accounts@notify.mindfulpenpal.com>`，新地址尚未开通。先在既有邮件服务商控制台新增发信身份，选择已验证的 notify.mindfulpenpal.com 域名，配置 accounts 地址和“账号安全”显示名称，完成该服务商要求的验证，并确认原 SMTP 登录账号可使用它发信。如服务商要求地址收件验证，应先创建可收件的邮箱或别名；本仓库不能代替服务商创建邮箱。不要购买新服务或替换既有提醒凭据来绕过发信授权。
+已确认 SMTP_HOST=smtp.qcloudmail.com，为腾讯云邮件推送。操作员已选择 `账号安全 <accounts@notify.mindfulpenpal.com>`，新地址尚未开通。腾讯云控制台进入“邮件推送 → 邮件配置 → 发信地址 → 新建”，选择已验证的 notify.mindfulpenpal.com、前缀accounts、别名账号安全。然后对新地址操作“设置SMTP密码”，在密码管理器中保存；SMTP用户名必须为该新地址，密码为它单独设置的SMTP密码，不是腾讯云登录密码。参照[新建发信地址](https://cloud.tencent.com/document/product/1288/55192)、[设置SMTP密码](https://cloud.tencent.com/document/product/1288/65749)、[SMTP认证示例](https://cloud.tencent.com/document/product/1288/65752)。这是发信身份，不会自动创建网页收件箱；收信须另行配置邮箱服务。本仓库不代替服务商创建邮箱，账号SMTP密码不应发到聊天或写入Git。
 
 代码合并部署后，通过 `sudoedit /opt/mytoolbox/.env` **新增**：
 
 ```dotenv
 AUTH_MAIL_FROM="账号安全 <accounts@notify.mindfulpenpal.com>"
+AUTH_MAIL_SMTP_USERNAME=accounts@notify.mindfulpenpal.com
+# 在服务器安全编辑器填写新地址的专用密码，不要粘贴到聊天。
+AUTH_MAIL_SMTP_PASSWORD=
 ```
 
 保留 SMTP_FROM 和 SMTP 登录配置。然后执行：
@@ -178,7 +181,7 @@ systemctl show auth-mail.service -p Result -p ExecMainStatus
 systemctl start auth-mail.timer
 ```
 
-服务检查成功后，使用操作员自己账号重新申请验证/重置邮件，确认 From地址和名称、新链接兑换及提醒任务原发件人均正常。不能只检查显示名称。新身份被服务商拒绝时，先停止 auth-mail.timer，移除 AUTH_MAIL_FROM 并重启网站/邮件任务，恢复后再启动timer；待服务商授权修复再切换。无数据库迁移；不修改用户邮箱。
+服务检查成功后，使用操作员自己账号重新申请验证/重置邮件，确认 From地址和名称、新链接兑换及提醒任务原发件人均正常。不能只检查显示名称。新身份被服务商拒绝时，先停止 auth-mail.timer，同时移除 AUTH_MAIL_FROM、AUTH_MAIL_SMTP_USERNAME、AUTH_MAIL_SMTP_PASSWORD 并重启网站/邮件任务，恢复后再启动timer；待服务商授权修复再切换。无数据库迁移；不修改用户邮箱。
 
 ## 7. 小程序上线
 

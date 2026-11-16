@@ -13,6 +13,13 @@ from .account_service import lock_account, audit, mirror_password, change_passwo
 from .session_service import digest
 
 
+def smtp_credentials():
+    username = current_app.config.get("AUTH_MAIL_SMTP_USERNAME", "")
+    password = current_app.config.get("AUTH_MAIL_SMTP_PASSWORD", "")
+    # Override as a pair; never combine a dedicated username with the old password.
+    return (username, password) if username or password else None
+
+
 def ready():
     adapter = current_app.config.get("AUTH_MAIL_ADAPTER", "disabled")
     if adapter == "capture":
@@ -21,12 +28,16 @@ def ready():
         return False
     try:
         base = urlsplit(current_app.config.get("APP_BASE_URL", ""))
+        credentials = smtp_credentials()
+        username, password = credentials if credentials is not None else (
+            current_app.config.get("SMTP_USERNAME"), current_app.config.get("SMTP_PASSWORD"))
         return bool(base.scheme == "https" and base.hostname and not base.username and not base.password
             and not base.query and not base.fragment and base.path in ("", "/")
             and current_app.config.get("SMTP_HOST")
             and valid_address(current_app.config.get("AUTH_MAIL_FROM") or current_app.config.get("SMTP_FROM"))
             and current_app.config.get("SMTP_SECURITY") in {"ssl", "starttls"}
-            and bool(current_app.config.get("SMTP_USERNAME")) == bool(current_app.config.get("SMTP_PASSWORD"))
+            and bool(username) == bool(password)
+            and (credentials is None or bool(current_app.config.get("AUTH_MAIL_FROM")))
             and 1 <= int(current_app.config.get("SMTP_PORT", 0)) <= 65535
             and 1 <= int(current_app.config.get("SMTP_TIMEOUT_SECONDS", 0)) <= 120)
     except (ValueError, TypeError):
@@ -95,7 +106,8 @@ def dispatch(limit=20):
             if current_app.config.get("AUTH_MAIL_ADAPTER") == "capture" and current_app.testing:
                 current_app.extensions.setdefault("auth_mail_capture", []).append((recipient, subject, body))
             else:
-                send_smtp(recipient, subject, body, sender=current_app.config.get("AUTH_MAIL_FROM") or None)
+                send_smtp(recipient, subject, body, sender=current_app.config.get("AUTH_MAIL_FROM") or None,
+                    credentials=smtp_credentials())
             success = True
         except MailError:
             pass  # Only aggregate safe delivery state is exposed.
