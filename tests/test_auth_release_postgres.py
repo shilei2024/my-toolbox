@@ -14,6 +14,10 @@ from tests.test_auth_identity_phase1 import legacy_fixture, revision, NEW, snaps
 
 @unittest.skipUnless(os.environ.get("AUTH_TEST_DATABASE_URL"), "isolated PostgreSQL URL not configured")
 class AuthReleasePostgresTests(cases.WechatRegistrationTests):
+    def test_full_application_harness(self):
+        from tests.test_auth_staging_smoke import AuthStagingTests
+        AuthStagingTests.test_unified_restore_harness(self)
+
     def setUp(self):
         url=sa.engine.make_url(os.environ["AUTH_TEST_DATABASE_URL"])
         if url.get_backend_name() != "postgresql": self.skipTest("PostgreSQL required")
