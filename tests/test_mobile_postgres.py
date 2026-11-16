@@ -309,7 +309,7 @@ class MobilePostgresTests(fixtures.MobileInvoiceTests):
             # Rehearse its original e4 -> f5 contract using a frozen migration tree.
             with tempfile.TemporaryDirectory() as frozen:
                 shutil.copytree(root/'migrations', Path(frozen)/'migrations', ignore=shutil.ignore_patterns(
-                    '__pycache__', 'a6b7c8d9e0f1_*.py', 'b7c8d9e0f1a2_*.py', 'c8d9e0f1a2b3_*.py', 'd9e0f1a2b3c4_*.py'))
+                    '__pycache__', 'a6b7c8d9e0f1_*.py', 'b7c8d9e0f1a2_*.py', 'c8d9e0f1a2b3_*.py', 'd9e0f1a2b3c4_*.py', 'e0f1a2b3c4d5_*.py'))
                 migrate(Path(frozen),target)
             # The incremental release must only read f5 and detect a modified
             # historical invoice; run the exact fingerprint against real PG.

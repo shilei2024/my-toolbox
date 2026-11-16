@@ -777,7 +777,7 @@ try:
         email_service.dispatch(limit=100)
         mail = [m for m in app.extensions['auth_mail_capture'] if m[0]=='user@test.com' and '完成注册' in m[1]][-1]
         token = mail[2].split('#')[1].split('\n')[0]
-    completed = client.post('/account/email/register', data={'token':token,'password':'Passw0rd1','confirm':'Passw0rd1'})
+    completed = client.post('/account/email/register-confirm', data={'token':token})
     ok = r.status_code == 302 and '/account/registration/pending' in r.location and completed.status_code == 302
     record("鉴权", "邮箱验证后注册成功", ok, f"status={r.status_code}, completed={completed.status_code}")
 except Exception as exc:  # noqa: BLE001

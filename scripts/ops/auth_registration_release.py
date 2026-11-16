@@ -1,4 +1,4 @@
-"""Guarded c8 -> d9 registration rollout; no Flask bootstrap or secret output."""
+"""Guarded registration rollout; no Flask bootstrap or secret output."""
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
@@ -17,6 +17,12 @@ except ImportError:
 
 PARENT = 'c8d9e0f1a2b3'
 HEAD = 'd9e0f1a2b3c4'
+PASSWORD_HEAD = 'e0f1a2b3c4d5'
+
+
+def versions(password_first):
+    return (HEAD, PASSWORD_HEAD, 'e0f1a2b3c4d5_registration_password.py') if password_first else (
+        PARENT, HEAD, 'd9e0f1a2b3c4_verified_registration.py')
 
 
 def fingerprint(conn, schema, tables):
@@ -26,38 +32,42 @@ def fingerprint(conn, schema, tables):
         # Fixed identifiers are taken from the database catalog, then quoted.
         quoted = conn.dialect.identifier_preparer.quote_identifier(table)
         expression = "to_jsonb(t) - 'registration_id'" if table == 'account_mail_jobs' else 'to_jsonb(t)'
+        if table == 'account_registrations':
+            expression = "to_jsonb(t) - 'password_hash'"
         result[table] = tuple(conn.execute(text(
             f'SELECT count(*),md5(COALESCE(string_agg(md5(({expression})::text),\'\' '
             f'ORDER BY md5(({expression})::text)),\'\')) FROM "{schema}".{quoted} t')).one())
     return result
 
 
-def migrate(root, url, *, schema='public'):
+def migrate(root, url, *, schema='public', password_first=False):
     import sqlalchemy as sa
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
     common.require(schema == 'public' or re.fullmatch(r'auth_rehearsal_[a-z0-9_]+', schema), 'invalid-schema')
+    parent, target, filename = versions(password_first)
     engine = sa.create_engine(url, connect_args={'connect_timeout':10,
         'options':f'-csearch_path={schema} -clock_timeout=15000 -cstatement_timeout=300000'})
     try:
         with engine.begin() as conn:
             common.require(conn.dialect.name == 'postgresql', 'postgresql-required')
-            common.require(conn.exec_driver_sql('SELECT version_num FROM alembic_version FOR UPDATE').scalars().all() == [PARENT], 'expected-c8-revision')
+            common.require(conn.exec_driver_sql('SELECT version_num FROM alembic_version FOR UPDATE').scalars().all() == [parent], 'unexpected-parent-revision')
             conn.exec_driver_sql('LOCK TABLE users,account_mail_jobs IN SHARE ROW EXCLUSIVE MODE')
             tables = [t for t in sa.inspect(conn).get_table_names(schema=schema) if t != 'alembic_version']
             before = fingerprint(conn, schema, tables)
-            spec = importlib.util.spec_from_file_location('registration_revision', root/'migrations/versions/d9e0f1a2b3c4_verified_registration.py')
+            spec = importlib.util.spec_from_file_location('registration_revision', root/'migrations/versions'/filename)
             module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
             module.op = Operations(MigrationContext.configure(conn)); module.upgrade()
-            conn.execute(sa.text('UPDATE alembic_version SET version_num=:revision'), {'revision':HEAD})
+            conn.execute(sa.text('UPDATE alembic_version SET version_num=:revision'), {'revision':target})
             common.require(fingerprint(conn, schema, tables) == before, 'historical-data-changed')
-        return HEAD
+        return target
     finally:
         engine.dispose()
 
 
 def deploy(args):
     root = Path('/opt/mytoolbox')
+    parent, target, _ = versions(args.password_first)
     common.require(os.name == 'posix' and os.geteuid() == 0 and Path.cwd().resolve() == root, 'server-root-required')
     common.require(args.restore_verified and args.staging_verified, 'restore-and-staging-required')
     common.require(all(re.fullmatch('[0-9a-f]{40}', v) for v in (args.source,args.target)), 'full-sha-required')
@@ -80,12 +90,12 @@ def deploy(args):
             common.require(subprocess.run(['systemctl','is-active','--quiet','mytoolbox']).returncode != 0, 'service-still-active')
             protected = {n:common.file_digest(root/n) for n in ('.env',common.CADDY)}
             metadata = backup.backup(root,directory,url)
-            common.require(metadata['migration_revisions'] == [PARENT], 'unexpected-revision')
+            common.require(metadata['migration_revisions'] == [parent], 'unexpected-revision')
             metadata.update(target_commit=args.target,purpose='verified-registration-final',restore_verified_by_operator=True,staging_verified_by_operator=True)
             backup.private_manifest(directory,metadata)
             common.checkout_release(root,args.target,log)
             common.require(all(common.file_digest(root/n) == v for n,v in protected.items()), 'configuration-changed')
-            migrate(root,url)
+            migrate(root,url,password_first=args.password_first)
             subprocess.run(['systemctl','start','mytoolbox'],check=True,timeout=60)
             import requests
             import time
@@ -98,7 +108,7 @@ def deploy(args):
             else: raise RuntimeError('health-failed')
         backup.private_manifest(directory,metadata)
         print('REGISTRATION_RELEASE_OK')
-        print('revision='+HEAD)
+        print('revision='+target)
         print('release_commit='+args.target)
         print('backup_dir='+str(directory))
     except BaseException:
@@ -115,11 +125,13 @@ def main():
     rehearsal = sub.add_parser('rehearse')
     rehearsal.add_argument('--backup-manifest',required=True)
     rehearsal.add_argument('--writers-stopped',action='store_true')
+    rehearsal.add_argument('--password-first',action='store_true')
     production = sub.add_parser('deploy')
     production.add_argument('--source',required=True)
     production.add_argument('--target',required=True)
     production.add_argument('--restore-verified',action='store_true')
     production.add_argument('--staging-verified',action='store_true')
+    production.add_argument('--password-first',action='store_true')
     args = parser.parse_args()
     try:
         if args.action == 'deploy':
@@ -134,8 +146,8 @@ def main():
             common.require(args.writers_stopped and parsed.get_backend_name() == 'postgresql'
                 and re.fullmatch(r'auth_rehearsal_[a-z0-9_]{1,40}',parsed.database or ''), 'isolated-stopped-database-required')
             verified_backup(args.backup_manifest)
-            migrate(root,url)
-            print('REGISTRATION_REHEARSAL_OK revision='+HEAD)
+            revision = migrate(root,url,password_first=args.password_first)
+            print('REGISTRATION_REHEARSAL_OK revision='+revision)
         return 0
     except Exception as exc:
         reason = str(exc) if isinstance(exc,common.ReleaseFailure) and re.fullmatch(r'[a-z0-9-]+',str(exc)) else 'unexpected-error'

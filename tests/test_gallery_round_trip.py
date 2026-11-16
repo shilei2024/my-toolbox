@@ -60,8 +60,7 @@ class GalleryRoundTripTests(unittest.TestCase):
             captured = [m for m in self.app.extensions['auth_mail_capture']
                 if m[0] == email and '完成注册' in m[1]][-1]
             raw = captured[2].split('#')[1].split('\n')[0]
-        activated = client.post('/account/email/register', data={'token':raw,
-            'password':'Passw0rd1', 'confirm':'Passw0rd1'})
+        activated = client.post('/account/email/register-confirm', data={'token':raw})
         self.assertEqual(activated.status_code, 302)
         self.assertIn('/account/registration/complete', activated.location)
         return client.post(f'/login?next={quote(next_url, safe="")}',

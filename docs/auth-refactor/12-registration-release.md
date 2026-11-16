@@ -1,5 +1,7 @@
 # 邮箱验证注册闭环：更新与人工验收
 
+本页为已上线d9版本的历史发布步骤。当前main若已包含e0，不能用本页默认d9命令部署；请使用[密码前置注册更新](13-password-first-registration.md)，迁移/发布器必须追加 --password-first。
+
 目标 revision：`d9e0f1a2b3c4`，只接受已在 `c8d9e0f1a2b3` 的数据库。正式域名 `https://mindfulpenpal.com`。本文步骤必须按顺序完成；目前真实环境仍是已部署的旧注册行为，不能仅更新Python文件而跳过迁移。
 
 ## 1. 发布条件

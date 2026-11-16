@@ -3,7 +3,7 @@
 {% block content %}
 <section class="card card-body mx-auto p-4" style="max-width:480px">
 <h1 class="h4">请查收注册验证邮件</h1>
-<p>若该邮箱可用于注册，将收到验证邮件。打开最新邮件中的链接，设置密码后即可完成注册。</p>
+<p>若该邮箱可用于注册，将收到验证邮件。打开最新邮件中的链接，确认邮箱后即可完成注册。</p>
 <p class="text-muted small">链接30分钟内有效。未收到时请检查垃圾邮件，或一分钟后重新发送。已有账号请直接登录或找回密码。</p>
 {% if message %}<p role="status">{{ message }}</p>{% endif %}
 <form method="post">{{ form.hidden_tag() }}

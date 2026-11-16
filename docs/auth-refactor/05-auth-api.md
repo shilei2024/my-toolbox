@@ -32,6 +32,8 @@
 
 ## Phase 3–6 新接口
 
+2026-11-17：用户要求恢复惯用注册交互。e0版本/register提交邮箱、密码及确认密码，仅将单向密码摘要保存到待验证申请；新邮件链接/account/email/register-confirm不再设置密码，POST确认后创建正式User并发送欢迎邮件。重发保持摘要；重新提交密码失效旧链接。d9旧申请无摘要时仍可用原/register邮件页面完成。部署参见[密码前置注册更新](13-password-first-registration.md)。
+
 网站注册自 d9 版本起采用[邮箱验证闭环](11-verified-registration.md)：POST /account/email/register 验证一次性token并设置密码后，同事务创建已验证User/密码身份、标记申请完成及入队欢迎邮件；随后跳转注册成功页，用户再登录。GET不激活。GET/POST /account/registration/pending 提供重发，IP/邮箱限流和一分钟冷却；过期申请可以重发。匿名提示不区分已注册与未注册。注册邮件不可用时/register返回503且不创建数据。旧用户和微信注册规则保持。具体升级须先迁移d9，见[注册发布指南](12-registration-release.md)。
 
 | 入口 | 认证和事务边界 |

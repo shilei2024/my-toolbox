@@ -58,7 +58,7 @@ class VerifiedRegistrationPostgresTests(IsolatedSchema, cases.VerifiedRegistrati
         def request():
             with self.app.app_context():
                 barrier.wait(timeout=10)
-                registration_service.request_registration('new@example.com')
+                registration_service.request_registration('new@example.com',password='owner-password123')
                 db.session.commit()
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(request) for _ in range(2)]
@@ -83,6 +83,26 @@ class VerifiedRegistrationPostgresTests(IsolatedSchema, cases.VerifiedRegistrati
 
 @unittest.skipUnless(os.environ.get('AUTH_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class RegistrationMigrationPostgresTests(IsolatedSchema, unittest.TestCase):
+    def test_password_first_production_migration_preserves_legacy_request(self):
+        self.create_schema()
+        self.engine = sa.create_engine(self.database_uri)
+        url = os.environ['AUTH_TEST_DATABASE_URL']
+        with self.engine.begin() as conn: c8_fixture(conn)
+        release.migrate(ROOT,url,schema=self.schema)
+        with self.engine.begin() as conn:
+            conn.exec_driver_sql("INSERT INTO account_registrations(id,email,token_hash,expires_at,last_requested_at,created_at) VALUES(1,'pending@example.test','"+'b'*64+"','2099-01-01',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+            tables = [t for t in sa.inspect(conn).get_table_names(schema=self.schema) if t != 'alembic_version']
+            before = release.fingerprint(conn,self.schema,tables)
+        with patch.object(release,'fingerprint',side_effect=[before,{}]):
+            with self.assertRaises(release.common.ReleaseFailure):
+                release.migrate(ROOT,url,schema=self.schema,password_first=True)
+        with self.engine.begin() as conn:
+            self.assertNotIn('password_hash',[c['name'] for c in sa.inspect(conn).get_columns('account_registrations')])
+        self.assertEqual(release.migrate(ROOT,url,schema=self.schema,password_first=True),release.PASSWORD_HEAD)
+        with self.engine.begin() as conn:
+            self.assertEqual(release.fingerprint(conn,self.schema,tables),before)
+            self.assertIsNone(conn.exec_driver_sql('SELECT password_hash FROM account_registrations WHERE id=1').scalar())
+
     def test_production_migrator_rolls_back_on_mismatch_then_preserves_all_history(self):
         self.create_schema()
         self.engine = sa.create_engine(self.database_uri)
