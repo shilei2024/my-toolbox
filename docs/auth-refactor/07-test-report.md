@@ -2,6 +2,10 @@
 
 更新：2026-11-15。本报告区分历史阶段与当前发布候选结果，不代表真实生产验收。
 
+## 专用发件身份（2026-11-16）
+
+`tests.test_auth_mail_sender tests.test_auth_email_https tests.test_customer_project_reminders tests.test_auth_release` 24项通过。新增SMTP mock验证账号邮件From与随后项目提醒From独立、不修改全局配置；未配置兼容旧地址，非法独立地址拒绝就绪并禁止连接。操作员已确认原发件身份的验证和重置邮件实际收到；新 accounts 发件身份尚未在服务商开通，不能标记专用地址已投递通过。
+
 ## HTTPS 邮件表单热修复（2026-11-16）
 
 生产真实浏览器发现 no-referrer 策略与 Flask-WTF HTTPS严格来源校验冲突，导致提交返回400。账号响应和邮件落地页meta统一改为same-origin，跨站不发送来源，令牌仍只放fragment；保留CSRF和严格来源校验。

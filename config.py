@@ -167,6 +167,7 @@ class Config:
     SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "").strip()
     SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
     SMTP_FROM: str = os.environ.get("SMTP_FROM", "").strip()
+    AUTH_MAIL_FROM: str = os.environ.get("AUTH_MAIL_FROM", "").strip()
     SMTP_TIMEOUT_SECONDS: int = int(os.environ.get("SMTP_TIMEOUT_SECONDS", "10"))
 
     # --- Misc ---
