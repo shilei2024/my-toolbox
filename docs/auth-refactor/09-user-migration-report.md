@@ -2,14 +2,14 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 生产迁移执行 | 2026-11-16 操作员反馈 AUTH_RELEASE_OK，revision=c8d9e0f1a2b3 |
+| 生产迁移执行 | 2026-11-17 操作员反馈 REGISTRATION_RELEASE_OK，revision=d9e0f1a2b3c4 |
 | 生产旧用户总量 | 备份恢复基线15；实时数量以生产为准 |
 | 账号映射 | 恢复库15条、mismatches=0；生产发布器预检与历史摘要检查通过 |
 | 生产异常用户数 | 发布器预检通过，不代替全部业务异常统计 |
 | 合成演练 | 2 个虚构旧账号，ID 恒等映射；停用/冲突变体使用独立测试 |
 | 密码/openid/旧Token/原件 | 恢复库迁移和应用 smoke历史摘要保持；生产发布器历史摘要通过；旧网站 Cookie 需重新登录 |
 | PostgreSQL 合成迁移与并发 | 远端 PG16通过；真实备份恢复、迁移与应用验收通过 |
-| 当前上线范围 | 网站核心代码已升级；真实邮件、下游撤销开关与新版小程序仍待验收/发布 |
+| 当前上线范围 | d9网站注册闭环已部署；e0按用户要求调整密码输入位置，待恢复库/生产升级；下游与小程序发布另行验收 |
 
 ## 操作员恢复库验收（2026-11-16）
 
@@ -20,6 +20,10 @@
 以上为操作员反馈的隔离恢复验收证据。
 
 ## 生产核心升级（2026-11-16）
+
+## d9注册闭环升级（2026-11-17）
+
+操作员反馈恢复库REGISTRATION_REHEARSAL_OK(d9)、全部MOBILE/AUTH业务标志、VERIFIED_REGISTRATION_STAGING_OK通过，历史记录保持。随后生产REGISTRATION_RELEASE_OK，revision=d9e0f1a2b3c4，release_commit=cbaeb1b2142da292a70486e249f0385611012f53，最终备份已保存；邮件服务Result=success/ExecMainStatus=0，主站及两个定时器active，健康status=ok。实际浏览器注册交互尚未最终验收，用户要求先在注册页填密码，e0为待部署调整，不将其标记为已上线。
 
 操作员确认：暂停客户提醒及本项目五个应用容器后，发布器最终备份、Git快进、事务迁移、历史摘要检查和健康检查成功；release_commit=a7aac0b4428b6afc41bdc6bd0e6826dd12eec9c5，revision=c8d9e0f1a2b3。主站和提醒定时器 active，正式域名 /healthz 返回 status=ok，五个应用容器已启动。API 当时 health starting，需随后确认 healthy。AUTH_MAIL_ADAPTER和新微信注册在发布前检查为关闭状态；真实收件、实际网站业务、下游和微信新版仍待继续验收，不将核心升级称为全部上线完成。
 
