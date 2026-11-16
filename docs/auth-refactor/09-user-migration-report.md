@@ -19,11 +19,11 @@
 
 以上为操作员反馈的隔离恢复验收证据。
 
-## 生产核心升级（2026-11-16）
-
 ## d9注册闭环升级（2026-11-17）
 
 操作员反馈恢复库REGISTRATION_REHEARSAL_OK(d9)、全部MOBILE/AUTH业务标志、VERIFIED_REGISTRATION_STAGING_OK通过，历史记录保持。随后生产REGISTRATION_RELEASE_OK，revision=d9e0f1a2b3c4，release_commit=cbaeb1b2142da292a70486e249f0385611012f53，最终备份已保存；邮件服务Result=success/ExecMainStatus=0，主站及两个定时器active，健康status=ok。实际浏览器注册交互尚未最终验收，用户要求先在注册页填密码，e0为待部署调整，不将其标记为已上线。
+
+## 生产核心升级（2026-11-16）
 
 操作员确认：暂停客户提醒及本项目五个应用容器后，发布器最终备份、Git快进、事务迁移、历史摘要检查和健康检查成功；release_commit=a7aac0b4428b6afc41bdc6bd0e6826dd12eec9c5，revision=c8d9e0f1a2b3。主站和提醒定时器 active，正式域名 /healthz 返回 status=ok，五个应用容器已启动。API 当时 health starting，需随后确认 healthy。AUTH_MAIL_ADAPTER和新微信注册在发布前检查为关闭状态；真实收件、实际网站业务、下游和微信新版仍待继续验收，不将核心升级称为全部上线完成。
 
