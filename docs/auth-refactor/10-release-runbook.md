@@ -155,6 +155,31 @@ systemctl is-active auth-mail.timer
 
 以操作员账号访问 `/account/security`，点击验证邮箱、收信并确认，再从 `/account/recover` 测试找回。只打开链接不消费令牌，提交确认后才生效。旧链接再次提交应失败，改密后网站、小程序和 Gallery 的旧会话均退出。真实邮件未通过时关闭邮件功能并修复 SMTP，不开放不可靠的找回入口。
 
+### 账号邮件专用发件地址
+
+已支持 `AUTH_MAIL_FROM`，验证和重置邮件优先使用此地址，项目通知继续使用 `SMTP_FROM`。地址留空时兼容原发送行为。复用现有 SMTP 登录和 TLS 连接；服务商必须允许该 SMTP 凭据使用新 From，应用配置成功不代表服务商已授权。
+
+操作员已选择 `账号安全 <accounts@notify.mindfulpenpal.com>`，新地址尚未开通。先在既有邮件服务商控制台新增发信身份，选择已验证的 notify.mindfulpenpal.com 域名，配置 accounts 地址和“账号安全”显示名称，完成该服务商要求的验证，并确认原 SMTP 登录账号可使用它发信。如服务商要求地址收件验证，应先创建可收件的邮箱或别名；本仓库不能代替服务商创建邮箱。不要购买新服务或替换既有提醒凭据来绕过发信授权。
+
+代码合并部署后，通过 `sudoedit /opt/mytoolbox/.env` **新增**：
+
+```dotenv
+AUTH_MAIL_FROM="账号安全 <accounts@notify.mindfulpenpal.com>"
+```
+
+保留 SMTP_FROM 和 SMTP 登录配置。然后执行：
+
+```bash
+systemctl stop auth-mail.timer
+systemctl stop auth-mail.service
+systemctl restart mytoolbox
+systemctl start auth-mail.service
+systemctl show auth-mail.service -p Result -p ExecMainStatus
+systemctl start auth-mail.timer
+```
+
+服务检查成功后，使用操作员自己账号重新申请验证/重置邮件，确认 From地址和名称、新链接兑换及提醒任务原发件人均正常。不能只检查显示名称。新身份被服务商拒绝时，先停止 auth-mail.timer，移除 AUTH_MAIL_FROM 并重启网站/邮件任务，恢复后再启动timer；待服务商授权修复再切换。无数据库迁移；不修改用户邮箱。
+
 ## 7. 小程序上线
 
 1. 开发者工具导入 `apps/invoice-miniprogram`；使用既有 AppID 和正式 API 域名，不改成示例配置。

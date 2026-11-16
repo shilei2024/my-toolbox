@@ -23,7 +23,8 @@ def ready():
         base = urlsplit(current_app.config.get("APP_BASE_URL", ""))
         return bool(base.scheme == "https" and base.hostname and not base.username and not base.password
             and not base.query and not base.fragment and base.path in ("", "/")
-            and current_app.config.get("SMTP_HOST") and valid_address(current_app.config.get("SMTP_FROM"))
+            and current_app.config.get("SMTP_HOST")
+            and valid_address(current_app.config.get("AUTH_MAIL_FROM") or current_app.config.get("SMTP_FROM"))
             and current_app.config.get("SMTP_SECURITY") in {"ssl", "starttls"}
             and bool(current_app.config.get("SMTP_USERNAME")) == bool(current_app.config.get("SMTP_PASSWORD"))
             and 1 <= int(current_app.config.get("SMTP_PORT", 0)) <= 65535
@@ -94,7 +95,7 @@ def dispatch(limit=20):
             if current_app.config.get("AUTH_MAIL_ADAPTER") == "capture" and current_app.testing:
                 current_app.extensions.setdefault("auth_mail_capture", []).append((recipient, subject, body))
             else:
-                send_smtp(recipient, subject, body)
+                send_smtp(recipient, subject, body, sender=current_app.config.get("AUTH_MAIL_FROM") or None)
             success = True
         except MailError:
             pass  # Only aggregate safe delivery state is exposed.

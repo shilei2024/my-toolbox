@@ -14,9 +14,9 @@ def valid_address(value):
     address = parseaddr(value)[1]
     return bool(address and "@" in address and address.rsplit("@", 1)[1])
 
-def send_smtp(recipient: str, subject: str, body: str) -> None:
+def send_smtp(recipient: str, subject: str, body: str, *, sender: str | None = None) -> None:
     host = str(current_app.config.get("SMTP_HOST", "")).strip()
-    sender = str(current_app.config.get("SMTP_FROM", "")).strip()
+    sender = str(current_app.config.get("SMTP_FROM", "") if sender is None else sender).strip()
     if not host or not sender:
         raise MailError("SMTP_NOT_CONFIGURED")
     mode = str(current_app.config.get("SMTP_SECURITY", "starttls")).lower()
