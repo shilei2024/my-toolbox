@@ -1,7 +1,8 @@
 """Website account security and email flows, always Cookie + CSRF."""
 import hashlib
+import re
 import secrets
-from flask import Blueprint, current_app, flash, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, make_response, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, logout_user
 from extensions import db, limiter
 from models import User
@@ -38,20 +39,34 @@ def recover():
             if user:
                 mail.enqueue(user.id, "reset", email)
                 db.session.commit()
-            message = "若该邮箱已验证且符合找回条件，将收到重置邮件。"
+            elif email:
+                from .registration_service import request_registration
+                request_registration(email, create=False)
+                db.session.commit()
+            message = "若该邮箱符合条件，将收到找回或注册验证邮件，请查收并按邮件提示继续。"
     return render_template("account_recover.html", message=message)
 
 
 @security_bp.route("/account/email/<purpose>", methods=["GET", "POST"])
 @limiter.limit("10/minute", methods=["POST"])
 def email_action(purpose):
-    if purpose not in {"verify", "reset"}:
+    if purpose not in {"verify", "reset", "register"}:
         return "页面不存在", 404
     message = ""
     if request.method == "POST":
         password = request.form.get("password")
-        if purpose == "reset" and password != request.form.get("confirm"):
+        if purpose in {"reset", "register"} and password != request.form.get("confirm"):
             message = "两次密码输入不一致，请重新打开邮件链接。"
+        elif purpose == "register":
+            from .registration_service import complete
+            result = complete(request.form.get("token"), password)
+            if result:
+                from .routes import _safe_next_url
+                target = _safe_next_url(result[1], current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
+                session.pop("registration_email", None)
+                session["registration_complete"] = {"next":target}
+                return redirect(url_for("account_security.registration_complete"))
+            message = "链接无效或已过期，或密码不符合8–128位且包含字母和数字的要求。请检查密码或重新申请邮件。"
         elif mail.consume(request.form.get("token"), purpose, password):
             if purpose == "reset":
                 logout_user()
@@ -60,9 +75,42 @@ def email_action(purpose):
         else:
             message = "链接无效或已过期，或密码不符合8–128位要求。请重新申请。"
     nonce = secrets.token_urlsafe(24)
-    response = make_response(render_template("account_email_action.html", purpose=purpose, nonce=nonce, message=message))
+    raw = request.form.get("token", "") if request.method == "POST" else ""
+    form_token = raw if re.fullmatch(r"[A-Za-z0-9_-]{43}", raw) else ""
+    response = make_response(render_template("account_email_action.html", purpose=purpose, nonce=nonce,
+        message=message, form_token=form_token))
     response.headers["Content-Security-Policy"] = f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     return response
+
+
+@security_bp.get("/account/registration/complete")
+def registration_complete():
+    result = session.get("registration_complete")
+    if not isinstance(result, dict):
+        return redirect(url_for("auth.register"))
+    return render_template("account_registration_complete.html", next_url=result.get("next"))
+
+
+@security_bp.route("/account/registration/pending", methods=["GET", "POST"])
+@limiter.limit("5/minute", methods=["POST"])
+@limiter.limit("5/hour", key_func=email_limit_key, methods=["POST"])
+def registration_pending():
+    from .forms import RegistrationEmailForm
+    from .registration_service import request_registration
+    form = RegistrationEmailForm()
+    message = ""
+    if form.validate_on_submit():
+        if mail.ready():
+            email = form.email.data.strip().lower()
+            request_registration(email, create=False)
+            db.session.commit()
+            session["registration_email"] = email
+            message = "若该邮箱有待完成的注册，将收到验证邮件。请稍后查收，重复申请需间隔一分钟。"
+        else:
+            message = "注册邮件服务暂不可用，请稍后重试。"
+    elif request.method == "GET":
+        form.email.data = session.get("registration_email", "")
+    return render_template("account_registration_pending.html", form=form, message=message)
 
 
 @security_bp.route("/account/security", methods=["GET", "POST"])

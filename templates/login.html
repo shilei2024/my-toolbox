@@ -28,6 +28,7 @@
         <p class="text-center mb-2">
           <a href="/account/recover">忘记密码？</a>
         </p>
+        <p class="text-center small"><a href="/account/registration/pending">尚未完成注册？重新发送验证邮件</a></p>
         <p class="text-center text-muted mb-0">
           还没有账号？ <a href="{{ url_for('auth.register', next=next_url) if next_url else url_for('auth.register') }}">立即注册</a>
         </p>

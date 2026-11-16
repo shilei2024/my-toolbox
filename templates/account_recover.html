@@ -6,5 +6,6 @@
 <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label for="email" class="form-label">邮箱</label><input id="email" name="email" type="email" maxlength="255" required class="form-control mb-3" autocomplete="email">
 <button class="btn btn-primary">发送重置邮件</button></form>
+<p class="small text-muted mt-3">新注册尚未验证？<a href="/account/registration/pending">重新发送注册邮件</a>。旧账号尚未验证邮箱，请先<a href="/login?next=/account/security">登录并验证邮箱</a>；无法登录时可使用管理员恢复码。</p>
 <a class="mt-3" href="{{ url_for('auth.forgot_password') }}">使用管理员提供的恢复码</a>
 </section>{% endblock %}

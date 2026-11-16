@@ -117,6 +117,11 @@
 </nav>
 
 <main id="main-content" class="container site-main py-4">
+  {% if current_user.is_authenticated and current_user.email and not current_user.email_verified_at and request.endpoint != 'account_security.security' %}
+  <div class="alert alert-info d-flex flex-wrap align-items-center gap-2" role="status">
+    <span>验证邮箱后，可在忘记密码时自助找回。</span><a href="/account/security" class="alert-link">立即验证邮箱</a>
+  </div>
+  {% endif %}
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <div class="mb-3">

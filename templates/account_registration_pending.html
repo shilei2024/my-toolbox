@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}验证邮箱，完成注册 — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="card card-body mx-auto p-4" style="max-width:480px">
+<h1 class="h4">请查收注册验证邮件</h1>
+<p>若该邮箱可用于注册，将收到验证邮件。打开最新邮件中的链接，设置密码后即可完成注册。</p>
+<p class="text-muted small">链接30分钟内有效。未收到时请检查垃圾邮件，或一分钟后重新发送。已有账号请直接登录或找回密码。</p>
+{% if message %}<p role="status">{{ message }}</p>{% endif %}
+<form method="post">{{ form.hidden_tag() }}
+<label class="form-label" for="email">注册邮箱</label>{{ form.email(class="form-control mb-2", autocomplete="email") }}
+{% for err in form.email.errors %}<p class="text-danger small">{{ err }}</p>{% endfor %}
+<button class="btn btn-primary w-100" type="submit">重新发送验证邮件</button></form>
+<div class="d-flex gap-3 mt-3"><a href="/register">更换邮箱</a><a href="/login">登录</a><a href="/account/recover">找回密码</a></div>
+</section>{% endblock %}

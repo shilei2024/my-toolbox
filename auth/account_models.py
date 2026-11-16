@@ -1,6 +1,6 @@
 """Shared authentication records; business ownership remains users.id."""
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from extensions import db
 from models import utcnow
@@ -38,10 +38,28 @@ class ActionToken(db.Model):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class AccountRegistration(db.Model):
+    __tablename__ = "account_registrations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    return_to: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_requested_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
 class AuthMailJob(db.Model):
     __tablename__ = "account_mail_jobs"
+    __table_args__ = (CheckConstraint(
+        "(purpose = 'register' AND user_id IS NULL AND registration_id IS NOT NULL) OR "
+        "(purpose != 'register' AND user_id IS NOT NULL AND registration_id IS NULL)",
+        name="ck_auth_mail_recipient_owner"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    registration_id: Mapped[int | None] = mapped_column(ForeignKey("account_registrations.id"), nullable=True, index=True)
     purpose: Mapped[str] = mapped_column(String(24), nullable=False)
     target_email: Mapped[str] = mapped_column(String(255), nullable=False)
     auth_epoch: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -130,6 +130,9 @@ jobs:
       - name: Verify email, registration, binding and release migration on PostgreSQL
         if: ${{ !cancelled() }}
         run: python scripts/ops/auth_ci_tests.py tests.test_auth_release tests.test_auth_release_postgres
+      - name: Verify email-first registration, welcome and migration rollback on PostgreSQL
+        if: ${{ !cancelled() }}
+        run: python scripts/ops/auth_ci_tests.py tests.test_registration_migration tests.test_verified_registration tests.test_verified_registration_postgres
 
   postgres-integration:
     name: PostgreSQL integration
