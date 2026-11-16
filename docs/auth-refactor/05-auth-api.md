@@ -10,7 +10,7 @@
 
 | 入口 | 认证/行为 |
 | --- | --- |
-| POST /register | 既有表单/CSRF；创建相同 users 账号和密码身份；事务创建网站会话；不增加私有工具权限 |
+| POST /register | 邮箱表单/CSRF；创建待验证申请并入队邮件，统一跳转待验证页；不创建User或网站会话 |
 | POST /login | 既有表单/CSRF；错误密码/停用统一 401；IP 每分钟5次、邮箱摘要每小时10次 |
 | GET /logout | 展示确认，不撤销 |
 | POST /logout | CSRF；撤销当前新网站会话并删除 Cookie；旧数字会话退出撤销全端 |
@@ -31,6 +31,8 @@
 密码继续兼容 Werkzeug 既有哈希；管理员恢复和改密沿用至少8位、最长128位策略，注册维持字母+数字规则。Argon2id 升级与有业务数据的双账号合并不在本次发布范围。
 
 ## Phase 3–6 新接口
+
+网站注册自 d9 版本起采用[邮箱验证闭环](11-verified-registration.md)：POST /account/email/register 验证一次性token并设置密码后，同事务创建已验证User/密码身份、标记申请完成及入队欢迎邮件；随后跳转注册成功页，用户再登录。GET不激活。GET/POST /account/registration/pending 提供重发，IP/邮箱限流和一分钟冷却；过期申请可以重发。匿名提示不区分已注册与未注册。注册邮件不可用时/register返回503且不创建数据。旧用户和微信注册规则保持。具体升级须先迁移d9，见[注册发布指南](12-registration-release.md)。
 
 | 入口 | 认证和事务边界 |
 | --- | --- |

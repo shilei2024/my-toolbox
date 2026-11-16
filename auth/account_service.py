@@ -78,6 +78,7 @@ def authenticate_password(email, password, *, channel):
 
 
 def register_password(email, password):
+    """Internal creation primitive; public web signup must prove email first."""
     email = normalized_email(email)
     if not email or email.count("@") != 1 or not all(email.split("@")):
         raise ValueError("invalid_email")

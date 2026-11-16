@@ -42,22 +42,34 @@ class GalleryRoundTripTests(unittest.TestCase):
         cls.app.config["APP_BASE_URL"] = "https://tools.example.com"
         cls.app.config["SESSION_COOKIE_DOMAIN"] = ".example.com"
         cls.app.config["SESSION_COOKIE_SECURE"] = True
+        cls.app.config['AUTH_MAIL_ADAPTER'] = 'capture'
 
-    def _register(self, email: str, next_url: str = GALLERY) -> "object":
+    def _register(self, email: str, next_url: str = GALLERY, client=None) -> "object":
         data = dict(REGISTER, email=email)
-        return self.app.test_client().post(
+        client = client or self.app.test_client()
+        pending = client.post(
             f"/register?next={quote(next_url, safe='')}",
             data=data,
             follow_redirects=False,
         )
+        self.assertEqual(pending.status_code, 302)
+        self.assertIn('/account/registration/pending', pending.location)
+        from auth import email_service
+        with self.app.app_context():
+            email_service.dispatch(limit=100)
+            captured = [m for m in self.app.extensions['auth_mail_capture']
+                if m[0] == email and '完成注册' in m[1]][-1]
+            raw = captured[2].split('#')[1].split('\n')[0]
+        activated = client.post('/account/email/register', data={'token':raw,
+            'password':'Passw0rd1', 'confirm':'Passw0rd1'})
+        self.assertEqual(activated.status_code, 302)
+        self.assertIn('/account/registration/complete', activated.location)
+        return client.post(f'/login?next={quote(next_url, safe="")}',
+            data={'email':email, 'password':'Passw0rd1', 'remember':'y'})
 
     def test_register_returns_to_gallery_then_introspection_identifies_user(self):
         client = self.app.test_client()
-        response = client.post(
-            f"/register?next={quote(GALLERY, safe='')}",
-            data=dict(REGISTER, email="roundtrip@example.com"),
-            follow_redirects=False,
-        )
+        response = self._register('roundtrip@example.com', client=client)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], GALLERY)
 
@@ -99,11 +111,7 @@ class GalleryRoundTripTests(unittest.TestCase):
 
     def test_authenticated_and_admin_pages_are_never_cached(self):
         client = self.app.test_client()
-        response = client.post(
-            f"/register?next={quote(GALLERY, safe='')}",
-            data=dict(REGISTER, email="cache-check@example.com"),
-            follow_redirects=False,
-        )
+        response = self._register('cache-check@example.com', client=client)
         self.assertEqual(response.status_code, 302)
         home = client.get("/")
         self.assertEqual(home.status_code, 200)

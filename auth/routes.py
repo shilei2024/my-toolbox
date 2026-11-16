@@ -11,7 +11,7 @@ from flask_login import current_user, login_required, logout_user
 from extensions import db, limiter
 from models import User
 from . import password_reset as reset_service
-from .forms import LoginForm, RegisterForm
+from .forms import LoginForm, RegistrationEmailForm
 from sqlalchemy.exc import IntegrityError
 from . import account_service, session_service
 
@@ -73,32 +73,26 @@ def _safe_next_url(value: str | None, external_url: str) -> str | None:
 
 @auth_bp.route("/register", methods=["GET", "POST"])
 @limiter.limit("5 per minute", methods=["POST"])
+@limiter.limit("5/hour", key_func=_password_account_limit_key, methods=["POST"])
 def register():
     next_url = _safe_next_url(request.args.get("next"), current_app.config.get("AI_IMAGE_EXTERNAL_URL", ""))
     if current_user.is_authenticated:
         return redirect(next_url or url_for("home"))
 
-    form = RegisterForm()
+    form = RegistrationEmailForm()
     if form.validate_on_submit():
+        from . import email_service, registration_service
+        if not email_service.ready():
+            flash("注册邮件服务暂不可用，请稍后重试。", "warning")
+            return render_template("register.html", form=form, next_url=next_url), 503
         email = form.email.data.strip().lower()
-        existing = db.session.query(User).filter_by(email=email).one_or_none()
-        if existing is not None:
-            flash("该邮箱已注册，请直接登录。", "warning")
-            return redirect(url_for("auth.login", **({"next": next_url} if next_url else {})))
-
         try:
-            user = account_service.register_password(email, form.password.data)
-            session_service.start_web_session(user, remember=True)
+            registration_service.request_registration(email, next_url)
+            db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            flash("注册状态已变化，请尝试登录或重新注册。", "warning")
-            return redirect(url_for("auth.login"))
-        except ValueError:
-            db.session.rollback()
-            flash("注册信息格式不正确，请检查后重试。", "warning")
-            return render_template("register.html", form=form, next_url=next_url), 400
-        flash("注册成功，欢迎！", "success")
-        return redirect(next_url or "/")
+        session["registration_email"] = email
+        return redirect(url_for("account_security.registration_pending"))
 
     return render_template("register.html", form=form, next_url=next_url)
 

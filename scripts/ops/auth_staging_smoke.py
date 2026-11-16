@@ -20,6 +20,7 @@ def exercise_unified(app):
     from extensions import db
     from models import User, UserToolGrant
     from auth import email_service
+    from auth.account_models import AuthMailJob
     exercise(app, unified=True)
     mobile = app.test_client(use_cookies=False)
     subject = 'auth-stage-' + secrets.token_hex(16)
@@ -45,13 +46,14 @@ def exercise_unified(app):
     web = app.test_client()
     require(web.post('/login', data={'email':email,'password':password}).status_code == 302, 'website-login-failed')
     with app.app_context():
-        require(email_service.dispatch()['sent'] >= 1, 'capture-mail-failed')
+        ids = [j.id for j in AuthMailJob.query.filter_by(user_id=uid)]
+        require(email_service.dispatch(job_ids=ids)['sent'] >= 1, 'capture-mail-failed')
         raw = app.extensions['auth_mail_capture'][-1][2].split('#')[1].split('\n')[0]
         require(email_service.consume(raw, 'verify'), 'verify-failed')
         require(not email_service.consume(raw, 'verify'), 'verify-replay')
         require(email_service.enqueue(uid, 'reset', email), 'reset-queue-failed')
         db.session.commit()
-        email_service.dispatch()
+        email_service.dispatch(job_ids=[j.id for j in AuthMailJob.query.filter_by(user_id=uid)])
         raw = app.extensions['auth_mail_capture'][-1][2].split('#')[1].split('\n')[0]
         require(email_service.consume(raw, 'reset', password+'2'), 'reset-failed')
     require(mobile.get('/api/mobile/account', headers=headers).status_code == 401, 'reset-mobile-not-revoked')
@@ -59,7 +61,7 @@ def exercise_unified(app):
     print('AUTH_APPLICATION_OK: signup, invoice-grant, same-account, website-login, captured-email, reset, revoke')
 
 
-def main():
+def main(*, registration=False):
     require(os.name == 'posix' and os.geteuid() != 0, 'run-as-postgres')
     require(not (ROOT/'.env').exists(), 'candidate-must-not-have-dotenv')
     os.chdir(ROOT)
@@ -86,16 +88,34 @@ def main():
         app.add_url_rule('/', 'home', lambda:'staging')
         with app.app_context():
             require(db.session.execute(text('SELECT current_database()')).scalar() == DATABASE, 'wrong-database')
-            require(db.session.execute(text('SELECT version_num FROM public.alembic_version')).scalars().all() == ['c8d9e0f1a2b3'], 'wrong-revision')
+            revision = 'd9e0f1a2b3c4' if registration else 'c8d9e0f1a2b3'
+            require(db.session.execute(text('SELECT version_num FROM public.alembic_version')).scalars().all() == [revision], 'wrong-revision')
             before = snapshot(db)
+            if registration:
+                from scripts.ops.verified_registration_smoke import history
+                all_before = history(db.session.connection())
         try:
             exercise_unified(app)
+            if registration:
+                from scripts.ops.verified_registration_smoke import exercise
+                from jinja2 import ChoiceLoader, DictLoader
+                # Render the real auth forms without bootstrapping the production
+                # application shell, its navigation endpoints or scheduled jobs.
+                app.jinja_loader = ChoiceLoader([DictLoader({'base.html':
+                    '<!doctype html><html lang="zh-CN"><body>{% block content %}{% endblock %}</body></html>'}), app.jinja_loader])
+                app.jinja_env.cache.clear()
+                exercise(app)
         finally:
             with app.app_context():
                 db.session.rollback()
                 require(snapshot(db, before) == before, 'historical-data-changed')
+                if registration:
+                    all_after = history(db.session.connection())
+                    require(all(not (rows-all_after[table]) for table,rows in all_before.items()), 'historical-record-changed')
         print('AUTH_HISTORY_OK: existing users, invoices and original BLOBs unchanged')
         print('AUTH_STAGING_OK')
+        if registration:
+            print('VERIFIED_REGISTRATION_STAGING_OK')
 
 
 if __name__ == '__main__':

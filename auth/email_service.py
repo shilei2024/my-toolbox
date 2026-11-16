@@ -61,20 +61,54 @@ def enqueue(user_id, purpose, email):
     return True
 
 
-def dispatch(limit=20):
+def _deliver(payload):
+    job_id, recipient, subject, body, claim, attempt = payload
+    success = False
+    try:
+        if current_app.config.get("AUTH_MAIL_ADAPTER") == "capture" and current_app.testing:
+            current_app.extensions.setdefault("auth_mail_capture", []).append((recipient, subject, body))
+        else:
+            send_smtp(recipient, subject, body, sender=current_app.config.get("AUTH_MAIL_FROM") or None,
+                credentials=smtp_credentials())
+        success = True
+    except MailError:
+        pass
+    db.session.execute(update(AuthMailJob).where(AuthMailJob.id == job_id,
+        AuthMailJob.claim == claim, AuthMailJob.status == "processing").values(
+        status="sent" if success else ("failed" if attempt >= 3 else "pending"),
+        updated_at=utcnow(), next_attempt_at=utcnow()+timedelta(minutes=attempt*2)))
+    db.session.commit()
+    return "sent" if success else "failed"
+
+
+def dispatch(limit=20, *, job_ids=None):
     if not ready():
         raise MailError("AUTH_MAIL_NOT_READY")
     now = utcnow()
-    AuthMailJob.query.filter(AuthMailJob.status == "processing", AuthMailJob.attempts >= 3,
-        AuthMailJob.updated_at < now-timedelta(minutes=5)).update({"status":"failed"})
+    stale = AuthMailJob.query.filter(AuthMailJob.status == "processing", AuthMailJob.attempts >= 3,
+        AuthMailJob.updated_at < now-timedelta(minutes=5))
+    if job_ids is not None:
+        stale = stale.filter(AuthMailJob.id.in_(job_ids))
+    stale.update({"status":"failed"})
     db.session.commit()
-    ids = db.session.query(AuthMailJob.id, AuthMailJob.user_id).filter(
+    query = db.session.query(AuthMailJob.id, AuthMailJob.user_id, AuthMailJob.registration_id).filter(
         AuthMailJob.attempts < 3, AuthMailJob.next_attempt_at <= now,
         or_(AuthMailJob.status == "pending", (AuthMailJob.status == "processing") &
-            (AuthMailJob.updated_at < now-timedelta(minutes=5)))).order_by(AuthMailJob.id).limit(limit).all()
+            (AuthMailJob.updated_at < now-timedelta(minutes=5))))
+    if job_ids is not None:
+        query = query.filter(AuthMailJob.id.in_(job_ids))
+    ids = query.order_by(AuthMailJob.id).limit(limit).all()
     db.session.rollback()
     result = {"sent": 0, "failed": 0, "cancelled": 0}
-    for job_id, user_id in ids:
+    for job_id, user_id, registration_id in ids:
+        if registration_id is not None:
+            from .registration_service import prepare_delivery
+            payload = prepare_delivery(job_id, registration_id)
+            if payload == "cancelled":
+                result["cancelled"] += 1
+            elif payload is not None:
+                result[_deliver(payload)] += 1
+            continue
         user = lock_account(user_id)
         job = AuthMailJob.query.filter_by(id=job_id).populate_existing().with_for_update().one()
         now = utcnow()
@@ -84,15 +118,17 @@ def dispatch(limit=20):
         if job.status == "processing" and job.updated_at >= now-timedelta(minutes=5):
             db.session.rollback()
             continue
-        if not user or not user.is_active_user or user.auth_epoch != job.auth_epoch or user.email != job.target_email or (job.purpose == "reset" and not user.email_verified_at):
+        if (not user or not user.is_active_user or (job.purpose != "welcome" and user.auth_epoch != job.auth_epoch)
+                or user.email != job.target_email or (job.purpose in {"reset", "welcome"} and not user.email_verified_at)):
             job.status = "cancelled"
             db.session.commit()
             result["cancelled"] += 1
             continue
-        ActionToken.query.filter_by(user_id=user.id, purpose=job.purpose, consumed_at=None).update({"consumed_at": now})
         token, claim = secrets.token_urlsafe(32), secrets.token_hex(16)
-        db.session.add(ActionToken(user_id=user.id, purpose=job.purpose, target_email=job.target_email,
-            token_hash=digest(token), auth_epoch=user.auth_epoch, expires_at=now+timedelta(minutes=30)))
+        if job.purpose != "welcome":
+            ActionToken.query.filter_by(user_id=user.id, purpose=job.purpose, consumed_at=None).update({"consumed_at": now})
+            db.session.add(ActionToken(user_id=user.id, purpose=job.purpose, target_email=job.target_email,
+                token_hash=digest(token), auth_epoch=user.auth_epoch, expires_at=now+timedelta(minutes=30)))
         job.status, job.claim, job.updated_at = "processing", claim, now
         job.attempts += 1
         recipient, purpose, attempt = job.target_email, job.purpose, job.attempts
@@ -101,21 +137,11 @@ def dispatch(limit=20):
         link = current_app.config["APP_BASE_URL"].rstrip("/")+"/account/email/"+purpose+"#"+token
         subject = "验证邮箱" if purpose == "verify" else "重置密码"
         body = f"请打开链接{subject}，30分钟内有效：\n{link}\n\n请使用最新邮件中的链接。如非本人操作，请忽略。"
-        success = False
-        try:
-            if current_app.config.get("AUTH_MAIL_ADAPTER") == "capture" and current_app.testing:
-                current_app.extensions.setdefault("auth_mail_capture", []).append((recipient, subject, body))
-            else:
-                send_smtp(recipient, subject, body, sender=current_app.config.get("AUTH_MAIL_FROM") or None,
-                    credentials=smtp_credentials())
-            success = True
-        except MailError:
-            pass  # Only aggregate safe delivery state is exposed.
-        db.session.execute(update(AuthMailJob).where(AuthMailJob.id == job_id, AuthMailJob.claim == claim).values(
-            status="sent" if success else ("failed" if attempt >= 3 else "pending"),
-            updated_at=utcnow(), next_attempt_at=utcnow()+timedelta(minutes=attempt*2)))
-        db.session.commit()
-        result["sent" if success else "failed"] += 1
+        if purpose == "welcome":
+            base = current_app.config["APP_BASE_URL"].rstrip("/")
+            subject = "注册成功，欢迎使用 MindfulPenPal"
+            body = f"你已完成邮箱验证，账号注册成功。\n\n登录：{base}/login\n忘记密码时，可使用已验证邮箱找回：{base}/account/recover\n\n请勿向他人提供密码或重置链接。"
+        result[_deliver((job_id, recipient, subject, body, claim, attempt))] += 1
     return result
 
 

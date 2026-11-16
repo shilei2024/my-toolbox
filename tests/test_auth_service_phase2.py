@@ -25,7 +25,7 @@ class AuthServiceTests(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
         self.app.config.update(TESTING=True, SECRET_KEY="phase2-synthetic-secret",
-            SQLALCHEMY_DATABASE_URI="sqlite://", WTF_CSRF_ENABLED=False,
+            SQLALCHEMY_DATABASE_URI=getattr(self, 'database_uri', 'sqlite://'), WTF_CSRF_ENABLED=False,
             RATELIMIT_ENABLED=False, WECHAT_MINI_ENABLED=True,
             WECHAT_MINI_APP_ID="wx0123456789abcdef", WECHAT_MINI_APP_SECRET="x"*32,
             GALLERY_INTROSPECTION_SECRET="g"*32)
@@ -81,14 +81,22 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(other.get("/who").json["id"], 1)
 
     def test_register_mirrors_identity_without_private_grants(self):
+        from auth.email_routes import security_bp
+        from auth import email_service, registration_service
+        self.app.register_blueprint(security_bp)
+        self.app.config.update(AUTH_MAIL_ADAPTER='capture', APP_BASE_URL='https://mindfulpenpal.com')
         response = self.client.post("/register", data={"email":"new@example.com", "password":"password123", "confirm":"password123"})
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.client.get("/who").json["id"], 2)
+        self.assertIsNone(self.client.get("/who").json["id"])
         with self.app.app_context():
+            self.assertEqual(User.query.count(), 1)
+            email_service.dispatch()
+            raw = self.app.extensions['auth_mail_capture'][-1][2].split('#')[1].split('\n')[0]
+            self.assertIsNotNone(registration_service.complete(raw, 'password123'))
             from models import UserToolGrant
             self.assertEqual(UserToolGrant.query.count(), 0)
             identity = ExternalIdentity.query.filter_by(user_id=2, provider="web_password").one()
-            self.assertIsNone(identity.verified_at)
+            self.assertIsNotNone(identity.verified_at)
             self.assertFalse(db.session.get(User, 2).is_admin)
 
     def test_logout_confirmation_and_csrf_protect_mutation(self):

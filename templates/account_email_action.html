@@ -1,8 +1,10 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="same-origin"><title>{{ '验证邮箱' if purpose == 'verify' else '重置密码' }}</title>
+{% set heading = '验证邮箱，完成注册' if purpose == 'register' else ('验证邮箱' if purpose == 'verify' else '重置密码') %}
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="same-origin"><title>{{ heading }}</title>
 <style nonce="{{ nonce }}">body{background:#f4f1ed;color:#352c3e;font:16px system-ui;margin:0;padding:32px 20px}main{max-width:420px;margin:8vh auto;background:white;border-radius:20px;padding:28px}input,button{box-sizing:border-box;width:100%;padding:14px;margin:8px 0;border:1px solid #ddd;border-radius:10px;font:inherit}button{background:#514054;color:white}h1{font-size:24px}a{color:#514054}</style></head><body><main>
-<h1>{{ '验证邮箱' if purpose == 'verify' else '重置密码' }}</h1>{% if message %}<p role="status">{{ message }}</p>{% endif %}
-<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="token" id="token">
-{% if purpose == 'reset' %}<label for="password">新密码</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><label for="confirm">确认新密码</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>{% endif %}
-<button id="submit" disabled>确认{{ '验证' if purpose == 'verify' else '重置' }}</button></form><a href="/account/recover">重新申请邮件</a>
-<script nonce="{{ nonce }}">const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);if(/^[A-Za-z0-9_-]{43}$/.test(token)){document.getElementById('token').value=token;document.getElementById('submit').disabled=false;}</script>
+<h1>{{ heading }}</h1>{% if message %}<p role="status">{{ message }}</p>{% endif %}
+{% if purpose == 'register' %}<p>设置登录密码后，邮箱验证和注册将同时完成。密码需8–128位，包含字母和数字。</p>{% endif %}
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="token" id="token" value="{{ form_token or '' }}">
+{% if purpose in ['reset', 'register'] %}<label for="password">{{ '登录密码' if purpose == 'register' else '新密码' }}</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>{% endif %}
+<button id="submit" disabled>{{ '验证邮箱并完成注册' if purpose == 'register' else ('确认验证' if purpose == 'verify' else '确认重置') }}</button></form><a href="{{ '/account/registration/pending' if purpose == 'register' else '/account/recover' }}">重新申请邮件</a>
+<script nonce="{{ nonce }}">const token=location.hash.slice(1)||document.getElementById('token').value;history.replaceState(null,'',location.pathname);if(/^[A-Za-z0-9_-]{43}$/.test(token)){document.getElementById('token').value=token;document.getElementById('submit').disabled=false;}</script>
 </main></body></html>

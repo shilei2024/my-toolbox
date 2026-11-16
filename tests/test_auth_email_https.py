@@ -29,7 +29,7 @@ class EmailHttpsTests(unittest.TestCase):
         body = page.get_data(as_text=True)
         if path.startswith('/account/email/'):
             self.assertIn('name="referrer" content="same-origin"', body)
-        return re.search(r'name="csrf_token" value="([^"]+)"', body).group(1)
+        return re.search(r'name="csrf_token"[^>]*value="([^"]+)"', body).group(1)
 
     def post(self, path, data):
         return self.client.post(path, base_url=ORIGIN, data=data,

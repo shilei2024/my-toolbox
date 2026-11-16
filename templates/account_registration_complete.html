@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}注册成功 — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="card card-body mx-auto p-4" style="max-width:480px">
+<h1 class="h4">注册成功</h1><p>邮箱已验证，密码已设置。注册成功邮件已加入发送队列。</p>
+<a class="btn btn-primary" href="{{ url_for('auth.login', next=next_url) if next_url else url_for('auth.login') }}">登录并开始使用</a>
+<p class="text-muted small mt-3 mb-0">以后忘记密码，可用这个邮箱找回。</p>
+</section>{% endblock %}

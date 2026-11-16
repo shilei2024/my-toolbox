@@ -286,13 +286,12 @@ class AdminGalleryRoutesTests(unittest.TestCase):
         self.assertIn("策展作品列表读取失败", response.get_data(as_text=True))
 
     def test_non_admin_cannot_access_gallery_admin(self):
+        from auth.account_service import register_password
+        from extensions import db
+        with self.app.app_context():
+            register_password('gallery-user@example.com', 'Passw0rd1')
+            db.session.commit()
         client = self.app.test_client()
-        client.post(
-            "/register",
-            data={"email": "gallery-user@example.com", "password": "Passw0rd1", "confirm": "Passw0rd1", "remember": "y"},
-            follow_redirects=False,
-        )
-        client.post("/logout", follow_redirects=False)
         client.post(
             "/login",
             data={"email": "gallery-user@example.com", "password": "Passw0rd1", "remember": "y"},

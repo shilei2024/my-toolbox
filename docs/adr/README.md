@@ -59,3 +59,4 @@
 
 - [ADR-0046：发票助手普通账号的个人客户空间](0046-personal-invoice-customer-access.md)。
 - [ADR-0047：统一账号、可撤销会话与认证邮件](0047-unified-account-sessions-and-email.md)。
+- [ADR-0048：邮箱所有权验证后创建正式账号](0048-email-first-registration.md)。
