@@ -68,6 +68,18 @@ class VerifiedRegistrationPostgresTests(IsolatedSchema, cases.VerifiedRegistrati
             self.assertEqual(AuthMailJob.query.filter_by(purpose='register').count(), 1)
             self.assertEqual(User.query.count(), 1)
 
+    def test_operator_harness_preserves_original_pending_mail_and_records(self):
+        from scripts.ops.verified_registration_smoke import exercise, history
+        with self.app.app_context():
+            db.session.add(AuthMailJob(user_id=1,purpose='verify',target_email='person@example.com',auth_epoch=0))
+            db.session.commit()
+            before = history(db.session.connection(),self.schema)
+        exercise(self.app)
+        with self.app.app_context():
+            after = history(db.session.connection(),self.schema)
+            self.assertTrue(all(not (rows-after[table]) for table,rows in before.items()))
+            self.assertEqual(AuthMailJob.query.filter_by(user_id=1).one().status, 'pending')
+
 
 @unittest.skipUnless(os.environ.get('AUTH_TEST_DATABASE_URL'), 'isolated PostgreSQL URL not configured')
 class RegistrationMigrationPostgresTests(IsolatedSchema, unittest.TestCase):

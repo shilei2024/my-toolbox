@@ -10,10 +10,12 @@ sys.path.insert(0, str(ROOT))
 from scripts.ops.mobile_invoice_staging_smoke import CheckFailure, require
 
 
-def history(conn):
+def history(conn, schema='public'):
     import sqlalchemy as sa
-    tables = sa.inspect(conn).get_table_names(schema='public')
-    return {table:Counter(conn.exec_driver_sql('SELECT md5(to_jsonb(t)::text) FROM public.'+
+    require(schema == 'public' or re.fullmatch(r'auth_rehearsal_[a-z0-9_]+', schema), 'invalid-schema')
+    tables = sa.inspect(conn).get_table_names(schema=schema)
+    prefix = conn.dialect.identifier_preparer.quote_identifier(schema)+'.'
+    return {table:Counter(conn.exec_driver_sql('SELECT md5(to_jsonb(t)::text) FROM '+prefix+
         conn.dialect.identifier_preparer.quote_identifier(table)+' t').scalars()) for table in tables}
 
 
