@@ -4,6 +4,8 @@
 
 ## 当前文档
 
+- [小程序派车编辑与票据核对精简](mobile-dispatch-streamline.md)：首行里程、完成编辑直接保存及可选月份。
+
 - [平台入口与 Gallery 读取梳理](platform-entry-audit.md)：入口地图、公开读取故障、规整边界与发布验收。
 
 - [发票助手普通账号新增客户](invoice-customer-access.md)：双端创建权限、个人客户隔离与验收。

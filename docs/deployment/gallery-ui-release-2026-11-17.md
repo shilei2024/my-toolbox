@@ -10,6 +10,61 @@
 
 ## 1. 服务器执行更新
 
+### 已回退服务器的恢复更新（操作员已确认1893ad5、三个模板0644、首页和健康200）
+
+以下针对当前已知回退状态，固定恢复到已发布Gallery对应的31f58bc。预期本地主分支仍指向之前成功快进的31f58bc；不符合即停止，不强制移动分支。备份先于切换，权限/启动/首页检查失败自动回退到原版本；只在两项本机请求和服务状态都通过后报告成功。
+
+```bash
+(
+set -euo pipefail
+umask 022
+cd /opt/mytoolbox
+SOURCE=1893ad51f6a65dc977981a26a64c6769135575d3
+TARGET=31f58bc9d8620ba9633ab20e364ce354fe5c1522
+test "$(git rev-parse HEAD)" = "$SOURCE"
+test "$(git rev-parse main)" = "$TARGET"
+test -z "$(git diff HEAD --name-only -- . ':(exclude)services/generation-service/deploy/Caddyfile.production')"
+test -z "$(git diff --cached --name-only)"
+test "$(systemctl is-active mytoolbox)" = active
+/opt/mytoolbox/.venv/bin/python scripts/ops/invoice_backup.py
+CADDY_BEFORE=$(git hash-object services/generation-service/deploy/Caddyfile.production)
+rollback_on_error() {
+  trap - ERR
+  git switch --detach "$SOURCE"
+  chmod 0644 templates/base.html templates/index.html templates/tools_base.html
+  systemctl restart mytoolbox
+  printf 'UPDATE_FAILED_ROLLED_BACK; do not rerun blindly\n'
+  exit 1
+}
+trap rollback_on_error ERR
+git switch main
+test "$(git rev-parse HEAD)" = "$TARGET"
+chmod 0644 templates/base.html templates/index.html templates/tools_base.html
+SERVICE_USER=$(systemctl show mytoolbox -p User --value)
+for file in templates/base.html templates/index.html templates/tools_base.html; do
+  sudo -u "${SERVICE_USER:-root}" test -r "$file"
+done
+test "$CADDY_BEFORE" = "$(git hash-object services/generation-service/deploy/Caddyfile.production)"
+systemctl restart mytoolbox
+READY=0
+for attempt in $(seq 1 20); do
+  if curl --fail --silent --max-time 3 http://127.0.0.1:8000/healthz >/dev/null; then
+    READY=1
+    break
+  fi
+  sleep 2
+done
+test "$READY" = 1
+curl --fail --silent --show-error --max-time 15 --output /dev/null --write-out 'home_http=%{http_code}\n' http://127.0.0.1:8000/
+curl --fail --silent --show-error --max-time 5 --output /dev/null --write-out 'health_http=%{http_code}\n' http://127.0.0.1:8000/healthz
+systemctl is-active mytoolbox
+trap - ERR
+printf 'release_commit=%s\nUI_GALLERY_SERVER_RELEASE_OK\n' "$(git rev-parse HEAD)"
+)
+```
+
+预期BACKUP_OK、home_http=200、health_http=200、active、release_commit=31f58bc完整SHA及成功标志。最后在浏览器刷新正式主站并重新登录检查Gallery。模板权限检查仅作用于三个源码文件，不递归修改目录，也不改变.env、Caddy或上传数据权限。
+
 > 事故已确认：旧命令在`umask 077`下执行Git，三个模板均变成600 root:root，服务用户无法读取。操作员恢复0644后home_http=200、health_http=200。暂停重跑旧命令；源码切换必须用022，私有备份仍用077。单独healthz成功不能作为首页恢复依据。服务器目前回退在1893ad5（detached HEAD），本节常规main更新命令不适用于该状态，不要直接重跑。
 
 以root整块复制至Ubuntu Bash。只接受已确认的e0生产基线1893ad5或0c1f26e，已有Caddyfile本地改动保留；其他已跟踪改动、未知版本、磁盘或备份失败会停止。TARGET固定，不追随未来main。已有同版本只验证健康，不覆盖回退记录。
