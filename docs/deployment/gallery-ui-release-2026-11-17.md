@@ -1,5 +1,9 @@
 # Gallery 与主站入口更新：人工服务器命令
 
+## 已确认执行结果
+
+操作员已完成“已回退服务器的恢复更新”：release_commit=31f58bc9d8620ba9633ab20e364ce354fe5c1522，main分支，home_http=200、health_http=200、active，输出UI_GALLERY_SERVER_RELEASE_OK。无需再次执行该恢复段；其中1893ad5起点断言现在会停止，这是预期保护。新备份9518327字节，archive_catalog=OK但restore_verified=NO。外网浏览器和业务账号验收仍待人工反馈。下文保留完整发布与事故恢复过程。
+
 ## 固定发布与边界
 
 发布提交：`31f58bc9d8620ba9633ab20e364ce354fe5c1522`（PR #146）。Next 16.4.6、公开作品读取恢复、入口和文案规整已合并，Vercel由main自动构建。代码候选五组CI全部通过；真实受保护Preview的公开列表18件作品、详情、筛选、登录跳转和匿名权限检查通过。正常/过期业务身份在隔离端到端及Linux CI通过；操作员正式业务账号验收仍需完成。
