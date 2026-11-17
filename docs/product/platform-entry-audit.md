@@ -5,7 +5,7 @@
 - 已完成Gallery读取恢复、入口精简和29工具页面检查；隔离会话验证已接入CI。
 - Next与eslint-config-next升级至16.4.6，使用官方注册表及独立缓存获取；生产依赖审计0漏洞，23项前端测试、全量lint、类型和生产构建通过。保留关闭Cache Components及防回归策略。
 - 此前16.4.5/16.4.6查询404已排除：用独立缓存后16.4.6可获取，旧阻断不再有效；不得继续把旧版本警告当当前状态。
-- 已授权后团队可见，但该连接项目列表仍为空；未读取到目标项目。已请求勾选具体项目。真实Preview和登录态线上验收仍未通过，正式版未发布。
+- CLI登录并关联项目后已恢复目标项目与受保护Preview访问；真实预览的公开作品、详情、筛选、页面和匿名权限边界通过。插件连接项目列表仍为空，使用已授权CLI完成工作，无需继续扩大插件权限。真实业务账号登录后的私有作品与收费操作未执行，正式版未发布。
 - 16.4.6为同系列安全补丁，无数据库/API变更、无新增基础设施；成本仅前端重建。正式部署须使用最新锁文件并经预览，异常回退上一构建。
 
 ## 范围与设计结论
@@ -81,3 +81,26 @@ Vercel插件读取明确项目的部署记录返回403；本机CLI没有现有�
 16.4.6远端首轮暴露Windows已有node_modules导致锁文件漏掉Linux/WASM可选依赖，Gallery的npm ci失败；在无node_modules临时目录重新计算现有锁文件，补全@emnapi依赖，未禁用CI或放宽安装检查。本地npm ci --dry-run通过，须以修复后的Linux CI为发布依据。团队授权后能识别正确团队，但项目列表依然为空，已请操作员勾选具体项目。
 
 锁文件后续定位：npm11生成仍漏掉bundled WASM依赖；改用CI同系列npm10.9.3，在无node_modules目录重新计算锁文件，@emnapi/core及runtime@1.11.3已写入。持续保留严格npm ci，无删除检查或忽略可选依赖的规避。
+
+
+## CLI授权与真实预览验收完成
+
+操作员完成本机Vercel CLI登录，能列出目标项目部署；将apps/gallery-web关联到现有my-toolbox-gallery项目。关联信息与CLI自动管理的保护访问凭据位于Git忽略文件中，未提交凭据、未关闭Deployment Protection。Windows原生curl直连超时，复用电脑现有系统代理后可访问；项目关联后CLI自动完成受保护预览认证。
+
+验收代码为f6c85e85f098a6275abd533a2e504bc3c3338bc3，Preview部署READY。正式域名仍指向main的0c1f26ec0cf211991c2c47aef3333917ec26ef04，未误把Preview当作生产发布。f6c85e8的Python、Generation、Gallery、PG集成和移动PG16五组CI全部成功。
+
+真实Preview只读检查：
+
+| 路径 | 结果 |
+|---|---|
+| /api/gallery、热门排序、facets | 200；列表18件作品 |
+| /api/gallery/公开slug、/gallery/公开slug | 200 |
+| /gallery | 200，页面含画廊标题，无读取错误提示 |
+| /api/me/session（无业务登录Cookie） | 200，guest |
+| /api/me/images、/api/me/favorites、/api/tasks（匿名） | 401，未放开私人数据 |
+| /my-images、/favorites（匿名） | 200，提供登录引导 |
+| /login?next=/my-images | 307到正式主站/login |
+
+本次CLI身份用于通过Vercel部署保护，不等于Flask业务账号身份。真实Preview上的业务登录/私人作品交互尚未使用真实账号执行；正常与过期业务身份的v2签名、公共恢复及私人拒绝已在隔离端到端和Linux CI通过。正式发布前保留操作员业务账号验收，不为测试创建生产用户、发送邮件或执行付费生成。
+
+恢复入口：PowerShell中可通过已安装的Vercel CLI读取目标项目；如将来过期再执行正常CLI登录即可，不需要新建个人API Token。关联文件和.env.local保持Git忽略。
