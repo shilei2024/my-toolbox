@@ -179,7 +179,7 @@ export function ShowcaseGallery({ initialPage, initialFacets, initialError, view
             {links.mainSite ? <a className="sc-pill sc-pill--small sc-hide-sm" href={links.mainSite}>工具箱</a> : null}
             {viewer.role === "admin" && links.admin ? <a className="sc-pill sc-pill--small" href={links.admin}>后台</a> : null}
             {authenticated
-              ? <span className="sc-account-name" title={viewer.displayName}>{viewer.displayName || "我的账号"}</span>
+              ? <Link className="sc-account-name" href="/my-images" title={viewer.displayName}>我的作品</Link>
               : <Link className="sc-pill sc-pill--small" href={links.login}>登录</Link>}
             <Link className="sc-pill sc-pill--small sc-pill--accent" href={links.create}>开始创作</Link>
           </div>
@@ -190,7 +190,7 @@ export function ShowcaseGallery({ initialPage, initialFacets, initialError, view
         <div className="sc-hero-inner">
           <div className="sc-hero-copy">
             <h1 id="sc-hero-title">每件作品都附<mark>完整提示词</mark></h1>
-            <p className="sc-hero-lede">AI 图像与视频作品，公开即附提示词。复制提示词带回工作台，或登录后直接生成同款。</p>
+            <p className="sc-hero-lede">发现灵感，收藏作品，创作同款。</p>
           </div>
           <div className="sc-hero-actions">
             <Link className="sc-pill sc-pill--accent sc-pill--large" href={links.create}>开始创作</Link>
@@ -202,6 +202,7 @@ export function ShowcaseGallery({ initialPage, initialFacets, initialError, view
 
       <div className="sc-page" id="works">
         <nav className="sc-channels" aria-label="作品频道">
+          {authenticated ? <div className="sc-channel-tabs" aria-label="个人空间"><Link className="sc-pill sc-pill--small" href="/my-images">我的作品</Link><Link className="sc-pill sc-pill--small" href="/favorites">收藏</Link><Link className="sc-pill sc-pill--small" href="/tasks">任务</Link></div> : null}
           <div className="sc-channel-tabs">
             <ChannelTab label="全部作品" active={mediaType === ""} count={facets.total} onClick={() => changeMedia("")} />
             <ChannelTab label="图片" active={mediaType === "image"} count={facets.media.image} onClick={() => changeMedia("image")} />
@@ -243,7 +244,7 @@ export function ShowcaseGallery({ initialPage, initialFacets, initialError, view
         <main className="sc-works" aria-busy={loading}>
           {loading && items.length === 0 ? <GridSkeleton /> : null}
           {!loading && error ? (
-            <StateMessage mark="!" title="暂时无法读取作品" description={error} />
+            <div role="alert"><StateMessage mark="!" title="暂时无法读取作品" description={error} /><button className="sc-pill" type="button" onClick={() => void load()}>重试</button></div>
           ) : null}
           {!loading && !error && items.length === 0 ? (
             <StateMessage mark="0" title="还没有匹配的作品" description="换一个关键词或清空筛选，看看其他作品。" />
