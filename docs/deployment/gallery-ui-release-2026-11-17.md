@@ -10,12 +10,14 @@
 
 ## 1. 服务器执行更新
 
+> 事故修正：旧命令在`umask 077`下执行Git，可能令root新写出的模板为0600，www-data无法读取。已收到生产PermissionError报告；文件权限尚需操作员stat确认。暂停重跑旧命令。源码切换必须用022，私有备份仍用077。单独healthz成功不能作为首页恢复依据。
+
 以root整块复制至Ubuntu Bash。只接受已确认的e0生产基线1893ad5或0c1f26e，已有Caddyfile本地改动保留；其他已跟踪改动、未知版本、磁盘或备份失败会停止。TARGET固定，不追随未来main。已有同版本只验证健康，不覆盖回退记录。
 
 ```bash
 (
 set -euo pipefail
-umask 077
+umask 022
 cd /opt/mytoolbox
 TARGET=31f58bc9d8620ba9633ab20e364ce354fe5c1522
 SOURCE=$(git rev-parse HEAD)
@@ -41,16 +43,23 @@ git diff --quiet "$SOURCE" "$TARGET" -- migrations auth models.py config.py app.
 df -h /opt/mytoolbox /var/backups
 /opt/mytoolbox/.venv/bin/python scripts/ops/invoice_backup.py
 install -d -m 700 /var/backups/mytoolbox/ui-gallery
-printf '%s\n' "$SOURCE" > /var/backups/mytoolbox/ui-gallery/source.sha
-printf '%s\n' "$TARGET" > /var/backups/mytoolbox/ui-gallery/target.sha
+(umask 077; printf '%s\n' "$SOURCE" > /var/backups/mytoolbox/ui-gallery/source.sha)
+(umask 077; printf '%s\n' "$TARGET" > /var/backups/mytoolbox/ui-gallery/target.sha)
 CADDY_BEFORE=$(git hash-object services/generation-service/deploy/Caddyfile.production)
 git branch "backup/ui-gallery-$(date -u +%Y%m%dT%H%M%SZ)" "$SOURCE"
 git merge --ff-only "$TARGET"
+chmod 0644 templates/base.html templates/index.html templates/tools_base.html
+SERVICE_USER=$(systemctl show mytoolbox -p User --value)
+for file in templates/base.html templates/index.html templates/tools_base.html; do
+  sudo -u "${SERVICE_USER:-root}" test -r "$file"
+done
 test "$CADDY_BEFORE" = "$(git hash-object services/generation-service/deploy/Caddyfile.production)"
 systemctl restart mytoolbox
 systemctl is-active mytoolbox
 systemctl is-active auth-mail.timer
 systemctl is-active customer-project-reminders.timer
+curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 http://127.0.0.1:8000/healthz
+curl --fail --silent --show-error --max-time 15 --output /dev/null http://127.0.0.1:8000/
 curl --fail --silent --show-error https://mindfulpenpal.com/healthz
 printf '\nrelease_commit=%s\nUI_GALLERY_SERVER_RELEASE_OK\n' "$(git rev-parse HEAD)"
 )
@@ -73,6 +82,7 @@ printf '\nrelease_commit=%s\nUI_GALLERY_SERVER_RELEASE_OK\n' "$(git rev-parse HE
 ```bash
 (
 set -euo pipefail
+umask 022
 cd /opt/mytoolbox
 SOURCE=$(cat /var/backups/mytoolbox/ui-gallery/source.sha)
 case "$SOURCE" in
@@ -83,9 +93,11 @@ test "$(git rev-parse HEAD)" = 31f58bc9d8620ba9633ab20e364ce354fe5c1522
 test -z "$(git diff HEAD --name-only -- . ':(exclude)services/generation-service/deploy/Caddyfile.production')"
 test -z "$(git diff --cached --name-only)"
 git switch --detach "$SOURCE"
+chmod 0644 templates/base.html templates/index.html templates/tools_base.html
 systemctl restart mytoolbox
 systemctl is-active mytoolbox
-curl --fail --silent --show-error https://mindfulpenpal.com/healthz
+curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 http://127.0.0.1:8000/healthz
+curl --fail --silent --show-error --max-time 15 --output /dev/null http://127.0.0.1:8000/
 printf '\nUI_GALLERY_SERVER_ROLLBACK_OK\n'
 )
 ```
