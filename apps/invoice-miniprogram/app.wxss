@@ -48,9 +48,8 @@ button.ghost { background: transparent; color: #716975; box-shadow: none; }
 button.danger { color: #a34c43; background: #fbf0ed; }
 button[size="mini"], button.compact { min-height: 72rpx; padding: 16rpx 24rpx; font-size: 24rpx; line-height: 1.6; border-radius: 14rpx; }
 button[disabled] { background: #E9E3DF; color: #877E88; box-shadow: none; opacity: 1; }
-.button-row, .upload-actions { display: flex; gap: 16rpx; }
-.button-row button, .upload-actions button { flex: 1; min-width: 0; }
-.button-row { margin-top: 8rpx; }
+.button-row, .upload-actions { display: flex; align-items: stretch; gap: 16rpx; margin-top: 24rpx; }
+.button-row > button, .upload-actions > button { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; margin: 0; padding-left: 16rpx; padding-right: 16rpx; }
 .link, .refresh { color: #514054; }
 .refresh { font-size: 24rpx; font-weight: 500; padding: 16rpx 0 16rpx 20rpx; }
 .receipt { padding: 24rpx 0; border-top: 1rpx solid #E9E3DF; }
