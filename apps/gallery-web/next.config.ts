@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Keep authenticated data out of cross-request caches; enabling this feature
+  // requires a separate review of identity partitioning and invalidation.
+  cacheComponents: false,
   // The shared Flask session is issued on 127.0.0.1 during local end-to-end
   // development, so Gallery must be reachable on that hostname as well.
   allowedDevOrigins: ["127.0.0.1"],

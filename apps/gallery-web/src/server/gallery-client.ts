@@ -11,6 +11,7 @@ export class GalleryClientError extends Error {
 }
 
 const PUBLIC_ERROR_MESSAGES: Record<string, string> = {
+  authentication_required: "登录已过期，请重新登录。",
   unauthorized: "请先登录后再继续。",
   forbidden: "你没有执行此操作的权限。",
   not_found: "请求的资源不存在。",
@@ -79,6 +80,15 @@ export async function serviceRequest<T>(path: string, viewer: ViewerContext, ini
   });
 
   const contentType = response.headers.get("content-type") ?? "";
+  // A revoked/old login must not make publicly approved works unavailable.
+  // Never retry personal data, mutations, or permission failures anonymously.
+  const pathname = new URL(path, base).pathname;
+  if (response.status === 401 && viewer.role !== "guest" && (init.method ?? "GET") === "GET"
+    && (pathname === "/v1/gallery" || pathname === "/v1/gallery/facets" || /^\/v1\/gallery\/[^/]+$/.test(pathname))) {
+    console.info("[gallery] public read retried without expired identity");
+    await response.body?.cancel();
+    return serviceRequest<T>(path, { role: "guest", requestId: viewer.requestId, bridge: "guest" }, init);
+  }
   const body = contentType.includes("application/json") ? await response.json() as unknown : undefined;
   if (!response.ok) {
     const safe = safeError(body);

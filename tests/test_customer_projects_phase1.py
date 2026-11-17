@@ -40,7 +40,7 @@ from customer_projects.services.projects import (  # noqa: E402
     create_project,
     local_day_bounds,
 )
-from extensions import db  # noqa: E402
+from extensions import db, limiter  # noqa: E402
 from models import ReimbursementInvoice, ReimbursementProductLine, User, Tool, UserToolGrant  # noqa: E402
 from shared.models import AuditEvent, Organization, OrganizationMembership  # noqa: E402
 
@@ -54,6 +54,7 @@ class CustomerProjectsPhase1Test(unittest.TestCase):
             CUSTOMER_PROJECTS_PILOT_EMAILS="",
         )
         with app.app_context():
+            limiter.reset()
             db.drop_all()
             db.create_all()
             self.admin_id = self._add_user("manager@test.com", admin=True)

@@ -4,6 +4,8 @@
 
 ## 平台部署标准
 
+- [Gallery 与主站入口更新人工命令（2026-11-17）](gallery-ui-release-2026-11-17.md)
+
 - [微信票据助手开发者工具、真机与上线手册](wechat-invoice-upload-rollout.md)
 - [管理日志中国标准时间校准发布手册](log-timestamp-timezone-fix.md)
 - [产品线 79 更名与发票 OCR 提速发布手册](reimbursement-ocr-rename-rollout.md)

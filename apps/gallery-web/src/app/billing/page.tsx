@@ -18,7 +18,7 @@ export default async function BillingPage() {
   const account = summary.account!;
   const memberAccount = summary.memberAccount;
   return <main className="page-shell billing-page">
-    <section className="billing-heading"><div><p className="eyebrow"><span className="eyebrow-dot" />Account billing</p><h1>积分与账单</h1><p>余额来自内部账本；支付渠道只负责完成交易。</p></div><Link className="button" href="/pricing">查看方案</Link></section>
+    <section className="billing-heading"><div><p className="eyebrow"><span className="eyebrow-dot" />Account billing</p><h1>积分与账单</h1><p>查看积分余额与收支记录。</p></div><Link className="button" href="/pricing">查看方案</Link></section>
     <section className="balance-grid">
       <article className="balance-primary"><span>可用积分</span><strong>{trimDecimal(account.availableAmount)}</strong><small>新生成任务可使用</small></article>
       <article><span>预占中</span><strong>{trimDecimal(account.reservedAmount)}</strong><small>任务结束后结算或释放</small></article>

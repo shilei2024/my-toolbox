@@ -90,6 +90,8 @@ jobs:
         run: npm test
       - name: Build production bundle
         run: npm run build
+      - name: Verify isolated Gallery session flows
+        run: npm run test:session-flows
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
