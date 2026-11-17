@@ -79,3 +79,5 @@ Vercel插件读取明确项目的部署记录返回403；本机CLI没有现有�
 最新f98ffe6的远端5组CI及Vercel部署均成功；从GitHub取得真实Preview地址后直接访问被重定向到Vercel登录墙，插件获取也缺权限，不能把登录墙200误报为页面验收成功。已请求操作员扩展目标项目授权或提供已生成的分享链接。预览登录态和正式发布仍未完成，不自动跳过。
 
 16.4.6远端首轮暴露Windows已有node_modules导致锁文件漏掉Linux/WASM可选依赖，Gallery的npm ci失败；在无node_modules临时目录重新计算现有锁文件，补全@emnapi依赖，未禁用CI或放宽安装检查。本地npm ci --dry-run通过，须以修复后的Linux CI为发布依据。团队授权后能识别正确团队，但项目列表依然为空，已请操作员勾选具体项目。
+
+锁文件后续定位：npm11生成仍漏掉bundled WASM依赖；改用CI同系列npm10.9.3，在无node_modules目录重新计算锁文件，@emnapi/core及runtime@1.11.3已写入。持续保留严格npm ci，无删除检查或忽略可选依赖的规避。
