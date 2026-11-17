@@ -5,6 +5,53 @@ from pathlib import Path
 
 
 class MiniProgramClientTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is required for native client checks')
+    def test_dispatch_immediate_save_mileage_order_and_failure_recovery(self):
+        source = r"""
+const assert=require('node:assert/strict');
+const app={globalData:{}};global.getApp=()=>app;
+global.wx={showModal:o=>o.success({confirm:true})};
+const api=require('./apps/invoice-miniprogram/lib/api');
+const context=require('./apps/invoice-miniprogram/lib/context');
+let p;global.Page=d=>p=d;require('./apps/invoice-miniprogram/pages/dispatch/index');
+p.data=structuredClone(p.data);
+p.setData=u=>{for(const [key,value] of Object.entries(u)){const parts=key.split('.');let target=p.data;for(const part of parts.slice(0,-1))target=target[part];target[parts.at(-1)]=value;}};
+const input=(key,value)=>p.input({currentTarget:{dataset:{key}},detail:{value}});
+const edit=index=>p.edit({currentTarget:{dataset:{index}}});
+let calls=0,payload,fail=false;
+api.request=async(path,opt)=>{calls++;payload=structuredClone(opt.data);if(fail)throw Error('保存失败');let end=null;return {snapshot:'s'+calls,totals:{},rows:opt.data.rows.map((r,i)=>{const start=i===0?Number(r.km_start):end;end=Math.round((start+Number(r.km_total))*100)/100;return {...r,id:r.id||calls*10+i,km_start:start,km_end:end};})};};
+(async()=>{
+ p.data.periodId=1;p.data.snapshot='s0';p.data.lines=[{name:'请选择产品线'},{name:'line'}];
+ p.add();assert.equal(p.data.startEditable,true);
+ input('date','2026-06-02');input('km_total','10');input('product_line','line');
+ await p.keep();assert.equal(calls,0);assert(p.data.editing); // First start is required.
+ input('km_start','100');await p.keep();assert.equal(calls,1);assert.equal(p.data.editing,false);assert.equal(p.data.rows[0].km_end,110);
+ p.add();input('date','2026-06-03');assert.equal(p.data.startEditable,false);assert.equal(p.data.draft.km_start,'110.00');
+ input('km_start','999');assert.equal(p.data.draft.km_start,'110.00');
+ input('km_total','5.25');input('product_line','line');
+ const before=structuredClone(p.data.rows);fail=true;await p.keep();
+ assert(p.data.editing);assert.deepEqual(p.data.rows,before);assert.equal(p.data.snapshot,'s1');assert(context.state().dispatchDirty);
+ fail=false;await p.keep();assert.equal(payload.rows[1].km_start,'');assert.equal(p.data.rows[1].km_start,110);assert.equal(p.data.rows[1].km_end,115.25);
+ edit(0);input('km_total','12.5');await p.keep();assert.equal(p.data.rows[1].km_start,112.5);
+ // Moving the first trip later keeps the period baseline and locks its start.
+ edit(0);input('date','2026-06-04');assert.equal(p.data.startEditable,false);assert.equal(p.data.draft.km_start,'105.25');await p.keep();
+ assert.equal(p.data.rows[0].km_start,100);assert.equal(p.data.rows[1].km_start,105.25);
+ // Backdated additions become the only manually editable start.
+ p.add();input('date','2026-06-01');assert(p.data.startEditable);assert.equal(p.data.draft.km_start,100);
+ input('km_start','90');input('km_total','2');input('product_line','line');await p.keep();assert.equal(p.data.rows[0].km_start,90);assert.equal(p.data.rows[1].km_start,92);
+ // Duplicate taps while awaiting the server do not issue another write.
+ edit(0);let resolve;api.request=()=>{calls++;return new Promise(r=>resolve=r);};const pending=p.keep();const count=calls;await p.keep();assert.equal(calls,count);p.cancel();assert(p.data.editing);
+ resolve({rows:p.data.rows,snapshot:'latest',totals:{}});await pending;assert.equal(p.data.editing,false);
+ const rows=structuredClone(p.data.rows);api.request=async()=>{throw Error('删除失败');};await p.remove({currentTarget:{dataset:{index:1}}});assert.deepEqual(p.data.rows,rows);
+ api.request=async(path,opt)=>({rows:opt.data.rows,snapshot:'deleted',totals:{}});await p.remove({currentTarget:{dataset:{index:1}}});assert.equal(p.data.rows.length,rows.length-1);assert.equal(p.data.snapshot,'deleted');
+ const fs=require('node:fs');const wxml=fs.readFileSync('./apps/invoice-miniprogram/pages/dispatch/index.wxml','utf8');assert(!wxml.includes('保存派车单'));assert(wxml.includes('!startEditable'));
+ const review=fs.readFileSync('./apps/invoice-miniprogram/pages/review/index.wxml','utf8');assert(!review.includes('section-title">发生月份'));assert(review.indexOf('data-key="occurrence_month"')>review.indexOf('wx:if="{{showMore}}"'));
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        result = subprocess.run([shutil.which('node'), '-e', source],
+            cwd=Path(__file__).parents[1], capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is required for native client logic checks')
     def test_native_tabs_share_period_and_protect_drafts_and_account_changes(self):
         root = Path(__file__).parents[1]
@@ -31,9 +78,9 @@ function page(path){let p;global.Page=d=>{p=d;};require('./apps/invoice-miniprog
  context.state().dispatchDirty=false;await dashboard.period({detail:{value:1}});assert.equal(context.state().periodId,2);assert.equal(queried,'/api/mobile/dashboard/2');
  const dispatch=page('dispatch');dispatch.data.periodId=2;dispatch.data.loggedIn=true;dispatch.data.lines=[{name:'请选择产品线'},{name:'line'}];
  dispatch.add();assert.equal(context.state().dispatchDirty,true);dispatch.cancel();assert.equal(context.state().dispatchDirty,false);
- dispatch.add();dispatch.data.draft.km_total='10';dispatch.data.draft.product_line='line';dispatch.keep();assert.equal(dispatch.data.rows.length,1);assert(dispatch.data.dirty);
  let payload;api.request=async(path,opt)=>{payload=opt.data;return {rows:[{id:7,...opt.data.rows[0]}],snapshot:'new',totals:{km_total:'10'}};};
- dispatch.data.snapshot='old';await dispatch.save();assert.equal(payload.snapshot,'old');assert.equal(context.state().dispatchDirty,false);assert.equal(dispatch.data.snapshot,'new');
+ dispatch.add();dispatch.data.draft.km_total='10';dispatch.data.draft.product_line='line';dispatch.data.draft.km_start='100';
+ dispatch.data.snapshot='old';await dispatch.keep();assert.equal(dispatch.data.rows.length,1);assert.equal(dispatch.data.editing,false);assert.equal(payload.snapshot,'old');assert.equal(context.state().dispatchDirty,false);assert.equal(dispatch.data.snapshot,'new');
  const mine=page('mine');context.state().dispatchDirty=true;modal=false;await mine.logout();assert(api.session());
  context.state().uploading=true;await mine.logout();assert(api.session());
  context.state().uploading=false;modal=true;api.request=async()=>({success:true});await mine.logout();assert.equal(api.session(),null);assert.equal(context.state().periodId,undefined);assert.equal(context.state().dispatchDirty,false);

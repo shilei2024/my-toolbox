@@ -4,6 +4,8 @@
 
 ## 当前文档
 
+- [小程序派车编辑与票据核对精简](mobile-dispatch-streamline.md)：首行里程、完成编辑直接保存及可选月份。
+
 - [发票助手普通账号新增客户](invoice-customer-access.md)：双端创建权限、个人客户隔离与验收。
 
 - [发票助手小程序视觉统一](mobile-ui-design.md)：五页面排版、原生控件、间距及视觉验证边界。

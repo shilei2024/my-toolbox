@@ -7,7 +7,7 @@ const textFields = [
   { key: "contact", name: "联系人" },
 ];
 const numberFields = [
-  { key: "km_start", name: "首次起始公里（其余行自动承接）" },
+  { key: "km_start", name: "起始公里" },
   { key: "km_total", name: "实际行驶公里" },
   { key: "toll_fee", name: "过桥费（元）" },
   { key: "parking_fee", name: "停车费（元）" },
@@ -28,6 +28,7 @@ Page({
     lineIndex: 0,
     editing: false,
     editIndex: -1,
+    startEditable: false,
     draft: {},
     textFields,
     numberFields,
@@ -129,6 +130,7 @@ Page({
       },
       message: "",
     });
+    this.syncMileage();
   },
   edit(e) {
     if (this.data.busy) return;
@@ -149,9 +151,40 @@ Page({
       ),
       message: "",
     });
+    this.syncMileage();
   },
   input(e) {
-    this.setData({ ["draft." + e.currentTarget.dataset.key]: e.detail.value });
+    if (this.data.busy) return;
+    const key = e.currentTarget.dataset.key;
+    if (key === "km_start" && !this.data.startEditable) return;
+    this.setData({ ["draft." + key]: e.detail.value });
+    if (key === "date") this.syncMileage();
+  },
+  orderedDraft() {
+    const rows = this.data.rows.map((row, index) => ({
+      ...row,
+      _editing: index === this.data.editIndex,
+      ...(index === this.data.editIndex ? this.data.draft : {}),
+    }));
+    if (this.data.editIndex < 0) rows.push({ ...this.data.draft, _editing: true });
+    return rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  },
+  syncMileage() {
+    const rows = this.orderedDraft();
+    const index = rows.findIndex((row) => row._editing);
+    const startEditable = index === 0;
+    let start = this.data.draft.km_start;
+    if (startEditable && !this.data.startEditable) {
+      start = this.data.rows[0]?.km_start ?? "";
+    } else if (!startEditable) {
+      const base = this.data.rows[0]?.km_start;
+      start = base === "" || base == null ? "" : (
+        (Math.round(Number(base) * 100) + rows.slice(0, index).reduce(
+          (sum, row) => sum + Math.round(Number(row.km_total || 0) * 100), 0,
+        )) / 100
+      ).toFixed(2);
+    }
+    this.setData({ startEditable, "draft.km_start": start });
   },
   line(e) {
     const index = Number(e.detail.value);
@@ -165,7 +198,7 @@ Page({
     this.setData({ editing: false });
     context.state().dispatchDirty = this.data.dirty;
   },
-  keep() {
+  async keep() {
     if (this.data.busy) return;
     if (
       !this.data.draft.date ||
@@ -175,16 +208,17 @@ Page({
       this.setData({ message: "请填写日期、实际公里数及产品线。" });
       return;
     }
-    const rows = [...this.data.rows];
-    if (this.data.editIndex < 0) rows.push({ ...this.data.draft });
-    else rows[this.data.editIndex] = { ...this.data.draft };
-    this.setData({
-      rows,
-      editing: false,
-      dirty: true,
-      message: "修改待保存；点击“保存派车单”同步网站。",
-    });
-    context.state().dispatchDirty = true;
+    const rows = this.orderedDraft().map(({ _editing, ...row }, index) => ({
+      ...row,
+      km_start: index === 0
+        ? (_editing ? this.data.draft.km_start : this.data.rows[0]?.km_start ?? "")
+        : "",
+    }));
+    if (!/^\d+(\.\d{1,2})?$/.test(String(rows[0].km_start))) {
+      this.setData({ message: "请先填写首行起始公里（最多两位小数）。" });
+      return;
+    }
+    await this.save(rows);
   },
   async remove(e) {
     if (this.data.busy) return;
@@ -196,28 +230,22 @@ Page({
     const yes = await new Promise((resolve) =>
       wx.showModal({
         title: "删除派车行",
-        content: "保存后此行也会从网站删除，是否继续？",
+        content: "此行也会从网站删除，是否继续？",
         success: (r) => resolve(r.confirm),
         fail: () => resolve(false),
       }),
     );
-    if (yes) {
-      this.setData({
-        rows: this.data.rows.filter((_, i) => i !== index),
-        dirty: true,
-      });
-      context.state().dispatchDirty = true;
-    }
+    if (yes && !this.data.busy) await this.save(this.data.rows.filter((_, i) => i !== index));
   },
-  async save() {
-    if (this.data.busy || this.data.editing) return;
+  async save(rows = this.data.rows) {
+    if (this.data.busy) return;
     this.setData({ busy: true, message: "" });
     try {
       const d = await api.request(
         "/api/mobile/dispatch/" + this.data.periodId,
         {
           method: "PUT",
-          data: { rows: this.data.rows, snapshot: this.data.snapshot },
+          data: { rows, snapshot: this.data.snapshot },
         },
       );
       this.setData({
@@ -225,11 +253,13 @@ Page({
         snapshot: d.snapshot,
         totals: d.totals,
         dirty: false,
-        message: "已保存并同步网站、仪表盘及派车单导出。",
+        editing: false,
+        message: "已保存",
       });
       context.state().dispatchDirty = false;
     } catch (e) {
-      this.setData({ message: e.message });
+      this.setData({ message: e.status === 409 && this.data.editing
+        ? e.message + "；请取消编辑后刷新核对。" : e.message });
     } finally {
       this.setData({ busy: false });
     }
