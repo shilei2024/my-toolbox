@@ -45,13 +45,12 @@
     </button>
     <div class="collapse navbar-collapse" id="mainNav">
       <ul class="navbar-nav site-primary-nav me-auto">
-        <li class="nav-item"><a class="nav-link" href="/">首页</a></li>
         <li class="nav-item"><a class="nav-link" href="/#tool-library">工具库</a></li>
         {% if customer_projects_available %}
           <li class="nav-item"><a class="nav-link" href="{{ url_for('customer_projects.dashboard') }}">客户项目</a></li>
         {% endif %}
         {% if config.AI_IMAGE_EXTERNAL_URL %}
-          <li class="nav-item"><a class="nav-link" href="/gallery">Gallery</a></li>
+          <li class="nav-item"><a class="nav-link" href="/gallery">作品画廊</a></li>
         {% endif %}
       </ul>
       <ul class="navbar-nav site-account-nav">
@@ -145,7 +144,7 @@
     </div>
     <div class="site-footer-links" aria-label="页脚导航">
       <a href="/">工具首页</a>
-      {% if config.AI_IMAGE_EXTERNAL_URL %}<a href="/gallery">Gallery</a>{% endif %}
+      {% if config.AI_IMAGE_EXTERNAL_URL %}<a href="/gallery">作品画廊</a>{% endif %}
       <a href="{{ url_for('privacy') }}">隐私</a>
       <a href="{{ url_for('terms') }}">条款</a>
     </div>

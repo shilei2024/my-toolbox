@@ -19,7 +19,7 @@ interface SiteHeaderProps {
 
 const navigation = [
   { href: "/gallery", label: "发现" },
-  { href: "/my-images", label: "我的图片" },
+  { href: "/my-images", label: "我的作品" },
   { href: "/tasks", label: "任务中心" },
   { href: "/favorites", label: "收藏" },
   { href: "/pricing", label: "会员" },
