@@ -7,7 +7,7 @@
 {% block content %}
 <div class="d-flex align-items-center gap-2 mb-3">
   <a href="/" class="btn btn-link p-0 text-muted text-decoration-none">
-    <i class="bi bi-arrow-left"></i> 返回
+    <i class="bi bi-arrow-left"></i> 工具库
   </a>
   <span class="text-muted">/</span>
   <span class="text-muted">{{ tool.name }}</span>
@@ -40,28 +40,28 @@
           {% endif %}
         </div>
         <p class="small text-muted mb-0">
-          {% if current_user.is_authenticated %}
-            每个工具每天 10 次免费使用，失败不扣次数。
+          {% if current_user.is_authenticated and is_admin %}
+            不限次数
+          {% elif current_user.is_authenticated %}
+            每日 {{ config.DAILY_FREE_LIMIT }} 次，失败不扣次数。
           {% else %}
-            每个工具共 3 次免费试用，用完请<a href="{{ url_for('auth.register') }}">注册</a>。
+            每日 {{ config.ANON_FREE_LIMIT }} 次试用，更多使用请<a href="{{ url_for('auth.register') }}">注册</a>。
           {% endif %}
         </p>
       </div>
     </div>
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <h6 class="text-muted text-uppercase small">使用提示</h6>
-        <ul class="small text-muted ps-3 mb-0">
-          {% if tool.id == 'reimbursement' %}
-          <li>发票原件会随报销记录保留，删除发票记录时一并删除附件。</li>
-          {% else %}
-          <li>文件处理完会立即从服务器删除。</li>
-          <li>单文件最大 {{ config.MAX_UPLOAD_MB }} MB。</li>
-          {% endif %}
-          <li>遇到问题请刷新页面或换个浏览器试试。</li>
-        </ul>
+    {% if tool.id in ['pdf_merge', 'pdf_split', 'pdf_rotate', 'pdf_protect', 'pdf_compress', 'pdf_watermark', 'pdf_to_word', 'word_to_pdf', 'image_to_pdf', 'image_convert', 'image_compress', 'zip_extractor', 'fcst_merge', 'reimbursement'] %}
+    <details class="card border-0 shadow-sm">
+      <summary class="card-body small text-muted">文件与隐私</summary>
+      <div class="px-3 pb-3 small text-muted">
+        {% if tool.id == 'reimbursement' %}
+        发票原件随记录保留，删除记录时一并删除。
+        {% else %}
+        单文件最大 {{ config.MAX_UPLOAD_MB }} MB。临时文件按清理策略自动删除。
+        {% endif %}
       </div>
-    </div>
+    </details>
+    {% endif %}
   </div>
   {% endif %}
 </div>
