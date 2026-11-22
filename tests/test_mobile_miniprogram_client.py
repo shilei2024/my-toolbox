@@ -380,3 +380,30 @@ const falseAfterSignIn=p=>p.updates.filter(u=>u.signedIn&&u.patch.loggedIn===fal
                 self.assertNotIn('wx:if="{{!loggedIn}}"', markup)
                 self.assertNotIn("wx:else", markup)
                 self.assertIn("auth.sync(this)", script)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node required')
+    def test_dispatch_completion_validation_failure_retry_and_cancel(self):
+        source=r"""
+const assert=require('node:assert/strict');let page,scroll=[];
+global.wx={pageScrollTo:o=>scroll.push(o)};global.Page=p=>{page=p;};
+const api=require('./apps/invoice-miniprogram/lib/api');const context=require('./apps/invoice-miniprogram/lib/context');
+require('./apps/invoice-miniprogram/pages/dispatch/index');page.data=structuredClone(page.data);
+page.setData=u=>{for(const [key,value] of Object.entries(u)){const parts=key.split('.');let target=page.data;for(const p of parts.slice(0,-1))target=target[p];target[parts.at(-1)]=value;}};
+page.data.periodId=7;page.data.snapshot='old';page.data.lines=[{name:'none'},{name:'line'}];let calls=0,resolve,payload;
+api.request=async(path,opt)=>{calls++;payload=opt.data;return new Promise(r=>{resolve=r;});};
+(async()=>{
+ page.add();await page.keep();assert.equal(calls,0);assert.equal(page.data.editing,true);assert.equal(scroll.at(-1).selector,'#dispatch-editor-feedback');
+ page.data.draft.km_total='0';page.data.draft.product_line='line';await page.keep();assert.equal(calls,0);assert(page.data.message.includes('起始公里'));
+ page.data.draft.km_start='100';const saving=page.keep();await page.keep();page.cancel();assert.equal(calls,1);assert.equal(page.data.editing,true);
+ resolve({rows:[{...payload.rows[0],id:9}],snapshot:'saved',totals:{}});await saving;
+ assert.equal(page.data.editing,false);assert.deepEqual(page.data.draft,{});assert.equal(context.state().dispatchDirty,false);assert.equal(scroll.at(-1).scrollTop,0);
+ page.edit({currentTarget:{dataset:{index:0}}});page.data.draft.km_total='20';
+ for(const status of [0,409]){api.request=async()=>{throw Object.assign(new Error('保存失败'),{status});};await page.keep();assert.equal(page.data.editing,true);assert.equal(page.data.busy,false);assert.equal(page.data.draft.km_total,'20');assert.equal(page.data.snapshot,'saved');assert.equal(page.data.rows[0].km_total,'0');assert.equal(scroll.at(-1).selector,'#dispatch-editor-feedback');}
+ api.request=async(path,opt)=>({rows:opt.data.rows,snapshot:'retry',totals:{}});await page.keep();assert.equal(page.data.editing,false);assert.equal(page.data.rows.length,1);assert.equal(page.data.rows[0].km_total,'20');
+ page.add();page.cancel();assert.equal(context.state().dispatchDirty,false);assert.deepEqual(page.data.draft,{});
+ page.data.dirty=true;page.edit({currentTarget:{dataset:{index:0}}});page.cancel();assert.equal(context.state().dispatchDirty,true);
+ page.edit({currentTarget:{dataset:{index:999}}});assert.equal(page.data.editing,false);
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+        result=subprocess.run([shutil.which('node'),'-e',source],cwd=Path(__file__).parents[1],capture_output=True,encoding='utf-8',timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)

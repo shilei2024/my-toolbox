@@ -136,6 +136,7 @@ Page({
     if (this.data.busy) return;
     const index = Number(e.currentTarget.dataset.index),
       row = this.data.rows[index];
+    if (!row) return;
     if (row.allocated) {
       this.setData({ message: "此行已分摊账单，请先在网站撤销分摊再修改。" });
       return;
@@ -195,17 +196,22 @@ Page({
   },
   cancel() {
     if (this.data.busy) return;
-    this.setData({ editing: false });
+    this.setData({ editing: false, draft: {}, editIndex: -1, lineIndex: 0, message: "" });
     context.state().dispatchDirty = this.data.dirty;
+  },
+  editorError(message) {
+    this.setData({ message });
+    if (wx.pageScrollTo) wx.pageScrollTo({ selector: "#dispatch-editor-feedback", duration: 150 });
   },
   async keep() {
     if (this.data.busy) return;
     if (
       !this.data.draft.date ||
+      this.data.draft.km_total == null ||
       this.data.draft.km_total === "" ||
       !this.data.draft.product_line
     ) {
-      this.setData({ message: "请填写日期、实际公里数及产品线。" });
+      this.editorError("请填写日期、实际公里数及产品线。");
       return;
     }
     const rows = this.orderedDraft().map(({ _editing, ...row }, index) => ({
@@ -215,7 +221,7 @@ Page({
         : "",
     }));
     if (!/^\d+(\.\d{1,2})?$/.test(String(rows[0].km_start))) {
-      this.setData({ message: "请先填写首行起始公里（最多两位小数）。" });
+      this.editorError("请先填写首行起始公里（最多两位小数）。");
       return;
     }
     await this.save(rows);
@@ -254,17 +260,24 @@ Page({
         totals: d.totals,
         dirty: false,
         editing: false,
-        message: "已保存",
+        draft: {},
+        editIndex: -1,
+        lineIndex: 0,
+        message: "已保存并返回派车列表",
       });
       context.state().dispatchDirty = false;
+      if (wx.pageScrollTo) wx.pageScrollTo({ scrollTop: 0, duration: 0 });
     } catch (e) {
-      this.setData({ message: e.status === 409 && this.data.editing
-        ? e.message + "；请取消编辑后刷新核对。" : e.message });
+      const message = e.status === 409 && this.data.editing
+        ? e.message + "；请取消编辑后刷新核对。" : e.message;
+      if (this.data.editing) this.editorError(message);
+      else this.setData({ message });
     } finally {
       this.setData({ busy: false });
     }
   },
   async reload() {
+    if (this.data.busy) return;
     if (this.data.dirty || this.data.editing) {
       const yes = await new Promise((resolve) =>
         wx.showModal({
